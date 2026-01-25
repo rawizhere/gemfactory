@@ -1,0 +1,79 @@
+services:
+  # PostgreSQL 17
+  postgres:
+    image: postgres:17-alpine
+    container_name: gemfactory-db
+    environment:
+      POSTGRES_DB: gemfactory
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gemfactory123}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    command: postgres -c max_connections=200
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d gemfactory" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gemfactory
+
+  # GemFactory Application
+  app:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    container_name: gemfactory
+    env_file:
+      - ../.env
+    environment:
+      # Database connection
+      DB_DSN: postgres://postgres:${POSTGRES_PASSWORD:-gemfactory123}@postgres:5432/gemfactory?sslmode=disable
+      # Telegram Bot
+      BOT_TOKEN: ${BOT_TOKEN}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      # Spotify
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET}
+      PLAYLIST_URL: ${PLAYLIST_URL}
+
+      # Application settings
+      HEALTH_PORT: 8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SCRAPER_REQUEST_DELAY: ${SCRAPER_REQUEST_DELAY:-2s}
+    ports:
+      - "8080:8080"
+    # volumes:
+    # - ../logs:/app/logs:rw  # Disabled - logging to console only
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - gemfactory
+
+volumes:
+  postgres_data:
+
+
+networks:
+  gemfactory:
+    driver: bridge

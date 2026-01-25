@@ -1,0 +1,74 @@
+services:
+  # PostgreSQL 17
+  postgres:
+    image: postgres:17-alpine
+    container_name: gemfactory-db
+    environment:
+      POSTGRES_DB: gemfactory
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: gemfactory123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    command: postgres -c max_connections=200
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d gemfactory" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gemfactory
+
+  # Приложение GemFactory
+  app:
+    image: tempizhere/gemfactory:latest
+    container_name: gemfactory
+    environment:
+      # База данных
+      DB_DSN: postgres://postgres:gemfactory123@postgres:5432/gemfactory?sslmode=disable&pool_max_conns=25&pool_min_conns=5&pool_max_conn_lifetime=5m&pool_max_conn_idle_time=1m
+      # Telegram Bot
+      BOT_TOKEN: YOUR_TELEGRAM_BOT_TOKEN_HERE
+      ADMIN_USERNAME: YOUR_TELEGRAM_USERNAME_HERE
+      # Spotify
+      SPOTIFY_CLIENT_ID: YOUR_SPOTIFY_CLIENT_ID_HERE
+      SPOTIFY_CLIENT_SECRET: YOUR_SPOTIFY_CLIENT_SECRET_HERE
+      PLAYLIST_URL: https://open.spotify.com/playlist/YOUR_PLAYLIST_ID_HERE
+
+      # Health check
+      HEALTH_PORT: 8080
+      LOG_LEVEL: info
+    ports:
+      - "8080:8080"
+      # volumes:
+      # - ./logs:/app/logs:rw  # Отключено - логирование только в консоль
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Лимиты ресурсов
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - gemfactory
+
+volumes:
+  postgres_data:
+
+
+networks:
+  gemfactory:
+    driver: bridge

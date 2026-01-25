@@ -1,0 +1,44 @@
+# Go-specific ignores
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Dependency directories
+vendor/
+
+# Environment files with sensitive data
+.env
+.env.local
+.env.development
+.env.production
+
+# Logs and temporary files
+*.log
+tmp/
+/logs/
+
+# IDE-specific files
+.vscode/
+.idea/
+
+# Build artifacts
+gemfactory
+tree.md
+bin/
+dist/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+coverage.out
+coverage.html
+
+# Ignore JSON files
+*.json
+
+# Data
+/data/
