@@ -21,13 +21,13 @@ services:
     networks:
       - gemfactory
 
-  # Приложение GemFactory
+  # GemFactory Application
   app:
-    image: tempizhere/gemfactory:latest
+    image: rawyezy/gemfactory:latest
     container_name: gemfactory
     environment:
-      # База данных
-      DB_DSN: postgres://postgres:gemfactory123@postgres:5432/gemfactory?sslmode=disable&pool_max_conns=25&pool_min_conns=5&pool_max_conn_lifetime=5m&pool_max_conn_idle_time=1m
+      # Database connection
+      DB_DSN: postgres://postgres:gemfactory123@postgres:5432/gemfactory?sslmode=disable
       # Telegram Bot
       BOT_TOKEN: YOUR_TELEGRAM_BOT_TOKEN_HERE
       ADMIN_USERNAME: YOUR_TELEGRAM_USERNAME_HERE
@@ -36,25 +36,26 @@ services:
       SPOTIFY_CLIENT_SECRET: YOUR_SPOTIFY_CLIENT_SECRET_HERE
       PLAYLIST_URL: https://open.spotify.com/playlist/YOUR_PLAYLIST_ID_HERE
 
-      # Health check
+      # Application settings
       HEALTH_PORT: 8080
       LOG_LEVEL: info
+      SCRAPER_REQUEST_DELAY: 2s
     ports:
       - "8080:8080"
-      # volumes:
-      # - ./logs:/app/logs:rw  # Отключено - логирование только в консоль
+    # volumes:
+    # - ./logs:/app/logs:rw  # Disabled - logging to console only
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
-    # Лимиты ресурсов
+    # Resource limits
     deploy:
       resources:
         limits:
-          cpus: '1.0'
+          cpus: "1.0"
           memory: 512M
         reservations:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 256M
     healthcheck:
       test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health" ]

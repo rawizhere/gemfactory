@@ -11,7 +11,7 @@ on:
 env:
   GO_VERSION: '1.24'
   GOLANGCI_LINT_VERSION: v2.8.0
-  DOCKER_IMAGE: rawyezy/gemfactory
+  DOCKER_IMAGE: ${{ github.repository }}
 
 jobs:
   detect-modules:
@@ -121,27 +121,27 @@ jobs:
           cache-from: type=gha,scope=docker
           cache-to: type=gha,mode=max,scope=docker
       - name: Docker Build Summary
-        if: always()
+        if: success()
         run: |
           echo '### Docker image successfully built and published' >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
           echo '**Tags:**' >> $GITHUB_STEP_SUMMARY
-          echo '- `rawyezy/gemfactory:latest`' >> $GITHUB_STEP_SUMMARY
+          echo '- `${{ env.DOCKER_IMAGE }}:latest`' >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
-          echo '**Docker Hub:** https://hub.docker.com/r/rawyezy/gemfactory' >> $GITHUB_STEP_SUMMARY
+          echo '**Docker Hub:** https://hub.docker.com/r/${{ env.DOCKER_IMAGE }}' >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
           echo '**Launch stack:**' >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo 'git clone https://github.com/rawyezy/gemfactory.git' >> $GITHUB_STEP_SUMMARY
-          echo 'cd gemfactory' >> $GITHUB_STEP_SUMMARY
+          echo 'git clone https://github.com/${{ github.repository }}.git' >> $GITHUB_STEP_SUMMARY
+          echo 'cd ${{ github.event.repository.name }}' >> $GITHUB_STEP_SUMMARY
           echo 'cp .env.example .env' >> $GITHUB_STEP_SUMMARY
           echo '# Edit .env file with your settings' >> $GITHUB_STEP_SUMMARY
           echo 'docker-compose -f deployments/docker-compose.yml --env-file .env up -d' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
           echo '**Containers:**' >> $GITHUB_STEP_SUMMARY
-          echo '- `gemfactory` - main application' >> $GITHUB_STEP_SUMMARY
-          echo '- `gemfactory-db` - PostgreSQL with pgvector' >> $GITHUB_STEP_SUMMARY
+          echo '- `${{ github.event.repository.name }}` - main application' >> $GITHUB_STEP_SUMMARY
+          echo '- `${{ github.event.repository.name }}-db` - PostgreSQL with pgvector' >> $GITHUB_STEP_SUMMARY
 
   notify:
     name: Notify on Failure
