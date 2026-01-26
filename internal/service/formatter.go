@@ -24,6 +24,15 @@ func FormatReleaseForTelegram(release *model.Release) string {
 	album := cleanReleaseString(release.AlbumName)
 	track := cleanReleaseString(release.TitleTrack)
 
+	// Fallback to Title if TitleTrack is missing (e.g. for "Pre-release" events)
+	if track == "" && release.Title != "" {
+		titleClean := cleanReleaseString(release.Title)
+		// Only use it if it's not redundant with album or artist name
+		if !strings.EqualFold(titleClean, album) && !strings.EqualFold(titleClean, artistName) {
+			track = titleClean
+		}
+	}
+
 	// Filter TBA
 	if isTBA(track) {
 		track = ""

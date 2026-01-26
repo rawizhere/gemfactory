@@ -321,7 +321,7 @@ func (f *fetcherImpl) parseEventPageFromDoc(doc *goquery.Document, url string) (
 
 		// Clean title.
 		lowerTitle := strings.ToLower(title)
-		if lowerTitle == "album release" || lowerTitle == "release date" || lowerTitle == "offline release" {
+		if strings.Contains(lowerTitle, "album release") || strings.Contains(lowerTitle, "release date") || lowerTitle == "offline release" {
 			title = metaAlbumName
 			isMainAlbumRelease = true
 		}
