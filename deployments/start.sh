@@ -3,35 +3,33 @@ set -e
 
 echo "=== Starting GemFactory ==="
 
-# Wait for PostgreSQL to become available
+# Wait for postgres
 echo "Waiting for PostgreSQL..."
 until pg_isready -d "$DB_DSN"; do
   echo "PostgreSQL is not ready - waiting..."
   sleep 2
 done
 
-# Apply pending migrations
+# Migrations
 echo "Applying migrations..."
 for f in /app/migrations/*.up.sql; do
   echo "Applying migration $f..."
   psql -d "$DB_DSN" -f "$f" || echo "Error applying $f (might already exist)"
 done
 
-# Verify table presence
+# Check tables
 echo "Verifying tables..."
 psql -d "$DB_DSN" -c "
 SELECT 'config' as table_name, COUNT(*) as record_count FROM gemfactory.config
 UNION ALL
-SELECT 'tasks' as table_name, COUNT(*) as record_count FROM gemfactory.tasks
-UNION ALL
 SELECT 'artists' as table_name, COUNT(*) as record_count FROM gemfactory.artists;
 " || echo "Error verifying tables"
 
-# Ensure data and log directories exist
+# Init dirs
 echo "Initializing directories..."
 mkdir -p /app/data /app/logs
 
-# Verify directory permissions
+# Permissions check
 echo "Verifying permissions..."
 ls -la /app/data || echo "Failed to list data directory"
 ls -la /app/logs || echo "Failed to list logs directory"
@@ -52,6 +50,6 @@ else
     echo "✗ Write access to /app/data failed"
 fi
 
-# Execute application
+# Run app
 echo "Starting application binary..."
 exec ./gemfactory

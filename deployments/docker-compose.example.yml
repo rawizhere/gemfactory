@@ -23,7 +23,7 @@ services:
 
   # GemFactory Application
   app:
-    image: rawyezy/gemfactory:latest
+    image: rawizhere/gemfactory:latest
     container_name: gemfactory
     environment:
       # Database connection

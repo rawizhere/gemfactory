@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"sync"
+
 	"github.com/uptrace/bun"
 	"go.uber.org/zap"
 	"golang.org/x/text/cases"
@@ -24,6 +26,7 @@ type ReleaseService struct {
 	artistRepo model.ArtistRepository
 	scraper    scraper.Fetcher
 	logger     *zap.Logger
+	mu         sync.Mutex // Ensures sequential scraping
 }
 
 func NewReleaseService(db *bun.DB, scraper scraper.Fetcher, logger *zap.Logger) *ReleaseService {
@@ -143,6 +146,10 @@ func (s *ReleaseService) Upsert(ctx context.Context, release *model.Release) err
 		}
 	}
 
+	// Clean MV and Spotify links
+	release.MV = s.CleanLink(release.MV)
+	release.Spotify = CleanLink(release.Spotify)
+
 	var existingRelease *model.Release
 	var err error
 
@@ -213,6 +220,8 @@ func (s *ReleaseService) Update(ctx context.Context, release *model.Release) err
 	release.Title = CleanReleaseTitle(release.Title)
 	release.AlbumName = CleanReleaseTitle(release.AlbumName)
 	release.TitleTrack = CleanReleaseTitle(release.TitleTrack)
+	release.MV = s.CleanLink(release.MV)
+	release.Spotify = CleanLink(release.Spotify)
 
 	return s.repo.Update(ctx, release)
 }
@@ -370,6 +379,11 @@ func (s *ReleaseService) GetAllReleases(ctx context.Context) ([]model.Release, e
 
 // ParseReleasesForMonth initiates a scraping job to collect and save releases for a given month.
 func (s *ReleaseService) ParseReleasesForMonth(ctx context.Context, monthName string) (int, error) {
+	// Ensure only one parsing task runs at a time to prevent Chromium stability issues in Docker.
+	s.logger.Debug("Scraping task requested, waiting for lock...", zap.String("month", monthName))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.logger.Info("Starting to parse releases", zap.String("month", monthName))
 
 	year := time.Now().Format("2006")
@@ -432,8 +446,8 @@ func (s *ReleaseService) ParseReleasesForMonth(ctx context.Context, monthName st
 
 	savedCount := 0
 	for _, scrapedRelease := range scrapedReleases {
-		artist, exists := artistObjectMap[strings.ToLower(scrapedRelease.Artist)]
-		if !exists {
+		artist := s.findArtist(scrapedRelease.Artist, artistObjectMap)
+		if artist == nil {
 			continue
 		}
 
@@ -503,6 +517,35 @@ func monthToInt(month string) int {
 		"october": 10, "november": 11, "december": 12,
 	}
 	return monthMap[strings.ToLower(month)]
+}
+
+// findArtist matches a scraped name to a known artist, handling group suffixes.
+func (s *ReleaseService) findArtist(scrapedName string, artistMap map[string]*model.Artist) *model.Artist {
+	scrapedLower := strings.ToLower(strings.TrimSpace(scrapedName))
+
+	if artist, ok := artistMap[scrapedLower]; ok {
+		return artist
+	}
+
+	// Fallback for names like "JOOHONEY (MONSTA X)"
+	for name, artist := range artistMap {
+		if strings.HasPrefix(scrapedLower, name+" (") ||
+			strings.HasPrefix(scrapedLower, name+"-") ||
+			strings.HasPrefix(scrapedLower, name+" -") ||
+			strings.HasPrefix(scrapedLower, name+" &") ||
+			strings.HasPrefix(scrapedLower, name+",") {
+			return artist
+		}
+
+		// Try removing common suffixes
+		cleaned := strings.Split(scrapedLower, " (")[0]
+		cleaned = strings.Split(cleaned, " -")[0]
+		if cleaned == name {
+			return artist
+		}
+	}
+
+	return nil
 }
 
 // GetTotalReleaseCount returns the total number of release records in the database.

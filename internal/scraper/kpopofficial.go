@@ -9,558 +9,487 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/chromedp/chromedp"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
 
-// ParseKProfilesMonthlyPage extracts the monthly release schedule from the kpopofficial website.
-// It performs deep crawling of individual event pages to gather Spotify and MV links.
-func (f *fetcherImpl) ParseKProfilesMonthlyPage(ctx context.Context, url, month, year string) ([]Release, error) {
-	f.logger.Info("Starting to parse kpopofficial page",
-		zap.String("url", url),
-		zap.String("month", month),
-		zap.String("year", year))
+// ParseKProfilesMonthlyPage extracts releases using chromedp to handle dynamic tabs and pagination.
+func (f *fetcherImpl) ParseKProfilesMonthlyPage(ctx context.Context, pageURL, month, year string) ([]Release, error) {
+	f.logger.Info("Starting browser-based parse", zap.String("url", pageURL))
 
-	// Get main monthly page.
-	var doc *goquery.Document
-	err := WithRetry(ctx, f.logger, f.config.RetryConfig, func() error {
-		var err error
-		doc, err = f.httpClient.GetHTML(ctx, url)
-		if err != nil {
-			if strings.Contains(err.Error(), "404") {
-				return &PermanentError{Err: err}
-			}
-			return err
-		}
-		return nil
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch page: %w", err)
+	// Quick 404 check
+	status, err := f.httpClient.CheckStatus(ctx, pageURL)
+	if err == nil && status == 404 {
+		f.logger.Warn("month page 404, skipping", zap.String("url", pageURL))
+		return nil, fmt.Errorf("page not found: 404")
 	}
 
-	// Scan for event links within grid items (cards).
-	var eventsToVisit []string
+	// Browser setup
+	timeoutCtx, cancelTimeout := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancelTimeout()
 
-	doc.Find(".gspbgrid_item").Each(func(i int, s *goquery.Selection) {
-		// Look for the main link in the card.
-		href, exists := s.Find("a.gspbgrid_item_link").Attr("href")
-		if !exists {
-			// Fallback: any link in the card that looks like an album link.
-			href, exists = s.Find("a").Attr("href")
-		}
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.NoSandbox,
+		chromedp.DisableGPU,
+		chromedp.Flag("disable-dev-shm-usage", true),
+		chromedp.Flag("remote-debugging-port", "9222"),
+		chromedp.Flag("disable-software-rasterizer", true),
+		chromedp.Flag("disable-extensions", true),
+		chromedp.Flag("disable-background-networking", true),
+		chromedp.Flag("disable-sync", true),
+		chromedp.Flag("disable-translate", true),
+		chromedp.Flag("metrics-recording-only", true),
+		chromedp.Flag("no-first-run", true),
+		chromedp.Flag("safebrowsing-disable-auto-update", true),
+		chromedp.Flag("blink-settings", "imagesEnabled=false"),
+		chromedp.Flag("headless", "new"),
+		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+	)
+	allocCtx, cancel := chromedp.NewExecAllocator(timeoutCtx, opts...)
+	defer cancel()
 
-		if exists && strings.Contains(href, "/album/") {
+	taskCtx, cancel := chromedp.NewContext(allocCtx)
+	defer cancel()
+
+	var finalHTML string
+	err = chromedp.Run(taskCtx,
+		chromedp.EmulateViewport(1920, 1080),
+		chromedp.Navigate(pageURL),
+		chromedp.WaitVisible(`body`, chromedp.ByQuery),
+		// Kill alerts/dialogs that might hang the browser
+		chromedp.Evaluate(`window.alert = window.confirm = window.prompt = function() {};`, nil),
+		chromedp.WaitReady(`.gspbgrid_item_link, .wp-block-greenshift-blocks-querygrid`, chromedp.ByQuery),
+		chromedp.Sleep(time.Duration(f.config.RequestDelay)*2),
+
+		// Switch to correct month tab
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			f.logger.Info("selecting release tab", zap.String("month", month))
+			var result struct {
+				Success bool   `json:"success"`
+				Match   string `json:"match"`
+			}
+			err := chromedp.Evaluate(fmt.Sprintf(`
+				(function() {
+					const m = "%s".toLowerCase();
+					const y = "%s";
+					const tabs = Array.from(document.querySelectorAll('.t-btn, [role="tab"], .wp-block-greenshift-blocks-tabs__header-item'));
+					
+					const queries = ['all ' + m + ' comebacks', 'all ' + m, m + ' comebacks', m + ' ' + y, m];
+					for (const q of queries) {
+						const el = tabs.find(t => t.textContent.toLowerCase().includes(q));
+						if (el) {
+							el.scrollIntoView({block: 'center'});
+							el.click();
+							return { success: true, match: q };
+						}
+					}
+					return { success: false };
+				})()
+			`, month, year), &result).Do(ctx)
+
+			if err != nil {
+				return fmt.Errorf("tab selection failed: %w", err)
+			}
+			if result.Success {
+				f.logger.Info("tab switched", zap.String("pattern", result.Match))
+			} else {
+				f.logger.Warn("could not find specific month tab, staying on default")
+			}
+			return nil
+		}),
+
+		chromedp.Sleep(3*time.Second),
+		chromedp.Evaluate(`window.scrollBy(0, 400);`, nil),
+
+		// Load more content
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			f.logger.Info("loading more content...")
+			var lastCount int
+			var stagnant int
+
+			for i := 0; i < 40; i++ {
+				var res struct {
+					Found bool `json:"found"`
+					Count int  `json:"count"`
+				}
+
+				err := chromedp.Evaluate(`
+					(function() {
+						const items = document.querySelectorAll('.gspbgrid_item_link').length;
+						const btn = Array.from(document.querySelectorAll('span, button, .gspb-loadmore-btn'))
+							.find(b => {
+								const r = b.getBoundingClientRect();
+								return r.width > 0 && r.height > 0 && b.textContent.toLowerCase().includes('show more');
+							});
+						
+						if (btn) {
+							btn.scrollIntoView({block: 'center'});
+							btn.click();
+							return { found: true, count: items };
+						}
+						return { found: false, count: items };
+					})()
+				`, &res).Do(ctx)
+
+				if err != nil {
+					f.logger.Error("pagination eval error", zap.Error(err))
+					break
+				}
+
+				if i%2 == 0 {
+					f.logger.Info("parsing batch", zap.Int("i", i), zap.Int("items", res.Count))
+				}
+
+				if !res.Found {
+					break
+				}
+
+				if res.Count > 0 && res.Count == lastCount {
+					stagnant++
+					if stagnant >= 3 {
+						f.logger.Warn("pagination stagnant, breaking", zap.Int("count", res.Count))
+						break
+					}
+				} else {
+					stagnant = 0
+					lastCount = res.Count
+				}
+
+				_ = chromedp.Sleep(5 * time.Second).Do(ctx)
+				_ = chromedp.Evaluate(`window.scrollBy(0, 300);`, nil).Do(ctx)
+			}
+			return nil
+		}),
+		chromedp.OuterHTML(`html`, &finalHTML),
+		// Manual GC trigger for better stability
+		chromedp.Evaluate(`window.gc && window.gc();`, nil),
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("chromedp failed: %w", err)
+	}
+
+	// Extract links from rendered HTML
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(finalHTML))
+	if err != nil {
+		return nil, err
+	}
+
+	var links []string
+	doc.Find("a").Each(func(i int, s *goquery.Selection) {
+		href, _ := s.Attr("href")
+		if strings.Contains(href, "/album/") {
 			if strings.HasPrefix(href, "/") {
 				href = "https://kpopofficial.com" + href
 			}
-			eventsToVisit = append(eventsToVisit, href)
+			links = append(links, href)
 		}
 	})
 
-	// Fallback for pages without grid items (older or different structure).
-	if len(eventsToVisit) == 0 {
-		doc.Find("a").Each(func(i int, s *goquery.Selection) {
-			href, exists := s.Attr("href")
-			if !exists {
-				return
-			}
-			if strings.Contains(href, "kpopofficial.com/album/") {
-				eventsToVisit = append(eventsToVisit, href)
-			}
-		})
+	links = uniqueStrings(links)
+	f.logger.Info("Discovered release links", zap.Int("count", len(links)))
+	if len(links) == 0 {
+		f.logger.Debug("HTML Preview (first 500 chars)", zap.String("html", truncateString(finalHTML, 500)))
 	}
 
-	// Deduplicate discovered links.
-	eventsToVisit = uniqueStrings(eventsToVisit)
-	f.logger.Info("Found event links to crawl", zap.Int("count", len(eventsToVisit)))
+	// Sub-crawl logic
+	type queueItem struct {
+		url   string
+		depth int
+	}
+
+	queue := make([]queueItem, 0, len(links))
+	visited := make(map[string]bool)
+	for _, u := range links {
+		visited[u] = true
+		queue = append(queue, queueItem{url: u, depth: 1})
+	}
 
 	var releases []Release
-	visited := make(map[string]bool)
-	for _, u := range eventsToVisit {
-		visited[u] = true
-	}
+	totalProcessed := 0
+	const maxLinks = 200
 
-	// Visit each event page to extract details.
-	// We use an iterative approach with a queue to support deep crawling discovered links.
-	queue := eventsToVisit
-	for len(queue) > 0 {
+	for len(queue) > 0 && totalProcessed < maxLinks {
 		currentBatch := queue
-		queue = []string{} // Reset queue for next depth.
-
+		queue = []queueItem{}
 		g, batchCtx := errgroup.WithContext(ctx)
-		const maxConcurrency = 5 // Slightly lower concurrency for safety.
+		const maxConcurrency = 8
 		sem := make(chan struct{}, maxConcurrency)
-		var releasesMutex sync.Mutex
-		var discoveredMutex sync.Mutex
+		var mtx sync.Mutex
 
-		for _, eventURL := range currentBatch {
-			url := eventURL
+		for _, item := range currentBatch {
+			it := item
 			g.Go(func() error {
 				sem <- struct{}{}
 				defer func() { <-sem }()
 
-				select {
-				case <-batchCtx.Done():
-					return batchCtx.Err()
-				default:
+				// Jitter
+				delay := f.config.RequestDelay
+				if delay == 0 {
+					delay = 200 * time.Millisecond
 				}
+				time.Sleep(delay)
 
-				if f.config.RequestDelay > 0 {
-					time.Sleep(f.config.RequestDelay)
-				}
-
-				pageReleases, discoveredLinks, err := f.parseEventPage(batchCtx, url)
+				pageReleases, discoveredLinks, err := f.parseEventPage(batchCtx, it.url, it.depth)
 				if err != nil {
-					f.logger.Error("Failed to parse event page", zap.String("url", url), zap.Error(err))
 					return nil
 				}
 
-				if len(pageReleases) > 0 {
-					releasesMutex.Lock()
-					for _, r := range pageReleases {
-						releases = append(releases, *r)
-					}
-					releasesMutex.Unlock()
+				mtx.Lock()
+				totalProcessed++
+				for _, r := range pageReleases {
+					releases = append(releases, *r)
 				}
-
-				if len(discoveredLinks) > 0 {
-					discoveredMutex.Lock()
+				if it.depth > 0 {
 					for _, dl := range discoveredLinks {
 						if !visited[dl] {
 							visited[dl] = true
-							queue = append(queue, dl)
+							queue = append(queue, queueItem{url: dl, depth: it.depth - 1})
 						}
 					}
-					discoveredMutex.Unlock()
 				}
+				mtx.Unlock()
 				return nil
 			})
 		}
-
 		if err := g.Wait(); err != nil {
 			return nil, err
 		}
-
-		if len(queue) > 0 {
-			f.logger.Info("Deep crawl: discovered more links", zap.Int("count", len(queue)))
-		}
 	}
-
 	return releases, nil
 }
 
-// ScrapedRelease represents the raw data extracted during the scraping process.
-type ScrapedRelease struct {
-	Artist     string
-	AlbumName  string
-	Title      string
-	TitleTrack string
-	Date       time.Time
-	MV         string
-	Spotify    string
-	SourceURL  string
-}
-
-// parseEventPage fetches and extracts data from a specific album/event page.
-// It returns a list of releases found on the page and any sub-links discovered in tables.
-func (f *fetcherImpl) parseEventPage(ctx context.Context, url string) ([]*Release, []string, error) {
+func (f *fetcherImpl) parseEventPage(ctx context.Context, url string, depth int) ([]*Release, []string, error) {
 	var doc *goquery.Document
 	err := WithRetry(ctx, f.logger, f.config.RetryConfig, func() error {
 		var err error
 		doc, err = f.httpClient.GetHTML(ctx, url)
 		return err
 	})
-
 	if err != nil {
 		return nil, nil, err
 	}
-
-	releases, links, err := f.parseEventPageFromDoc(doc, url)
-	if err != nil {
-		html, _ := doc.Html()
-		f.logger.Error("Failed to parse event page content",
-			zap.String("url", url),
-			zap.String("html_snippet", truncateString(html, 1000)))
-		return nil, nil, err
+	rels, links, err := f.parseEventPageFromDoc(doc, url)
+	if depth > 0 {
+		return rels, links, err
 	}
-	return releases, links, nil
+	// Stop recursion
+	return rels, nil, err
 }
 
-// parseEventPageFromDoc extracts structured release data from an HTML document.
 func (f *fetcherImpl) parseEventPageFromDoc(doc *goquery.Document, url string) ([]*Release, []string, error) {
-	// Extract Title & Artist from Page Title or Header as fallback/default.
-	pageTitle := doc.Find("h1.entry-title").Text()
-	if pageTitle == "" {
-		pageTitle = doc.Find(".post-title").Text()
-	}
-	if pageTitle == "" {
-		pageTitle = doc.Find("h1").First().Text()
-	}
-	if pageTitle == "" {
-		pageTitle = doc.Find("title").Text()
-	}
-	pageTitle = strings.TrimSpace(pageTitle)
+	pageTitle := strings.TrimSpace(doc.Find("h1.entry-title, .post-title, h1").First().Text())
 	defaultArtist, defaultAlbum := splitTitle(pageTitle)
 
-	// Global metadata containers.
-	var metaAlbumName = defaultAlbum
-	var metaTitleTrack = ""
-	var metaArtist = defaultArtist
+	var metaArtist, metaAlbum, metaTrack, albumLink string
+	metaArtist = defaultArtist
+	metaAlbum = defaultAlbum
 
-	// Events found in the table.
-	type eventRaw struct {
-		Name string
-		Date string
-		Link string
-	}
+	type eventRaw struct{ Name, Date, Link string }
 	var events []eventRaw
-	var discoveredSubLinks []string
+	var subLinks []string
 
-	// getText extracts cleaned plain text from a selection, handling line breaks and metadata cleanup.
-	getText := func(s *goquery.Selection) string {
-		html, _ := s.Html()
-		// Replace common block tags with space.
-		html = strings.ReplaceAll(html, "<br>", " ")
-		html = strings.ReplaceAll(html, "<br/>", " ")
-		html = strings.ReplaceAll(html, "<br />", " ")
-
-		// Create a temporary doc to extract text cleanly.
-		tmpDoc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
-		text := tmpDoc.Text()
-
-		// Remove "View Details" or other common button text if stuck to the date.
-		text = strings.ReplaceAll(text, "[View Details]", "")
-
-		return strings.TrimSpace(text)
-	}
-
-	// First pass: Scan table for metadata AND events.
+	// First pass: gather global metadata (Artist, Album, Title Track)
 	doc.Find("tr").Each(func(i int, s *goquery.Selection) {
 		cells := s.Find("td")
 		if cells.Length() < 2 {
 			return
 		}
 
-		col1 := getText(cells.Eq(0))
-		col2 := getText(cells.Eq(1))
+		key := strings.ToLower(strings.Join(strings.Fields(cells.Eq(0).Text()), " "))
 
-		// Check keys.
-		k := strings.ToLower(col1)
-
-		if strings.Contains(k, "artist") && !strings.Contains(k, "feat") {
-			if val := col2; val != "" {
-				metaArtist = val
+		// Clone cell to remove buttons/links from text extraction
+		valCell := cells.Eq(1).Clone()
+		valCell.Find("a").Each(func(idx int, a *goquery.Selection) {
+			atxt := strings.ToLower(a.Text())
+			if strings.Contains(atxt, "view") || strings.Contains(atxt, "details") ||
+				strings.Contains(atxt, "amazon") || strings.Contains(atxt, "shop") {
+				a.Remove()
 			}
+		})
+		val := strings.TrimSpace(valCell.Text())
+
+		switch key {
+		case "artist":
+			metaArtist = val
+		case "album":
+			metaAlbum = strings.Trim(val, " “\"”'[]")
+			cells.Eq(1).Find("a").Each(func(j int, tag *goquery.Selection) {
+				href, _ := tag.Attr("href")
+				if strings.Contains(href, "/album/") {
+					if strings.HasPrefix(href, "/") {
+						href = "https://kpopofficial.com" + href
+					}
+					albumLink = href
+				}
+			})
+		case "title track", "title":
+			metaTrack = strings.Trim(val, " “\"”'[]")
+		}
+	})
+
+	// Second pass: extract events and follow-up links
+	doc.Find("tr").Each(func(i int, s *goquery.Selection) {
+		cells := s.Find("td")
+		if cells.Length() < 2 {
 			return
 		}
-		if k == "album" || k == "album title" {
-			if val := col2; val != "" {
-				re := regexp.MustCompile(`\[.*?\]`)
-				val = re.ReplaceAllString(val, "")
-				metaAlbumName = strings.TrimSpace(val)
+
+		// Extract all album/detail links from the second cell for deep crawling
+		cells.Eq(1).Find("a").Each(func(j int, tag *goquery.Selection) {
+			href, _ := tag.Attr("href")
+			if strings.Contains(href, "/album/") {
+				if strings.HasPrefix(href, "/") {
+					href = "https://kpopofficial.com" + href
+				}
+				subLinks = append(subLinks, href)
 			}
+		})
+
+		// Remove buttons/links from labels
+		keyCell := cells.Eq(0).Clone()
+		keyCell.Find("a").Each(func(idx int, a *goquery.Selection) {
+			atxt := strings.ToLower(a.Text())
+			if strings.Contains(atxt, "view") || strings.Contains(atxt, "details") {
+				a.Remove()
+			}
+		})
+		key := strings.Join(strings.Fields(keyCell.Text()), " ")
+		lowKey := strings.ToLower(key)
+		val := strings.TrimSpace(cells.Eq(1).Text())
+
+		// Skip metadata/utility rows
+		if lowKey == "artist" || lowKey == "album" || strings.Contains(lowKey, "buy") ||
+			strings.Contains(lowKey, "source") || strings.Contains(lowKey, "tracklist") ||
+			lowKey == "price" {
 			return
 		}
 
-		if k == "title track" || k == "title" {
-			if val := col2; val != "" {
-				val = strings.Trim(val, " \"”")
-				val = strings.ReplaceAll(val, "“", "")
-				val = strings.ReplaceAll(val, "”", "")
-				val = strings.ReplaceAll(val, "\"", "")
-				metaTitleTrack = strings.TrimSpace(val)
-			}
-			return
-		}
-
-		// Check if it looks like an event (has date in col2).
-		dateStr := findDateInString(col2)
+		dateStr := findDateInString(val)
 		if dateStr != "" {
+			title := key
+			isMain := strings.Contains(lowKey, "release date") ||
+				strings.Contains(lowKey, "album release") ||
+				lowKey == "offline release"
+
+			if isMain {
+				if albumLink != "" && normalizeURL(albumLink) != normalizeURL(url) {
+					return
+				}
+				title = metaAlbum
+			}
+
 			var evtLink string
 			cells.Eq(1).Find("a").Each(func(j int, tag *goquery.Selection) {
-				href, exists := tag.Attr("href")
-				if exists {
-					// Handle different types of links.
-					if strings.Contains(tag.Text(), "View Details") || strings.Contains(href, "/album/") {
-						if strings.HasPrefix(href, "/") {
-							href = "https://kpopofficial.com" + href
-						}
-						evtLink = href
-						discoveredSubLinks = append(discoveredSubLinks, href)
+				href, _ := tag.Attr("href")
+				if strings.Contains(href, "/album/") {
+					if strings.HasPrefix(href, "/") {
+						href = "https://kpopofficial.com" + href
 					}
+					evtLink = href
 				}
 			})
 
-			events = append(events, eventRaw{Name: col1, Date: dateStr, Link: evtLink})
+			if evtLink == "" || normalizeURL(evtLink) == normalizeURL(url) {
+				events = append(events, eventRaw{Name: title, Date: dateStr, Link: evtLink})
+			}
+
+			if evtLink != "" && normalizeURL(evtLink) != normalizeURL(url) {
+				subLinks = append(subLinks, evtLink)
+			}
 		}
 	})
 
-	// Shared links (only used if NOT a sub-link event).
-	globalYoutubeLink := findIframeSrc(doc, "youtube.com/embed")
-	if globalYoutubeLink == "" {
-		globalYoutubeLink = findLinkByDomain(doc, "youtube.com", "youtu.be")
+	yt, _ := doc.Find("iframe[src*='youtube']").Attr("src")
+	if strings.Contains(yt, "embed/") {
+		id := strings.Split(yt, "embed/")[1]
+		if idx := strings.Index(id, "?"); idx != -1 {
+			id = id[:idx]
+		}
+		yt = "https://www.youtube.com/watch?v=" + id
 	}
-	globalSpotifyLink := findLinkByDomain(doc, "open.spotify.com")
+	sp, _ := doc.Find("a[href*='open.spotify.com']").Attr("href")
 
-	// Fallback Title Track.
-	if metaTitleTrack == "" {
-		metaTitleTrack = findLineWithPrefix(doc, "Title Track")
-		metaTitleTrack = strings.TrimPrefix(metaTitleTrack, "Title Track")
-		metaTitleTrack = strings.TrimPrefix(metaTitleTrack, ":")
-		metaTitleTrack = strings.TrimSpace(metaTitleTrack)
-		metaTitleTrack = strings.Trim(metaTitleTrack, " \"”")
-	}
-
-	var foundReleases []*Release
-
-	// Process events.
+	var releases []*Release
 	for _, ev := range events {
-		title := ev.Name
-		isMainAlbumRelease := false
-
-		// Clean title.
-		lowerTitle := strings.ToLower(title)
-		if strings.Contains(lowerTitle, "album release") || strings.Contains(lowerTitle, "release date") || lowerTitle == "offline release" {
-			title = metaAlbumName
-			isMainAlbumRelease = true
-		}
-
-		var date time.Time
-		d, err := parseKProfilesDate(ev.Date)
-		if err == nil {
-			date = d
-		}
-
-		// Prefer sub-page links over global links for specific events.
-		mvLink := globalYoutubeLink
-		spotifyLink := globalSpotifyLink
-		sourceURL := url // Default page URL as fallback.
-		if ev.Link != "" {
-			mvLink = ""
-			spotifyLink = ""
-			sourceURL = ev.Link // Specific event page URL.
-		}
-
-		r := &Release{
-			Artist:    cleanArtistName(metaArtist),
-			AlbumName: metaAlbumName,
-			Title:     title,
-			Date:      date,
-			MV:        mvLink,
-			Spotify:   spotifyLink,
-			SourceURL: sourceURL,
-		}
-
-		// Assign Title Track.
-		if isMainAlbumRelease {
-			r.TitleTrack = metaTitleTrack
-		} else {
-			safeTitle := strings.ReplaceAll(title, "“", "\"")
-			safeTitle = strings.ReplaceAll(safeTitle, "”", "\"")
-			if strings.Contains(safeTitle, "\"") {
-				parts := strings.Split(safeTitle, "\"")
-				if len(parts) >= 2 {
-					r.TitleTrack = parts[1]
-				}
-			}
-		}
-
-		foundReleases = append(foundReleases, r)
+		d, _ := time.Parse("January 2, 2006", ev.Date)
+		releases = append(releases, &Release{
+			Artist:     cleanArtistName(metaArtist),
+			AlbumName:  metaAlbum,
+			Title:      ev.Name,
+			TitleTrack: metaTrack,
+			Date:       d,
+			MV:         yt,
+			Spotify:    sp,
+			SourceURL:  url,
+		})
 	}
-
-	// Strategy 2: Fallback.
-	if len(foundReleases) == 0 {
-		var date time.Time
-		ogDesc, exists := doc.Find("meta[property='og:description']").Attr("content")
-		if exists {
-			dateStr := findDateInString(ogDesc)
-			if dateStr != "" {
-				date, _ = parseKProfilesDate(dateStr)
-			}
-		}
-		if date.IsZero() {
-			dateStr := findDateInContent(doc)
-			if dateStr != "" {
-				date, _ = parseKProfilesDate(dateStr)
-			}
-		}
-
-		if !date.IsZero() {
-			r := &Release{
+	if len(releases) == 0 {
+		if ds := findDateInString(doc.Find(".entry-content").Text()); ds != "" {
+			d, _ := time.Parse("January 2, 2006", ds)
+			releases = append(releases, &Release{
 				Artist:     cleanArtistName(metaArtist),
-				AlbumName:  metaAlbumName,
-				Title:      metaAlbumName,
-				TitleTrack: metaTitleTrack,
-				Date:       date,
-				MV:         globalYoutubeLink,
-				Spotify:    globalSpotifyLink,
+				AlbumName:  metaAlbum,
+				Title:      metaAlbum,
+				TitleTrack: metaTrack,
+				Date:       d,
+				MV:         yt,
+				Spotify:    sp,
 				SourceURL:  url,
-			}
-			foundReleases = append(foundReleases, r)
+			})
 		}
 	}
-
-	return foundReleases, uniqueStrings(discoveredSubLinks), nil
+	return releases, uniqueStrings(subLinks), nil
 }
 
-// findIframeSrc extracts the source URL from an iframe containing a specific domain part.
-func findIframeSrc(doc *goquery.Document, domainPart string) string {
-	var src string
-	doc.Find("iframe").EachWithBreak(func(i int, s *goquery.Selection) bool {
-		val, exists := s.Attr("src")
-		if exists && strings.Contains(val, domainPart) {
-			src = val
-			// Standardize YouTube embed links to regular watch links.
-			if strings.Contains(src, "youtube.com/embed/") {
-				id := strings.Split(src, "embed/")[1]
-				if idx := strings.Index(id, "?"); idx != -1 {
-					id = id[:idx]
-				}
-				src = "https://www.youtube.com/watch?v=" + id
-			}
-			return false
-		}
-		return true
-	})
-
-	if isYouTubeChannel(src) {
-		return ""
-	}
-
-	return src
+func normalizeURL(u string) string {
+	u = strings.TrimSuffix(u, "/")
+	return strings.ToLower(u)
 }
 
-// isYouTubeChannel verifies if a given URL points to a channel profile rather than a video.
-func isYouTubeChannel(link string) bool {
-	low := strings.ToLower(link)
-	return strings.Contains(low, "youtube.com/@") ||
-		strings.Contains(low, "youtube.com/channel/") ||
-		strings.Contains(low, "youtube.com/user/") ||
-		strings.Contains(low, "youtube.com/c/")
-}
-
-// uniqueStrings returns a new slice with duplicate strings removed.
-func uniqueStrings(input []string) []string {
-	keys := make(map[string]bool)
-	list := []string{}
-	for _, entry := range input {
-		if _, value := keys[entry]; !value {
-			keys[entry] = true
-			list = append(list, entry)
+func uniqueStrings(in []string) []string {
+	m := make(map[string]bool)
+	var out []string
+	for _, s := range in {
+		normalized := normalizeURL(s)
+		if !m[normalized] {
+			m[normalized] = true
+			out = append(out, s)
 		}
 	}
-	return list
+	return out
 }
 
-// splitTitle attempts to separate an artist name and album title from a combined string.
-func splitTitle(input string) (string, string) {
-	// Format "Artist – Album".
-	parts := strings.SplitN(input, "–", 2)
-	if len(parts) == 2 {
-		return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+func splitTitle(in string) (string, string) {
+	p := strings.SplitN(in, "–", 2)
+	if len(p) < 2 {
+		p = strings.SplitN(in, "-", 2)
 	}
-	// Try "-".
-	parts = strings.SplitN(input, "-", 2)
-	if len(parts) == 2 {
-		return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	if len(p) == 2 {
+		return strings.TrimSpace(p[0]), strings.TrimSpace(p[1])
 	}
-	return strings.TrimSpace(input), ""
+	return in, ""
 }
 
-// findLinkByDomain searches the document for hyperlinks matching specific domain patterns.
-func findLinkByDomain(doc *goquery.Document, domains ...string) string {
-	var link string
-	// Search globally, not just in entry-content, as buttons might be outside.
-	doc.Find("a").EachWithBreak(func(i int, s *goquery.Selection) bool {
-		href, exists := s.Attr("href")
-		if !exists {
-			return true
-		}
-		for _, d := range domains {
-			if strings.Contains(href, d) {
-				// Special check for YouTube links to avoid channels.
-				if strings.Contains(d, "youtube.com") || strings.Contains(d, "youtu.be") {
-					if isYouTubeChannel(href) {
-						continue
-					}
-				}
-				link = href
-				return false // found.
-			}
-		}
-		return true
-	})
-	return link
-}
-
-// findLineWithPrefix searches for a line of text within paragraph or list item elements that starts with a given prefix.
-func findLineWithPrefix(doc *goquery.Document, prefix string) string {
-	var result string
-	doc.Find("p, li").EachWithBreak(func(i int, s *goquery.Selection) bool {
-		text := s.Text()
-		if strings.Contains(strings.ToLower(text), strings.ToLower(prefix)) {
-			lines := strings.Split(text, "\n")
-			for _, line := range lines {
-				if strings.Contains(strings.ToLower(line), strings.ToLower(prefix)) {
-					result = line
-					return false
-				}
-			}
-		}
-		return true
-	})
-	return result
-}
-
-// findDateInString extracts a date string in "Month DD, YYYY" format from the input text.
-func findDateInString(text string) string {
-	// Regex for "Month DD, YYYY".
+func findDateInString(t string) string {
 	re := regexp.MustCompile(`(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}`)
-	match := re.FindString(text)
-	return match
+	return re.FindString(t)
 }
 
-// findDateInContent searches for a date string within the document's entry content.
-func findDateInContent(doc *goquery.Document) string {
-	// Look for standard date patterns in text.
-	content := doc.Find(".entry-content").Text()
-	return findDateInString(content)
-}
-
-// cleanArtistName removes decorative symbols and emojis from the artist's name.
-func cleanArtistName(raw string) string {
-	raw = strings.TrimSpace(raw)
-
-	// Remove Unicode emojis and special symbols.
-	var cleaned []rune
-	for _, r := range raw {
-		// Keep normal letters, numbers and basic symbols (like & or -).
-		// Ranges:
-		// Basic Latin: 0x0020 - 0x007F
-		// Latin-1 Supplement: 0x00A0 - 0x00FF (includes accents)
-		// Korean Hangul: 0xAC00 - 0xD7AF and 0x1100 - 0x11FF
-		// CJK Unified Ideographs: 0x4E00 - 0x9FFF
-		// Hiragana/Katakana could be added if needed.
-
-		// Simple allow-list approach for now:
-		if r < 0x2000 { // Basic multilingual plane, covering most languages
-			cleaned = append(cleaned, r)
-		}
-	}
-
-	raw = string(cleaned)
-	return strings.TrimSpace(raw)
-}
-
-// parseKProfilesDate parses date in "January 1, 2026" format.
-func parseKProfilesDate(dateStr string) (time.Time, error) {
-	return time.Parse("January 2, 2006", dateStr)
-}
-
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
+func truncateString(s string, l int) string {
+	if len(s) <= l {
 		return s
 	}
-	return s[:maxLen] + "... [truncated]"
+	return s[:l] + "..."
+}
+
+func cleanArtistName(s string) string {
+	var r []rune
+	for _, c := range s {
+		if c < 0x2000 {
+			r = append(r, c)
+		}
+	}
+	return strings.TrimSpace(string(r))
 }

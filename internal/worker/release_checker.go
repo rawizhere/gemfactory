@@ -33,7 +33,7 @@ func NewReleaseCheckerWorker(releaseService service.ReleaseServiceInterface, log
 	}
 }
 
-// Start initiates the background loop for periodic release checks and interval updates.
+// Start initiates the worker's main loop.
 func (w *ReleaseCheckerWorker) Start(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 	w.logger.Info("Release checker worker started", zap.Duration("interval", w.interval))
@@ -41,8 +41,15 @@ func (w *ReleaseCheckerWorker) Start(ctx context.Context, wg *sync.WaitGroup) {
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 
-	// Initial check on startup
-	w.checkReleases(ctx)
+	// Initial check on startup (with delay to let system settle)
+	go func() {
+		select {
+		case <-time.After(30 * time.Second):
+			w.checkReleases(ctx)
+		case <-ctx.Done():
+			return
+		}
+	}()
 
 	for {
 		select {
@@ -75,20 +82,20 @@ func (w *ReleaseCheckerWorker) ApplyConfig(ctx context.Context, configs []model.
 }
 
 func (w *ReleaseCheckerWorker) checkReleases(ctx context.Context) {
-	w.logger.Info("Checking for new releases (current + 3 months ahead)...")
+	w.logger.Info("Checking for new releases (previous + current + 3 months ahead)...")
 
 	now := time.Now()
-	// Scan current and next 3 months
-	for i := 0; i <= 3; i++ {
+	// Scan previous, current and next 3 months
+	for i := -1; i <= 3; i++ {
 		targetDate := now.AddDate(0, i, 0)
 		monthName := strings.ToLower(targetDate.Format("January"))
 		yearStr := targetDate.Format("2006")
 
 		w.logger.Info("Parsing releases", zap.String("month", monthName), zap.String("year", yearStr))
 
-		count, err := w.releaseService.ParseReleasesForMonth(ctx, monthName)
+		count, err := w.releaseService.ParseReleasesForMonth(ctx, fmt.Sprintf("%s-%s", monthName, yearStr))
 		if err != nil {
-			// Stop forward scan if monthly page is missing (404)
+			// Stop forward scan on 404/not found
 			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
 				w.logger.Warn("Monthly page not found, stopping forward scan for this cycle",
 					zap.String("month", monthName),

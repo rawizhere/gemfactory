@@ -1,155 +1,102 @@
-name: CI/CD Pipeline
+name: build
 
 on:
   push:
     branches: [ main, dev ]
-    tags:
-      - 'v*.*.*'
+    tags: [ 'v*.*.*' ]
   pull_request:
     branches: [ main, dev ]
 
 env:
   GO_VERSION: '1.24'
-  GOLANGCI_LINT_VERSION: v2.8.0
+  LINT_VERSION: v2.8.0
   DOCKER_IMAGE: ${{ github.repository }}
 
 jobs:
-  detect-modules:
-    name: Detect Go Modules
-    runs-on: ubuntu-latest
-    outputs:
-      modules: ${{ steps.set-modules.outputs.modules }}
+  static-analysis:
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      - id: set-modules
-        run: echo "modules=$(go list -m -json | jq -s '.' | jq -c '[.[].Dir]')" >> $GITHUB_OUTPUT
-
-  lint:
-    name: Lint
-    needs: detect-modules
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        modules: ${{ fromJSON(needs.detect-modules.outputs.modules) }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-      - name: golangci-lint ${{ matrix.modules }}
+          cache: false
+      - name: run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: ${{ env.GOLANGCI_LINT_VERSION }}
-          working-directory: ${{ matrix.modules }}
+          version: ${{ env.LINT_VERSION }}
           args: --timeout=5m
+          skip-cache: true
 
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    needs: lint
+  vulnerability-scan:
+    runs-on: self-hosted
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-      - name: Clean Go build cache
+          cache: false
+      - name: check dependencies
         run: |
-          rm -rf ~/.cache/go-build
-          go clean -modcache
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-test-${{ github.job }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-test-${{ github.job }}-
-      - name: Install dependencies
-        run: go mod download
-      - name: Run tests
-        run: go test -v -race -coverprofile=coverage.out ./...
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          file: ./coverage.out
-          flags: unittests
-          name: codecov-umbrella
-      - name: Run security scan
-        run: |
-          go install github.com/sonatype-nexus-community/nancy@latest
-          go list -json -deps ./... | nancy sleuth || echo "Security scan failed - continuing build"
-        continue-on-error: true
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
 
-  docker:
-    name: Build and Push Docker Image
-    runs-on: ubuntu-latest
-    needs: [test]
+  unit-tests:
+    runs-on: self-hosted
+    needs: [static-analysis, vulnerability-scan]
+    env:
+      CGO_ENABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - name: run tests
+        run: |
+          go mod download
+          go test -v -race -coverprofile=coverage.out ./...
+
+  build-and-push:
+    runs-on: self-hosted
+    needs: [unit-tests]
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Set up Docker Buildx
+      - uses: actions/checkout@v4
+      - name: setup buildx
         uses: docker/setup-buildx-action@v3
-      - name: Log in to Docker Hub
+      - name: login to dockerhub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Extract metadata
+      - name: generate metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.DOCKER_IMAGE }}
-          tags: |
-            type=raw,value=latest
-      - name: Build and push Docker image
+          tags: type=raw,value=latest
+      - name: build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./deployments/Dockerfile
           platforms: linux/amd64
           push: true
-          tags: |
-            ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=docker
-          cache-to: type=gha,mode=max,scope=docker
-      - name: Docker Build Summary
-        if: success()
-        run: |
-          echo '### Docker image successfully built and published' >> $GITHUB_STEP_SUMMARY
-          echo '' >> $GITHUB_STEP_SUMMARY
-          echo '**Tags:**' >> $GITHUB_STEP_SUMMARY
-          echo '- `${{ env.DOCKER_IMAGE }}:latest`' >> $GITHUB_STEP_SUMMARY
-          echo '' >> $GITHUB_STEP_SUMMARY
-          echo '**Docker Hub:** https://hub.docker.com/r/${{ env.DOCKER_IMAGE }}' >> $GITHUB_STEP_SUMMARY
-          echo '' >> $GITHUB_STEP_SUMMARY
-          echo '**Launch stack:**' >> $GITHUB_STEP_SUMMARY
-          echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo 'git clone https://github.com/${{ github.repository }}.git' >> $GITHUB_STEP_SUMMARY
-          echo 'cd ${{ github.event.repository.name }}' >> $GITHUB_STEP_SUMMARY
-          echo 'cp .env.example .env' >> $GITHUB_STEP_SUMMARY
-          echo '# Edit .env file with your settings' >> $GITHUB_STEP_SUMMARY
-          echo 'docker-compose -f deployments/docker-compose.yml --env-file .env up -d' >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo '' >> $GITHUB_STEP_SUMMARY
-          echo '**Containers:**' >> $GITHUB_STEP_SUMMARY
-          echo '- `${{ github.event.repository.name }}` - main application' >> $GITHUB_STEP_SUMMARY
-          echo '- `${{ github.event.repository.name }}-db` - PostgreSQL with pgvector' >> $GITHUB_STEP_SUMMARY
+
+  cleanup:
+    runs-on: self-hosted
+    needs: [build-and-push]
+    if: always()
+    steps:
+      - name: prune unused docker images
+        run: docker system prune -f
 
   notify:
-    name: Notify on Failure
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     if: failure()
-    needs: [lint, test, docker]
+    needs: [static-analysis, vulnerability-scan, unit-tests, build-and-push]
     steps:
-      - name: Notify failure
-        run: |
-          echo "CI/CD pipeline failed!"
-          # Add notifications here (Slack, Telegram, etc.)
+      - run: echo "build failed"

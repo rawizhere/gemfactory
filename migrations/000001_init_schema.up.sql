@@ -102,40 +102,42 @@ INSERT INTO gemfactory.config (key, value, description) VALUES
 ('HEALTH_PORT', '8080', 'Health check port'),
 ('TIMEZONE', 'Europe/Moscow', 'Application timezone'),
 ('APP_DATA_DIR', './data', 'Application data directory'),
-('RELEASE_CHECK_INTERVAL', '24h', 'Interval between release checks (e.g., 1h, 24h, 30m)')
+('RELEASE_CHECK_INTERVAL', '8h', 'Interval between release checks (e.g., 1h, 24h, 30m)')
 ON CONFLICT (key) DO NOTHING;
 
 -- Tasks seeding removed
 
--- Artist Seeding (Sample/Primary list)
+-- Artist Seeding
 INSERT INTO gemfactory.artists (name, gender, is_active) VALUES
 ('ARTMS', 'female', true), ('Apink', 'female', true), ('AtHeart', 'female', true), ('BABYMONSTER', 'female', true), ('BADVILLAIN', 'female', true),
 ('BEWAVE', 'female', true), ('BIBI', 'female', true), ('BLACKPINK', 'female', true), ('BURVEY', 'female', true), ('Baby DONT Cry', 'female', true),
-('Billlie', 'female', true), ('CHUU', 'female', true), ('CLASS:y', 'female', true), ('CRAZANGEL', 'female', true), ('Candy Shop', 'female', true),
-('CHUNG HA', 'female', true), ('DreamNote', 'female', true), ('FIFTY FIFTY', 'female', true), ('GFRIEND', 'female', true), ('Gyubin', 'female', true),
+('Billlie', 'female', true), ('CHUNG HA', 'female', true), ('CHUU', 'female', true), ('CLASS:y', 'female', true), ('CRAZANGEL', 'female', true),
+('Candy Shop', 'female', true), ('DreamNote', 'female', true), ('FIFTY FIFTY', 'female', true), ('GFRIEND', 'female', true), ('Gyubin', 'female', true),
 ('H1-KEY', 'female', true), ('HITGS', 'female', true), ('Hearts2Hearts', 'female', true), ('HyunA', 'female', true), ('ICHILLIN''', 'female', true),
 ('ILLIT', 'female', true), ('IRENE', 'female', true), ('IRENE & SEULGI', 'female', true), ('ITZY', 'female', true), ('IU', 'female', true),
 ('IVE', 'female', true), ('JENNIE', 'female', true), ('JEON SOMI', 'female', true), ('KIIRAS', 'female', true), ('KISS OF LIFE', 'female', true),
 ('KWON EUNBI', 'female', true), ('Kandis', 'female', true), ('Kep1er', 'female', true), ('KiiiKiii', 'female', true), ('Kim Lip', 'female', true),
-('LE SSERAFIM', 'female', true), ('LIGHTSUM', 'female', true), ('LISA', 'female', true), ('MEOVV', 'female', true), ('MISAMO', 'female', true),
-('MIYEON', 'female', true), ('MRCH', 'female', true), ('Meowmiro', 'female', true), ('Minnie', 'female', true), ('Moon Byul', 'female', true),
-('MΛDEIN', 'female', true), ('NANA', 'female', true), ('NMIXX', 'female', true), ('NiziU', 'female', true), ('ODD YOUTH', 'female', true),
-('OH MY GIRL', 'female', true), ('Olivia Marsh', 'female', true), ('PRIMROSE', 'female', true), ('PURPLE KISS', 'female', true), ('QWER', 'female', true),
-('RESCENE', 'female', true), ('ROSÉ', 'female', true), ('Red Velvet', 'female', true), ('Rolling Quartz', 'female', true), ('SAY MY NAME', 'female', true),
-('SEULGI', 'female', true), ('SOORIN', 'female', true), ('SPIA', 'female', true), ('STAYC', 'female', true), ('SUMMER CAKE', 'female', true),
-('SUNMI', 'female', true), ('Solar', 'female', true), ('TAEYEON', 'female', true), ('TWICE', 'female', true), ('UAU', 'female', true),
-('UDTT', 'female', true), ('UNIS', 'female', true), ('VIVIZ', 'female', true), ('VVS', 'female', true), ('VVUP', 'female', true),
-('WENDY', 'female', true), ('WJSN', 'female', true), ('WOOAH', 'female', true), ('XG', 'female', true), ('YEJI', 'female', true),
-('YENA', 'female', true), ('YOU DAYEON', 'female', true), ('YOUNG POSSE', 'female', true), ('YUJU', 'female', true), ('YUQI', 'female', true),
-('Yves', 'female', true), ('ablume', 'female', true), ('aespa', 'female', true), ('dodree (도드리)', 'female', true), ('fromis_9', 'female', true), ('hanhee', 'female', true),
-('i-dle', 'female', true), ('ifeye', 'female', true), ('izna', 'female', true), ('rescence', 'female', true), ('tripleS', 'female', true),
-('tripleS ∞!', 'female', true), ('&TEAM', 'male', true), ('82MAJOR', 'male', true), ('8TURN', 'male', true), ('AB6IX', 'male', true),
-('ALL(H)OURS', 'male', true), ('ALLDAY PROJECT', 'male', true), ('AMPERS&ONE', 'male', true), ('ATEEZ', 'male', true), ('BAND LUCY', 'male', true),
-('BOYNEXTDOOR', 'male', true), ('BamBam', 'male', true), ('CHEN', 'male', true), ('CORTIS', 'male', true), ('ENHYPEN', 'male', true),
-('Forestella', 'male', true), ('GOT7', 'male', true), ('HIGHLIGHT', 'male', true), ('IDID', 'male', true), ('KARD', 'male', true),
-('KAVE', 'male', true), ('KEY', 'male', true), ('Kai', 'male', true), ('KickFlip', 'male', true), ('NCT DREAM', 'male', true),
-('NEXZ', 'male', true), ('NouerA', 'male', true), ('P1Harmony', 'male', true), ('RIIZE', 'male', true), ('Stray Kids', 'male', true),
-('TAEMIN', 'male', true), ('TAEYONG', 'male', true), ('TEN', 'male', true), ('THE BOYZ', 'male', true), ('TXT', 'male', true),
-('WHIB', 'male', true), ('WayV', 'male', true), ('Xdinary Heroes', 'male', true), ('ZEROBASEONE', 'male', true), ('idntt', 'male', true),
-('male &TEAM', 'male', true), ('xikers', 'male', true)
+('LE SSERAFIM', 'female', true), ('LIGHTSUM', 'female', true), ('LISA', 'female', true), ('LOLA', 'female', true),
+('MADEIN', 'female', true), ('MEOVV', 'female', true), ('MISAMO', 'female', true), ('MIYEON', 'female', true), ('MRCH', 'female', true),
+('Meowmiro', 'female', true), ('Minnie', 'female', true), ('Moon Byul', 'female', true), ('MΛDEIN', 'female', true), ('NANA', 'female', true),
+('NMIXX', 'female', true), ('NiziU', 'female', true), ('ODD YOUTH', 'female', true), ('OH MY GIRL', 'female', true), ('Olivia Marsh', 'female', true),
+('PRIMROSE', 'female', true), ('PURPLE KISS', 'female', true), ('QWER', 'female', true), ('RESCENE', 'female', true), ('ROSÉ', 'female', true),
+('Red Velvet', 'female', true), ('Rolling Quartz', 'female', true), ('SAY MY NAME', 'female', true), ('SEULGI', 'female', true), ('SOORIN', 'female', true),
+('SPIA', 'female', true), ('STAYC', 'female', true), ('SUMMER CAKE', 'female', true), ('SUNMI', 'female', true), ('Solar', 'female', true),
+('TAEYEON', 'female', true), ('TWICE', 'female', true), ('UAU', 'female', true), ('UDTT', 'female', true), ('UNIS', 'female', true),
+('VIVIZ', 'female', true), ('VVS', 'female', true), ('VVUP', 'female', true), ('WENDY', 'female', true), ('WJSN', 'female', true),
+('WOOAH', 'female', true), ('XG', 'female', true), ('YEJI', 'female', true), ('YENA', 'female', true), ('YOU DAYEON', 'female', true),
+('YOUNG POSSE', 'female', true), ('YUJU', 'female', true), ('YUQI', 'female', true), ('Yves', 'female', true), ('ablume', 'female', true),
+('aespa', 'female', true), ('dodree', 'female', true), ('fromis_9', 'female', true), ('hanhee', 'female', true), ('i-dle', 'female', true),
+('ifeye', 'female', true), ('izna', 'female', true), ('rescence', 'female', true), ('tripleS', 'female', true),
+('&TEAM', 'male', true), ('104', 'male', true), ('82MAJOR', 'male', true), ('8TURN', 'male', true), ('AB6IX', 'male', true),
+('ALL(H)OURS', 'male', true), ('ALLDAY PROJECT', 'male', true), ('ALPHA DRIVE ONE', 'male', true), ('AMPERS&ONE', 'male', true), ('ATEEZ', 'male', true),
+('AxMxP', 'male', true), ('BAND LUCY', 'male', true), ('BOYNEXTDOOR', 'male', true), ('BamBam', 'male', true), ('CHEN', 'male', true),
+('CORTIS', 'male', true), ('ENHYPEN', 'male', true), ('Forestella', 'male', true), ('GOT7', 'male', true), ('HIGHLIGHT', 'male', true),
+('IDID', 'male', true), ('JOOHONEY', 'male', true), ('KARD', 'male', true), ('KAVE', 'male', true), ('KEY', 'male', true),
+('Kai', 'male', true), ('KickFlip', 'male', true), ('LA POEM', 'male', true), ('NCT DREAM', 'male', true), ('NEXZ', 'male', true),
+('NouerA', 'male', true), ('P1Harmony', 'male', true), ('RIIZE', 'male', true), ('Stray Kids', 'male', true), ('TAEMIN', 'male', true),
+('TAEYONG', 'male', true), ('TEN', 'male', true), ('THE BOYZ', 'male', true), ('TXT', 'male', true), ('WAKER', 'male', true),
+('WHIB', 'male', true), ('WayV', 'male', true), ('Xdinary Heroes', 'male', true), ('ZEROBASEONE', 'male', true), 
+('idntt', 'male', true), ('&TEAM', 'male', true), ('xikers', 'male', true)
 ON CONFLICT (name) DO NOTHING;

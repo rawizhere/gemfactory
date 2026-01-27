@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -41,6 +42,9 @@ func WithRetry(ctx context.Context, logger *zap.Logger, config RetryConfig, fn f
 
 		lastErr = err
 
+		// Detect 429 Too Many Requests
+		isRateLimited := strings.Contains(err.Error(), "429")
+
 		if attempt == config.MaxRetries {
 			break
 		}
@@ -51,19 +55,29 @@ func WithRetry(ctx context.Context, logger *zap.Logger, config RetryConfig, fn f
 			return permErr.Err
 		}
 
+		actualDelay := delay
+		if isRateLimited {
+			actualDelay = 5 * time.Second
+			logger.Warn("Rate limited (429), backing off...", zap.Int("attempt", attempt+1))
+		}
+
 		logger.Warn("Retry attempt failed",
 			zap.Int("attempt", attempt+1),
 			zap.Int("max_retries", config.MaxRetries),
-			zap.Duration("next_delay", delay),
+			zap.Duration("next_delay", actualDelay),
 			zap.Error(err))
 
 		select {
-		case <-time.After(delay):
+		case <-time.After(actualDelay):
 		case <-ctx.Done():
 			return ctx.Err()
 		}
 
-		delay = time.Duration(float64(delay) * config.BackoffMultiplier)
+		if isRateLimited {
+			delay = 10 * time.Second
+		} else {
+			delay = time.Duration(float64(delay) * config.BackoffMultiplier)
+		}
 		if delay > config.MaxDelay {
 			delay = config.MaxDelay
 		}

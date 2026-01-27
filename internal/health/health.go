@@ -115,18 +115,8 @@ func (s *Server) checkDatabase() error {
 		return fmt.Errorf("database connection is nil")
 	}
 
-	rows, err := s.db.Query("SELECT 1")
-	if err != nil {
-		return fmt.Errorf("database query failed: %w", err)
-	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			s.logger.Warn("Failed to close database rows", zap.Error(closeErr))
-		}
-	}()
-
-	if !rows.Next() {
-		return fmt.Errorf("no rows returned from health check query")
+	if err := s.db.Ping(); err != nil {
+		return fmt.Errorf("database ping failed: %w", err)
 	}
 
 	return nil
