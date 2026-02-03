@@ -1,4 +1,3 @@
-// Package app provides the command routing logic for Telegram updates.
 package app
 
 import (
@@ -8,13 +7,12 @@ import (
 	"gemfactory/internal/middleware"
 	"gemfactory/internal/service"
 	"gemfactory/internal/telegram"
-	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/mymmrac/telego"
 	"go.uber.org/zap"
 )
 
-// Router directs incoming Telegram updates to their appropriate command handlers.
+// Router directs incoming updates to handlers.
 type Router struct {
 	handlers   *handlers.Handlers
 	middleware *middleware.Middleware
@@ -23,7 +21,6 @@ type Router struct {
 	logger     *zap.Logger
 }
 
-// NewRouterWithBotAPI initializes a new Router with the specified services and BotAPI.
 func NewRouterWithBotAPI(services *service.Services, config *config.Config, logger *zap.Logger, botAPI telegram.BotAPI) *Router {
 	return &Router{
 		handlers:   handlers.RegisterRoutesWithBotAPI(services, config, logger, botAPI),
@@ -34,32 +31,33 @@ func NewRouterWithBotAPI(services *service.Services, config *config.Config, logg
 	}
 }
 
-// HandleUpdate processes a generic Telegram update through the middleware and handlers.
-func (r *Router) HandleUpdate(update tgbotapi.Update) {
-	// Create context for the update processing lifecycle
+// HandleUpdate processes a Telegram update.
+func (r *Router) HandleUpdate(update telego.Update) {
 	ctx := context.Background()
 
-	// Apply global middleware chain
-	r.middleware.ProcessWithMiddleware(update, func(update tgbotapi.Update) {
-		// Handle text messages
+	r.middleware.ProcessWithMiddleware(update, func(update telego.Update) {
 		if update.Message != nil {
 			r.handleMessage(ctx, update.Message)
 		}
-
-		// Handle callback queries
 		if update.CallbackQuery != nil {
 			r.handleCallbackQuery(ctx, update.CallbackQuery)
 		}
 	})
 }
 
-// handleMessage dispatches text-based commands to their respective user or admin handlers.
-func (r *Router) handleMessage(ctx context.Context, message *tgbotapi.Message) {
-	if !message.IsCommand() {
-		return
+// handleMessage handles text commands.
+func (r *Router) handleMessage(ctx context.Context, message *telego.Message) {
+	command := ""
+	for _, entity := range message.Entities {
+		if entity.Type == telego.EntityTypeBotCommand && entity.Offset == 0 {
+			command = message.Text[1:entity.Length]
+			break
+		}
 	}
 
-	command := strings.ToLower(message.Command())
+	if command == "" {
+		return
+	}
 
 	switch command {
 	// User commands
@@ -96,12 +94,10 @@ func (r *Router) handleMessage(ctx context.Context, message *tgbotapi.Message) {
 	}
 }
 
-// handleCallbackQuery processes interaction events from inline keyboards.
-func (r *Router) handleCallbackQuery(ctx context.Context, query *tgbotapi.CallbackQuery) {
+func (r *Router) handleCallbackQuery(ctx context.Context, query *telego.CallbackQuery) {
 	r.handlers.HandleCallbackQuery(ctx, query)
 }
 
-// RegisterBotCommands retrieves the collection of standard commands for bot menu registration.
-func (r *Router) RegisterBotCommands() []tgbotapi.BotCommand {
+func (r *Router) RegisterBotCommands() []telego.BotCommand {
 	return r.handlers.RegisterBotCommands()
 }

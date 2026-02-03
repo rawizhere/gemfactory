@@ -1,4 +1,3 @@
-// Package middleware manages request processing flows such as rate limiting and debouncing.
 package middleware
 
 import (
@@ -8,14 +7,14 @@ import (
 	"go.uber.org/zap"
 )
 
-// RateLimiterInterface defines the contract for request rate limiting.
+// RateLimiterInterface defines the methods for request rate limiting.
 type RateLimiterInterface interface {
 	Allow(userID int64) bool
 	AllowRequest(userID int64) bool
 	Cleanup()
 }
 
-// RateLimiter tracks user requests over a rolling time window.
+// RateLimiter tracks requests over a rolling time window.
 type RateLimiter struct {
 	requests map[int64][]time.Time
 	mu       sync.RWMutex

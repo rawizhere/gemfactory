@@ -7,7 +7,7 @@ import (
 	"gemfactory/internal/service"
 	"gemfactory/internal/telegram"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/mymmrac/telego"
 	"go.uber.org/zap"
 )
 
@@ -42,7 +42,7 @@ func New(services *service.Services, config *config.Config, keyboard keyboard.Ma
 }
 
 // HandleCallbackQuery delegates Telegram callback query interaction to the keyboard manager.
-func (h *Handlers) HandleCallbackQuery(ctx context.Context, query *tgbotapi.CallbackQuery) {
+func (h *Handlers) HandleCallbackQuery(ctx context.Context, query *telego.CallbackQuery) {
 	err := h.User.Keyboard.HandleCallbackQuery(ctx, query)
 	if err != nil {
 		h.User.Logger.Error("Failed to handle callback query", zap.Error(err), zap.String("data", query.Data))
@@ -50,8 +50,8 @@ func (h *Handlers) HandleCallbackQuery(ctx context.Context, query *tgbotapi.Call
 }
 
 // RegisterBotCommands returns a slice of standard Telegram bot commands for menu registration.
-func (h *Handlers) RegisterBotCommands() []tgbotapi.BotCommand {
-	return []tgbotapi.BotCommand{
+func (h *Handlers) RegisterBotCommands() []telego.BotCommand {
+	return []telego.BotCommand{
 		{Command: "start", Description: "Start the bot"},
 		{Command: "help", Description: "Show help"},
 		{Command: "month", Description: "Get releases for a month"},

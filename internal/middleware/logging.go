@@ -1,15 +1,15 @@
-// Package middleware provides Telegram update processing middleware.
 package middleware
 
 import (
 	"fmt"
+	"gemfactory/internal/telegram"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/mymmrac/telego"
 	"go.uber.org/zap"
 )
 
-// RequestContext holds metadata for tracking request execution.
+// RequestContext holds metadata for tracking requests.
 type RequestContext struct {
 	StartTime time.Time
 	RequestID string
@@ -18,12 +18,20 @@ type RequestContext struct {
 	Command   string
 }
 
-// LoggingMiddleware logs incoming commands and their execution duration.
-func LoggingMiddleware(logger *zap.Logger) func(update tgbotapi.Update, next func(tgbotapi.Update)) {
-	return func(update tgbotapi.Update, next func(tgbotapi.Update)) {
+// LoggingMiddleware logs commands and their duration.
+func LoggingMiddleware(logger *zap.Logger) func(update telego.Update, next func(telego.Update)) {
+	return func(update telego.Update, next func(telego.Update)) {
 		if update.Message == nil {
 			next(update)
 			return
+		}
+
+		command := ""
+		for _, entity := range update.Message.Entities {
+			if entity.Type == telego.EntityTypeBotCommand && entity.Offset == 0 {
+				command = update.Message.Text[1:entity.Length]
+				break
+			}
 		}
 
 		requestCtx := &RequestContext{
@@ -31,10 +39,10 @@ func LoggingMiddleware(logger *zap.Logger) func(update tgbotapi.Update, next fun
 			RequestID: fmt.Sprintf("%d-%d", update.UpdateID, time.Now().UnixNano()),
 			UserID:    update.Message.From.ID,
 			ChatID:    update.Message.Chat.ID,
-			Command:   update.Message.Command(),
+			Command:   command,
 		}
 
-		user := getUserIdentifier(update.Message.From)
+		user := telegram.GetUserIdentifier(update.Message.From)
 
 		logger.Info("Processing command",
 			zap.String("request_id", requestCtx.RequestID),
@@ -56,10 +64,18 @@ func LoggingMiddleware(logger *zap.Logger) func(update tgbotapi.Update, next fun
 }
 
 // LogRequestWithError is an error-aware logging middleware.
-func LogRequestWithError(logger *zap.Logger) func(update tgbotapi.Update, next func(tgbotapi.Update) error) error {
-	return func(update tgbotapi.Update, next func(tgbotapi.Update) error) error {
+func LogRequestWithError(logger *zap.Logger) func(update telego.Update, next func(telego.Update) error) error {
+	return func(update telego.Update, next func(telego.Update) error) error {
 		if update.Message == nil {
 			return next(update)
+		}
+
+		command := ""
+		for _, entity := range update.Message.Entities {
+			if entity.Type == telego.EntityTypeBotCommand && entity.Offset == 0 {
+				command = update.Message.Text[1:entity.Length]
+				break
+			}
 		}
 
 		requestCtx := &RequestContext{
@@ -67,10 +83,10 @@ func LogRequestWithError(logger *zap.Logger) func(update tgbotapi.Update, next f
 			RequestID: fmt.Sprintf("%d-%d", update.UpdateID, time.Now().UnixNano()),
 			UserID:    update.Message.From.ID,
 			ChatID:    update.Message.Chat.ID,
-			Command:   update.Message.Command(),
+			Command:   command,
 		}
 
-		user := getUserIdentifier(update.Message.From)
+		user := telegram.GetUserIdentifier(update.Message.From)
 
 		logger.Info("Processing command",
 			zap.String("request_id", requestCtx.RequestID),
@@ -80,7 +96,7 @@ func LogRequestWithError(logger *zap.Logger) func(update tgbotapi.Update, next f
 			zap.String("user", user),
 			zap.Int("update_id", update.UpdateID))
 
-		// Call the next handler.
+		// Execute next handler
 		err := next(update)
 
 		// Log command completion.
@@ -100,24 +116,4 @@ func LogRequestWithError(logger *zap.Logger) func(update tgbotapi.Update, next f
 
 		return err
 	}
-}
-
-// getUserIdentifier returns a human-readable user string (username or ID).
-func getUserIdentifier(user *tgbotapi.User) string {
-	if user == nil {
-		return "unknown"
-	}
-
-	if user.UserName != "" {
-		return "@" + user.UserName
-	}
-
-	if user.FirstName != "" {
-		if user.LastName != "" {
-			return user.FirstName + " " + user.LastName
-		}
-		return user.FirstName
-	}
-
-	return fmt.Sprintf("user_%d", user.ID)
 }

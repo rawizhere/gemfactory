@@ -1,17 +1,18 @@
 package handlers
 
 import (
+	"context"
 	"gemfactory/internal/config"
 	"gemfactory/internal/keyboard"
 	"gemfactory/internal/service"
 	"gemfactory/internal/telegram"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/mymmrac/telego"
 	"go.uber.org/zap"
 )
 
-// BaseHandler provides common dependencies and utility methods for all command handlers.
+// BaseHandler provides common dependencies for handlers.
 type BaseHandler struct {
 	Services *service.Services
 	Config   *config.Config
@@ -31,49 +32,46 @@ func NewBaseHandler(services *service.Services, config *config.Config, keyboard 
 	}
 }
 
-// isAdmin verifies if the given Telegram user has administrative privileges.
-func (h *BaseHandler) isAdmin(user *tgbotapi.User) bool {
-	if user == nil || user.UserName == "" {
+// IsAdmin checks if the user has admin privileges.
+func (h *BaseHandler) IsAdmin(user *telego.User) bool {
+	if user == nil || user.Username == "" {
 		return false
 	}
 
 	adminUser := strings.TrimPrefix(h.Config.AdminUsername, "@")
-	match := strings.EqualFold(user.UserName, adminUser)
+	match := strings.EqualFold(user.Username, adminUser)
 
 	if !match {
 		h.Logger.Warn("Admin access denied",
-			zap.String("user", user.UserName),
+			zap.String("user", user.Username),
 			zap.String("expected", adminUser))
 	}
 
 	return match
 }
 
-// sendMessage transmits a plain text message to the specified chat.
-func (h *BaseHandler) sendMessage(chatID int64, text string) {
-	if h.BotAPI != nil {
-		if err := h.BotAPI.SendMessage(chatID, text); err != nil {
-			h.Logger.Error("Failed to send message", zap.Int64("chat_id", chatID), zap.Error(err))
-		}
-	}
+// SendMessage sends a plain text message.
+func (h *BaseHandler) SendMessage(ctx context.Context, chatID int64, text string) error {
+	return h.BotAPI.SendMessage(ctx, chatID, text)
 }
 
-// sendMessageWithMarkup transmits a text message with an associated inline keyboard or markup.
-func (h *BaseHandler) sendMessageWithMarkup(chatID int64, text string, markup interface{}) {
-	if h.BotAPI != nil {
-		if err := h.BotAPI.SendMessageWithMarkup(chatID, text, markup); err != nil {
-			h.Logger.Error("Failed to send message with markup", zap.Int64("chat_id", chatID), zap.Error(err))
-		}
-	}
+// SendMessageWithMarkup sends a message with reply markup.
+func (h *BaseHandler) SendMessageWithMarkup(ctx context.Context, chatID int64, text string, markup any) error {
+	return h.BotAPI.SendMessageWithMarkup(ctx, chatID, text, markup)
 }
 
-// handleError logs an error and notifies the user with a standardized message.
-func (h *BaseHandler) handleError(chatID int64, err error, userMessage string) {
+// SendMessageWithKeyboard sends a message with the default navigation keyboard.
+func (h *BaseHandler) SendMessageWithKeyboard(ctx context.Context, chatID int64, text string) error {
+	return h.BotAPI.SendMessageWithMarkup(ctx, chatID, text, h.Keyboard.GetMainKeyboard())
+}
+
+// HandleError logs and notifies the user about an error.
+func (h *BaseHandler) HandleError(ctx context.Context, chatID int64, err error, userMessage string) {
 	h.Logger.Error(userMessage, zap.Error(err), zap.Int64("chat_id", chatID))
-	h.sendMessage(chatID, "❌ "+userMessage)
+	_ = h.BotAPI.SendMessage(ctx, chatID, "❌ "+userMessage)
 }
 
-// getMainKeyboard retrieves the primary navigation keyboard for the bot.
-func (h *BaseHandler) getMainKeyboard() tgbotapi.InlineKeyboardMarkup {
+// GetMainKeyboard retrieves the primary navigation markup from the keyboard manager.
+func (h *BaseHandler) GetMainKeyboard() *telego.InlineKeyboardMarkup {
 	return h.Keyboard.GetMainKeyboard()
 }

@@ -4,13 +4,13 @@ package keyboard
 import (
 	"context"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/mymmrac/telego"
 )
 
 // ManagerInterface defines the contract for keyboard interaction.
 type ManagerInterface interface {
-	GetMainKeyboard() tgbotapi.InlineKeyboardMarkup
-	GetAllMonthsKeyboard() tgbotapi.InlineKeyboardMarkup
-	HandleCallbackQuery(ctx context.Context, callback *tgbotapi.CallbackQuery) error
+	GetMainKeyboard() *telego.InlineKeyboardMarkup
+	GetAllMonthsKeyboard() *telego.InlineKeyboardMarkup
+	HandleCallbackQuery(ctx context.Context, callback *telego.CallbackQuery) error
 	Stop()
 }

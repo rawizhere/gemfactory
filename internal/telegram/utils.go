@@ -3,16 +3,16 @@ package telegram
 import (
 	"fmt"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/mymmrac/telego"
 )
 
-// GetUserIdentifier determines a human-readable name for a Telegram user.
-func GetUserIdentifier(user *tgbotapi.User) string {
+// GetUserIdentifier returns a human-readable name for a user.
+func GetUserIdentifier(user *telego.User) string {
 	if user == nil {
 		return "unknown"
 	}
-	if user.UserName != "" {
-		return user.UserName
+	if user.Username != "" {
+		return user.Username
 	}
 	if user.FirstName != "" {
 		if user.LastName != "" {

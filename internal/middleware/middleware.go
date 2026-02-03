@@ -1,11 +1,10 @@
-// Package middleware manages request processing flows such as rate limiting and debouncing.
 package middleware
 
 import (
 	"gemfactory/internal/config"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/mymmrac/telego"
 	"go.uber.org/zap"
 )
 
@@ -30,7 +29,7 @@ func New(config *config.Config, logger *zap.Logger) *Middleware {
 }
 
 // Process applies rate limits to the incoming update.
-func (m *Middleware) Process(update tgbotapi.Update) bool {
+func (m *Middleware) Process(update telego.Update) bool {
 	if update.Message != nil {
 		userID := update.Message.From.ID
 		if !m.rateLimiter.Allow(userID) {
@@ -43,16 +42,16 @@ func (m *Middleware) Process(update tgbotapi.Update) bool {
 }
 
 // ProcessWithMiddleware chains multiple middleware steps before executing the final handler.
-func (m *Middleware) ProcessWithMiddleware(update tgbotapi.Update, handler func(tgbotapi.Update)) {
-	middlewareChain := func(update tgbotapi.Update) {
+func (m *Middleware) ProcessWithMiddleware(update telego.Update, handler func(telego.Update)) {
+	middlewareChain := func(update telego.Update) {
 		// Recovery middleware
-		RecoveryMiddlewareWithUpdate(m.logger)(update, func(update tgbotapi.Update) {
+		RecoveryMiddlewareWithUpdate(m.logger)(update, func(update telego.Update) {
 			// Logging middleware
-			LoggingMiddleware(m.logger)(update, func(update tgbotapi.Update) {
+			LoggingMiddleware(m.logger)(update, func(update telego.Update) {
 				// Debounce middleware for messages
-				DebounceMiddleware(m.debouncer, m.logger)(update, func(update tgbotapi.Update) {
+				DebounceMiddleware(m.debouncer, m.logger)(update, func(update telego.Update) {
 					// Debounce middleware for callbacks
-					DebounceCallbackMiddleware(m.debouncer, m.logger)(update, func(update tgbotapi.Update) {
+					DebounceCallbackMiddleware(m.debouncer, m.logger)(update, func(update telego.Update) {
 						// Rate limiting
 						if m.Process(update) {
 							handler(update)
@@ -67,11 +66,11 @@ func (m *Middleware) ProcessWithMiddleware(update tgbotapi.Update, handler func(
 }
 
 // ProcessWithMiddlewareAndError: An error-aware version of ProcessWithMiddleware.
-func (m *Middleware) ProcessWithMiddlewareAndError(update tgbotapi.Update, handler func(tgbotapi.Update) error) error {
-	middlewareChain := func(update tgbotapi.Update) error {
-		return ErrorHandlerMiddleware(m.logger)(update, func(update tgbotapi.Update) error {
-			return LogRequestWithError(m.logger)(update, func(update tgbotapi.Update) error {
-				return DebounceMiddlewareWithError(m.debouncer, m.logger)(update, func(update tgbotapi.Update) error {
+func (m *Middleware) ProcessWithMiddlewareAndError(update telego.Update, handler func(telego.Update) error) error {
+	middlewareChain := func(update telego.Update) error {
+		return ErrorHandlerMiddleware(m.logger)(update, func(update telego.Update) error {
+			return LogRequestWithError(m.logger)(update, func(update telego.Update) error {
+				return DebounceMiddlewareWithError(m.debouncer, m.logger)(update, func(update telego.Update) error {
 					if !m.Process(update) {
 						return nil // Rate limit exceeded, skip handler.
 					}
@@ -85,12 +84,12 @@ func (m *Middleware) ProcessWithMiddlewareAndError(update tgbotapi.Update, handl
 }
 
 // GetAdminMiddleware: Returns middleware that restricts access to administrators.
-func (m *Middleware) GetAdminMiddleware() func(update tgbotapi.Update, next func(tgbotapi.Update)) {
+func (m *Middleware) GetAdminMiddleware() func(update telego.Update, next func(telego.Update)) {
 	return AdminOnlyMiddlewareWithConfig(m.config, m.logger)
 }
 
 // GetAdminMiddlewareWithError: An error-aware version of GetAdminMiddleware.
-func (m *Middleware) GetAdminMiddlewareWithError() func(update tgbotapi.Update, next func(tgbotapi.Update) error) error {
+func (m *Middleware) GetAdminMiddlewareWithError() func(update telego.Update, next func(telego.Update) error) error {
 	return AdminOnlyMiddlewareWithConfigAndError(m.config, m.logger)
 }
 

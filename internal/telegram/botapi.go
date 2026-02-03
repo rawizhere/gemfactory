@@ -2,111 +2,136 @@
 package telegram
 
 import (
+	"context"
 	"fmt"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/mymmrac/telego"
+	"github.com/mymmrac/telego/telegoutil"
 	"go.uber.org/zap"
 )
 
-// BotAPI defines the contract for essential Telegram messaging and management operations.
+// BotAPI defines the contract for Telegram messaging and management.
 type BotAPI interface {
-	SendMessage(chatID int64, text string) error
-	SendMessageWithMarkup(chatID int64, text string, markup any) error
-	SendMessageWithReply(chatID int64, text string, replyToMessageID int) error
-	SendMessageWithReplyAndMarkup(chatID int64, text string, replyToMessageID int, markup any) error
-	EditMessageReplyMarkup(chatID int64, messageID int, markup any) error
-	SetBotCommands(commands []tgbotapi.BotCommand) error
-	GetFile(fileID string) (tgbotapi.File, error)
+	SendMessage(ctx context.Context, chatID int64, text string) error
+	SendMessageWithMarkup(ctx context.Context, chatID int64, text string, markup any) error
+	SendMessageWithReply(ctx context.Context, chatID int64, text string, replyToMessageID int) error
+	SendMessageWithReplyAndMarkup(ctx context.Context, chatID int64, text string, replyToMessageID int, markup any) error
+	EditMessageReplyMarkup(ctx context.Context, chatID int64, messageID int, markup any) error
+	SetBotCommands(ctx context.Context, commands []telego.BotCommand) error
+	GetFile(ctx context.Context, fileID string) (*telego.File, error)
 }
 
-// TelegramBotAPI is a concrete implementation of BotAPI using the go-telegram-bot-api library.
+// TelegramBotAPI implements BotAPI using the telego library.
 type TelegramBotAPI struct {
-	api    *tgbotapi.BotAPI
+	bot    *telego.Bot
 	logger *zap.Logger
 }
 
 // NewTelegramBotAPI initializes a new TelegramBotAPI instance with logging.
-func NewTelegramBotAPI(api *tgbotapi.BotAPI, logger *zap.Logger) *TelegramBotAPI {
+func NewTelegramBotAPI(bot *telego.Bot, logger *zap.Logger) *TelegramBotAPI {
 	return &TelegramBotAPI{
-		api:    api,
+		bot:    bot,
 		logger: logger,
 	}
 }
 
-// GetAPI returns the internal Telegram Bot API client.
-func (t *TelegramBotAPI) GetAPI() *tgbotapi.BotAPI {
-	return t.api
+// GetBot returns the internal telego.Bot client.
+func (t *TelegramBotAPI) GetBot() *telego.Bot {
+	return t.bot
 }
 
-// SendMessage transmits a plain text message using HTML parse mode.
-func (t *TelegramBotAPI) SendMessage(chatID int64, text string) error {
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ParseMode = "HTML"
-	msg.DisableWebPagePreview = true
-	_, err := t.api.Send(msg)
+// SendMessage sends a plain text message.
+func (t *TelegramBotAPI) SendMessage(ctx context.Context, chatID int64, text string) error {
+	params := telegoutil.Message(telegoutil.ID(chatID), text).WithParseMode(telego.ModeHTML)
+	params.LinkPreviewOptions = &telego.LinkPreviewOptions{IsDisabled: true}
+	_, err := t.bot.SendMessage(ctx, params)
 	if err != nil {
 		t.logger.Error("Failed to send message", zap.Int64("chat_id", chatID), zap.Error(err))
 	}
 	return err
 }
 
-// SendMessageWithMarkup transmits a text message with an associated reply markup.
-func (t *TelegramBotAPI) SendMessageWithMarkup(chatID int64, text string, markup any) error {
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ReplyMarkup = markup
-	msg.ParseMode = "HTML"
-	msg.DisableWebPagePreview = true
-	_, err := t.api.Send(msg)
+// SendMessageWithMarkup sends a text message with reply markup.
+func (t *TelegramBotAPI) SendMessageWithMarkup(ctx context.Context, chatID int64, text string, markup any) error {
+	params := telegoutil.Message(telegoutil.ID(chatID), text).WithParseMode(telego.ModeHTML)
+	params.LinkPreviewOptions = &telego.LinkPreviewOptions{IsDisabled: true}
+
+	if markup != nil {
+		if m, ok := markup.(telego.ReplyMarkup); ok {
+			params.ReplyMarkup = m
+		} else {
+			return fmt.Errorf("markup must be of type telego.ReplyMarkup")
+		}
+	}
+
+	_, err := t.bot.SendMessage(ctx, params)
 	if err != nil {
 		t.logger.Error("Failed to send message with markup", zap.Int64("chat_id", chatID), zap.Error(err))
 	}
 	return err
 }
 
-// SendMessageWithReply transmits a text message in response to a specific message ID.
-func (t *TelegramBotAPI) SendMessageWithReply(chatID int64, text string, replyToMessageID int) error {
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ReplyToMessageID = replyToMessageID
-	msg.ParseMode = "HTML"
-	msg.DisableWebPagePreview = true
-	_, err := t.api.Send(msg)
+// SendMessageWithReply sends a text message replying to a specific message.
+func (t *TelegramBotAPI) SendMessageWithReply(ctx context.Context, chatID int64, text string, replyToMessageID int) error {
+	params := telegoutil.Message(telegoutil.ID(chatID), text).WithParseMode(telego.ModeHTML)
+	params.LinkPreviewOptions = &telego.LinkPreviewOptions{IsDisabled: true}
+	params.ReplyParameters = &telego.ReplyParameters{MessageID: replyToMessageID}
+
+	_, err := t.bot.SendMessage(ctx, params)
 	if err != nil {
 		t.logger.Error("Failed to send message with reply", zap.Int64("chat_id", chatID), zap.Int("reply_to_message_id", replyToMessageID), zap.Error(err))
 	}
 	return err
 }
 
-// SendMessageWithReplyAndMarkup transmits a reply message including custom markup.
-func (t *TelegramBotAPI) SendMessageWithReplyAndMarkup(chatID int64, text string, replyToMessageID int, markup any) error {
-	msg := tgbotapi.NewMessage(chatID, text)
-	msg.ReplyToMessageID = replyToMessageID
-	msg.ReplyMarkup = markup
-	msg.ParseMode = "HTML"
-	msg.DisableWebPagePreview = true
-	_, err := t.api.Send(msg)
+// SendMessageWithReplyAndMarkup sends a reply with custom markup.
+func (t *TelegramBotAPI) SendMessageWithReplyAndMarkup(ctx context.Context, chatID int64, text string, replyToMessageID int, markup any) error {
+	params := telegoutil.Message(telegoutil.ID(chatID), text).WithParseMode(telego.ModeHTML)
+	params.LinkPreviewOptions = &telego.LinkPreviewOptions{IsDisabled: true}
+	params.ReplyParameters = &telego.ReplyParameters{MessageID: replyToMessageID}
+
+	if markup != nil {
+		if m, ok := markup.(telego.ReplyMarkup); ok {
+			params.ReplyMarkup = m
+		} else {
+			return fmt.Errorf("markup must be of type telego.ReplyMarkup")
+		}
+	}
+
+	_, err := t.bot.SendMessage(ctx, params)
 	if err != nil {
 		t.logger.Error("Failed to send message with reply and markup", zap.Int64("chat_id", chatID), zap.Int("reply_to_message_id", replyToMessageID), zap.Error(err))
 	}
 	return err
 }
 
-// EditMessageReplyMarkup updates the inline keyboard of an existing message.
-func (t *TelegramBotAPI) EditMessageReplyMarkup(chatID int64, messageID int, markup any) error {
-	inlineMarkup, ok := markup.(tgbotapi.InlineKeyboardMarkup)
-	if !ok {
-		return fmt.Errorf("markup must be of type tgbotapi.InlineKeyboardMarkup")
+// EditMessageReplyMarkup updates an existing message's keyboard.
+func (t *TelegramBotAPI) EditMessageReplyMarkup(ctx context.Context, chatID int64, messageID int, markup any) error {
+	params := &telego.EditMessageReplyMarkupParams{
+		ChatID:    telegoutil.ID(chatID),
+		MessageID: messageID,
 	}
-	edit := tgbotapi.NewEditMessageReplyMarkup(chatID, messageID, inlineMarkup)
-	_, err := t.api.Send(edit)
+
+	if markup != nil {
+		if m, ok := markup.(*telego.InlineKeyboardMarkup); ok {
+			params.ReplyMarkup = m
+		} else if m, ok := markup.(telego.InlineKeyboardMarkup); ok {
+			params.ReplyMarkup = &m
+		} else {
+			return fmt.Errorf("markup must be of type telego.InlineKeyboardMarkup")
+		}
+	}
+
+	_, err := t.bot.EditMessageReplyMarkup(ctx, params)
 	if err != nil {
 		t.logger.Error("Failed to edit message reply markup", zap.Int64("chat_id", chatID), zap.Int("message_id", messageID), zap.Error(err))
 	}
 	return err
 }
 
-// SetBotCommands registers the bot's command list with the Telegram server.
-func (t *TelegramBotAPI) SetBotCommands(commands []tgbotapi.BotCommand) error {
-	_, err := t.api.Request(tgbotapi.NewSetMyCommands(commands...))
+// SetBotCommands registers bot commands with Telegram.
+func (t *TelegramBotAPI) SetBotCommands(ctx context.Context, commands []telego.BotCommand) error {
+	err := t.bot.SetMyCommands(ctx, &telego.SetMyCommandsParams{Commands: commands})
 	if err != nil {
 		t.logger.Error("Failed to set bot commands", zap.Error(err))
 	}
@@ -114,9 +139,8 @@ func (t *TelegramBotAPI) SetBotCommands(commands []tgbotapi.BotCommand) error {
 }
 
 // GetFile retrieves metadata for a specific file stored on Telegram's servers.
-func (t *TelegramBotAPI) GetFile(fileID string) (tgbotapi.File, error) {
-	file := tgbotapi.FileConfig{FileID: fileID}
-	return t.api.GetFile(file)
+func (t *TelegramBotAPI) GetFile(ctx context.Context, fileID string) (*telego.File, error) {
+	return t.bot.GetFile(ctx, &telego.GetFileParams{FileID: fileID})
 }
 
 var _ BotAPI = (*TelegramBotAPI)(nil)

@@ -1,17 +1,16 @@
-// Package middleware manages request processing flows such as rate limiting and debouncing.
 package middleware
 
 import (
 	"gemfactory/internal/config"
-	"gemfactory/internal/telegram"
+	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/mymmrac/telego"
 	"go.uber.org/zap"
 )
 
-// AdminOnlyMiddleware restricts access to users with administrative privileges.
-func AdminOnlyMiddleware(adminUsername string, logger *zap.Logger) func(update tgbotapi.Update, next func(tgbotapi.Update)) {
-	return func(update tgbotapi.Update, next func(tgbotapi.Update)) {
+// AdminOnlyMiddleware restricts access to administrators.
+func AdminOnlyMiddleware(adminUsername string, logger *zap.Logger) func(update telego.Update, next func(telego.Update)) {
+	return func(update telego.Update, next func(telego.Update)) {
 		if update.Message == nil {
 			next(update)
 			return
@@ -22,12 +21,12 @@ func AdminOnlyMiddleware(adminUsername string, logger *zap.Logger) func(update t
 			return
 		}
 
-		if update.Message.From.UserName != adminUsername {
-			user := telegram.GetUserIdentifier(update.Message.From)
+		cleanAdmin := strings.TrimPrefix(adminUsername, "@")
+		if !strings.EqualFold(update.Message.From.Username, cleanAdmin) {
 			logger.Warn("Unauthorized access attempt",
-				zap.String("command", update.Message.Command()),
-				zap.String("user", user),
-				zap.String("expected_admin", adminUsername))
+				zap.String("text", update.Message.Text),
+				zap.String("user", update.Message.From.Username),
+				zap.String("expected_admin", cleanAdmin))
 			return
 		}
 
@@ -36,8 +35,8 @@ func AdminOnlyMiddleware(adminUsername string, logger *zap.Logger) func(update t
 }
 
 // AdminOnlyMiddlewareWithError is an error-aware version of AdminOnlyMiddleware.
-func AdminOnlyMiddlewareWithError(adminUsername string, logger *zap.Logger) func(update tgbotapi.Update, next func(tgbotapi.Update) error) error {
-	return func(update tgbotapi.Update, next func(tgbotapi.Update) error) error {
+func AdminOnlyMiddlewareWithError(adminUsername string, logger *zap.Logger) func(update telego.Update, next func(telego.Update) error) error {
+	return func(update telego.Update, next func(telego.Update) error) error {
 		if update.Message == nil {
 			return next(update)
 		}
@@ -47,12 +46,12 @@ func AdminOnlyMiddlewareWithError(adminUsername string, logger *zap.Logger) func
 			return nil
 		}
 
-		if update.Message.From.UserName != adminUsername {
-			user := telegram.GetUserIdentifier(update.Message.From)
+		cleanAdmin := strings.TrimPrefix(adminUsername, "@")
+		if !strings.EqualFold(update.Message.From.Username, cleanAdmin) {
 			logger.Warn("Unauthorized access attempt",
-				zap.String("command", update.Message.Command()),
-				zap.String("user", user),
-				zap.String("expected_admin", adminUsername))
+				zap.String("text", update.Message.Text),
+				zap.String("user", update.Message.From.Username),
+				zap.String("expected_admin", cleanAdmin))
 			return nil
 		}
 
@@ -60,12 +59,12 @@ func AdminOnlyMiddlewareWithError(adminUsername string, logger *zap.Logger) func
 	}
 }
 
-// AdminOnlyMiddlewareWithConfig uses the administrative username from the application configuration.
-func AdminOnlyMiddlewareWithConfig(config *config.Config, logger *zap.Logger) func(update tgbotapi.Update, next func(tgbotapi.Update)) {
+// AdminOnlyMiddlewareWithConfig uses the admin username from config.
+func AdminOnlyMiddlewareWithConfig(config *config.Config, logger *zap.Logger) func(update telego.Update, next func(telego.Update)) {
 	return AdminOnlyMiddleware(config.AdminUsername, logger)
 }
 
 // AdminOnlyMiddlewareWithConfigAndError is an error-aware version of AdminOnlyMiddlewareWithConfig.
-func AdminOnlyMiddlewareWithConfigAndError(config *config.Config, logger *zap.Logger) func(update tgbotapi.Update, next func(tgbotapi.Update) error) error {
+func AdminOnlyMiddlewareWithConfigAndError(config *config.Config, logger *zap.Logger) func(update telego.Update, next func(telego.Update) error) error {
 	return AdminOnlyMiddlewareWithError(config.AdminUsername, logger)
 }

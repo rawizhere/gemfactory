@@ -5,27 +5,27 @@ import (
 	"fmt"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/mymmrac/telego"
 )
 
-// UserHandlers defines the logic for processing standard user-facing commands.
+// UserHandlers handles standard user-facing commands.
 type UserHandlers struct {
 	*BaseHandler
 }
 
-// NewUserHandlers initializes a new UserHandlers instance.
+// NewUserHandlers creates a new UserHandlers instance.
 func NewUserHandlers(base *BaseHandler) *UserHandlers {
 	return &UserHandlers{BaseHandler: base}
 }
 
-// Start processes the /start command, greeting the user and presenting the initial menu.
-func (h *UserHandlers) Start(ctx context.Context, message *tgbotapi.Message) {
+// Start processes the /start command.
+func (h *UserHandlers) Start(ctx context.Context, message *telego.Message) {
 	text := "Welcome! Please choose a month:"
-	h.sendMessageWithMarkup(message.Chat.ID, text, h.getMainKeyboard())
+	_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, text, h.GetMainKeyboard())
 }
 
-// Help processes the /help command, detailing all available bot features.
-func (h *UserHandlers) Help(ctx context.Context, message *tgbotapi.Message) {
+// Help processes the /help command.
+func (h *UserHandlers) Help(ctx context.Context, message *telego.Message) {
 	text := "Available commands:\n" +
 		"\n/start - Start the bot\n" +
 		"/help - Show this message\n" +
@@ -38,17 +38,18 @@ func (h *UserHandlers) Help(ctx context.Context, message *tgbotapi.Message) {
 		"/playlist - Playlist link\n" +
 		"\n" +
 		fmt.Sprintf("Admin: @%s", h.Config.AdminUsername)
-	h.sendMessageWithMarkup(message.Chat.ID, text, h.getMainKeyboard())
+	_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, text, h.GetMainKeyboard())
 }
 
-// Month processes requests for release lists for a specific month and optional year.
-func (h *UserHandlers) Month(ctx context.Context, message *tgbotapi.Message) {
-	args := strings.Fields(message.CommandArguments())
-	if len(args) == 0 {
-		h.sendMessageWithMarkup(message.Chat.ID, "Please choose a month:", h.getMainKeyboard())
+// Month handles release list requests for a specific period.
+func (h *UserHandlers) Month(ctx context.Context, message *telego.Message) {
+	parts := strings.Fields(message.Text)
+	if len(parts) < 2 {
+		_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, "Please choose a month:", h.GetMainKeyboard())
 		return
 	}
 
+	args := parts[1:]
 	month := strings.ToLower(args[0])
 	femaleOnly := false
 	maleOnly := false
@@ -74,41 +75,42 @@ func (h *UserHandlers) Month(ctx context.Context, message *tgbotapi.Message) {
 
 	response, err := h.Services.Release.GetReleasesForMonth(ctx, monthQuery, femaleOnly, maleOnly)
 	if err != nil {
-		h.handleError(message.Chat.ID, err, "Error retrieving releases")
+		h.HandleError(ctx, message.Chat.ID, err, "Error retrieving releases")
 		return
 	}
 
-	h.sendMessageWithMarkup(message.Chat.ID, response, h.getMainKeyboard())
+	_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, response, h.GetMainKeyboard())
 }
 
-// Artists processes the command to display a formatted list of all active artists.
-func (h *UserHandlers) Artists(ctx context.Context, message *tgbotapi.Message) {
+// Artists shows active artists.
+func (h *UserHandlers) Artists(ctx context.Context, message *telego.Message) {
 	response, err := h.Services.Artist.FormatList(ctx)
 	if err != nil {
-		h.handleError(message.Chat.ID, err, "Error retrieving artist list")
+		h.HandleError(ctx, message.Chat.ID, err, "Error retrieving artist list")
 		return
 	}
-	h.sendMessageWithMarkup(message.Chat.ID, response, h.getMainKeyboard())
+	_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, response, h.GetMainKeyboard())
 }
 
-// Search processes the command to find all releases associated with a specific artist name.
-func (h *UserHandlers) Search(ctx context.Context, message *tgbotapi.Message) {
-	artistName := message.CommandArguments()
-	if artistName == "" {
-		h.sendMessage(message.Chat.ID, "Usage: /search <artist_name>")
+// Search finds releases by artist.
+func (h *UserHandlers) Search(ctx context.Context, message *telego.Message) {
+	parts := strings.SplitN(message.Text, " ", 2)
+	if len(parts) < 2 {
+		_ = h.SendMessage(ctx, message.Chat.ID, "Usage: /search <artist_name>")
 		return
 	}
 
+	artistName := strings.TrimSpace(parts[1])
 	response, err := h.Services.Release.GetByArtist(ctx, artistName)
 	if err != nil {
-		h.handleError(message.Chat.ID, err, "Search error")
+		h.HandleError(ctx, message.Chat.ID, err, "Search error")
 		return
 	}
-	h.sendMessage(message.Chat.ID, response)
+	_ = h.SendMessage(ctx, message.Chat.ID, response)
 }
 
-// Metrics processes the command to display aggregate system and collection statistics.
-func (h *UserHandlers) Metrics(ctx context.Context, message *tgbotapi.Message) {
+// Metrics displays system and collection statistics.
+func (h *UserHandlers) Metrics(ctx context.Context, message *telego.Message) {
 	fCount, mCount, tCount, _ := h.Services.Artist.GetCounts(ctx)
 	rCount, _ := h.Services.Release.GetTotalReleaseCount(ctx)
 
@@ -119,5 +121,5 @@ func (h *UserHandlers) Metrics(ctx context.Context, message *tgbotapi.Message) {
 		"🎵 Total Releases: %d",
 		tCount, fCount, mCount, rCount)
 
-	h.sendMessage(message.Chat.ID, text)
+	_ = h.SendMessage(ctx, message.Chat.ID, text)
 }
