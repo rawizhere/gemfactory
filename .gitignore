@@ -25,6 +25,7 @@ tmp/
 
 # Build artifacts
 gemfactory
+bot
 tree.md
 bin/
 dist/
@@ -37,8 +38,14 @@ Thumbs.db
 coverage.out
 coverage.html
 
+# Project-specific ignores
+#.agent/
+#docs/
+.history/
+*.test
+
 # Ignore JSON files
 *.json
 
 # Data
-/data/
+/data/docs/
