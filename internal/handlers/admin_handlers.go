@@ -10,17 +10,17 @@ import (
 	"github.com/mymmrac/telego"
 )
 
-// AdminHandlers handles administrator-level commands.
+// AdminHandlers processes privileged administrative commands.
 type AdminHandlers struct {
 	*BaseHandler
 }
 
-// NewAdminHandlers initializes a new AdminHandlers instance.
+// NewAdminHandlers creates a new AdminHandlers instance.
 func NewAdminHandlers(base *BaseHandler) *AdminHandlers {
 	return &AdminHandlers{BaseHandler: base}
 }
 
-// Admin shows available administrative commands.
+// Admin displays the list of available admin operations.
 func (h *AdminHandlers) Admin(ctx context.Context, message *telego.Message) {
 	if !h.IsAdmin(message.From) {
 		_ = h.SendMessage(ctx, message.Chat.ID, "You don't have admin permissions")
@@ -32,13 +32,12 @@ func (h *AdminHandlers) Admin(ctx context.Context, message *telego.Message) {
 		"/remove_artist [names] - Deactivate artists\n" +
 		"/export - Export artist list\n" +
 		"/config [key] [value] - Configuration\n" +
-		"/parse [month] [year] - Run parser\n" +
-		"/reload_playlist - Reload playlist"
+		"/parse [month] [year] - Run parser"
 
 	_ = h.SendMessage(ctx, message.Chat.ID, text)
 }
 
-// AddArtist registers new artists.
+// AddArtist parses and registers new artists with their specified gender.
 func (h *AdminHandlers) AddArtist(ctx context.Context, message *telego.Message) {
 	if !h.IsAdmin(message.From) {
 		return
@@ -70,7 +69,7 @@ func (h *AdminHandlers) AddArtist(ctx context.Context, message *telego.Message) 
 	_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("✅ Added artists: %d", count))
 }
 
-// RemoveArtist deactivates artists.
+// RemoveArtist deactivates the specified artists.
 func (h *AdminHandlers) RemoveArtist(ctx context.Context, message *telego.Message) {
 	if !h.IsAdmin(message.From) {
 		return
@@ -94,7 +93,38 @@ func (h *AdminHandlers) RemoveArtist(ctx context.Context, message *telego.Messag
 	_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("✅ Deactivated artists: %d", count))
 }
 
-// Parse triggers manual release sync.
+// Config gets or sets application configuration values in the database.
+func (h *AdminHandlers) Config(ctx context.Context, message *telego.Message) {
+	if !h.IsAdmin(message.From) {
+		return
+	}
+
+	parts := strings.Fields(message.Text)
+	if len(parts) == 1 {
+		res, err := h.Services.Config.GetAll(ctx)
+		if err != nil {
+			h.HandleError(ctx, message.Chat.ID, err, "Failed to get config")
+			return
+		}
+		_ = h.SendMessage(ctx, message.Chat.ID, res)
+		return
+	}
+
+	if len(parts) >= 3 {
+		key := strings.ToUpper(parts[1])
+		val := strings.Join(parts[2:], " ")
+		if err := h.Services.Config.Update(ctx, key, val); err != nil {
+			h.HandleError(ctx, message.Chat.ID, err, "Failed to update config")
+			return
+		}
+		_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("✅ Config updated: %s = %s", key, val))
+		return
+	}
+
+	_ = h.SendMessage(ctx, message.Chat.ID, "Usage: /config OR /config <KEY> <VALUE>")
+}
+
+// Parse triggers an asynchronous release crawl for the given month and year.
 func (h *AdminHandlers) Parse(ctx context.Context, message *telego.Message) {
 	if !h.IsAdmin(message.From) {
 		return
@@ -116,7 +146,7 @@ func (h *AdminHandlers) Parse(ctx context.Context, message *telego.Message) {
 	_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("🔄 Running parser for %s %d...", month, year))
 
 	go func() {
-		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		bgCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
 
 		monthQuery := fmt.Sprintf("%s-%d", month, year)
@@ -129,7 +159,7 @@ func (h *AdminHandlers) Parse(ctx context.Context, message *telego.Message) {
 	}()
 }
 
-// Export sends the list of registered artists.
+// Export returns a comma-separated list of all tracked artist names.
 func (h *AdminHandlers) Export(ctx context.Context, message *telego.Message) {
 	if !h.IsAdmin(message.From) {
 		return
@@ -144,7 +174,6 @@ func (h *AdminHandlers) Export(ctx context.Context, message *telego.Message) {
 	_ = h.SendMessage(ctx, message.Chat.ID, response)
 }
 
-// parseArtistList converts a comma-separated string into a slice of names.
 func (h *AdminHandlers) parseArtistList(input string) []string {
 	parts := strings.Split(input, ",")
 	var result []string

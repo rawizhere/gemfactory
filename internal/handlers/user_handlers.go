@@ -8,7 +8,7 @@ import (
 	"github.com/mymmrac/telego"
 )
 
-// UserHandlers handles standard user-facing commands.
+// UserHandlers processes public user commands and queries.
 type UserHandlers struct {
 	*BaseHandler
 }
@@ -18,13 +18,13 @@ func NewUserHandlers(base *BaseHandler) *UserHandlers {
 	return &UserHandlers{BaseHandler: base}
 }
 
-// Start processes the /start command.
+// Start displays the welcome message and month selection keyboard.
 func (h *UserHandlers) Start(ctx context.Context, message *telego.Message) {
 	text := "Welcome! Please choose a month:"
 	_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, text, h.GetMainKeyboard())
 }
 
-// Help processes the /help command.
+// Help provides usage instructions and available bot commands.
 func (h *UserHandlers) Help(ctx context.Context, message *telego.Message) {
 	text := "Available commands:\n" +
 		"\n/start - Start the bot\n" +
@@ -34,14 +34,12 @@ func (h *UserHandlers) Help(ctx context.Context, message *telego.Message) {
 		"/search [artist] - Search by artist\n" +
 		"/artists - Artist lists\n" +
 		"/metrics - System metrics\n" +
-		"/homework - Daily homework\n" +
-		"/playlist - Playlist link\n" +
 		"\n" +
 		fmt.Sprintf("Admin: @%s", h.Config.AdminUsername)
 	_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, text, h.GetMainKeyboard())
 }
 
-// Month handles release list requests for a specific period.
+// Month retrieves and lists releases for a specific month and year, optionally filtered by gender.
 func (h *UserHandlers) Month(ctx context.Context, message *telego.Message) {
 	parts := strings.Fields(message.Text)
 	if len(parts) < 2 {
@@ -82,7 +80,7 @@ func (h *UserHandlers) Month(ctx context.Context, message *telego.Message) {
 	_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, response, h.GetMainKeyboard())
 }
 
-// Artists shows active artists.
+// Artists returns formatted lists of all tracked male and female artists.
 func (h *UserHandlers) Artists(ctx context.Context, message *telego.Message) {
 	response, err := h.Services.Artist.FormatList(ctx)
 	if err != nil {
@@ -92,7 +90,7 @@ func (h *UserHandlers) Artists(ctx context.Context, message *telego.Message) {
 	_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, response, h.GetMainKeyboard())
 }
 
-// Search finds releases by artist.
+// Search queries releases matching the given artist name.
 func (h *UserHandlers) Search(ctx context.Context, message *telego.Message) {
 	parts := strings.SplitN(message.Text, " ", 2)
 	if len(parts) < 2 {
@@ -109,7 +107,7 @@ func (h *UserHandlers) Search(ctx context.Context, message *telego.Message) {
 	_ = h.SendMessage(ctx, message.Chat.ID, response)
 }
 
-// Metrics displays system and collection statistics.
+// Metrics reports database totals for artists and releases.
 func (h *UserHandlers) Metrics(ctx context.Context, message *telego.Message) {
 	fCount, mCount, tCount, _ := h.Services.Artist.GetCounts(ctx)
 	rCount, _ := h.Services.Release.GetTotalReleaseCount(ctx)

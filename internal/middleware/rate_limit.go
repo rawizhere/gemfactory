@@ -1,20 +1,14 @@
 package middleware
 
 import (
+	"slices"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 )
 
-// RateLimiterInterface defines the methods for request rate limiting.
-type RateLimiterInterface interface {
-	Allow(userID int64) bool
-	AllowRequest(userID int64) bool
-	Cleanup()
-}
-
-// RateLimiter tracks requests over a rolling time window.
+// RateLimiter enforces sliding-window request limits per user.
 type RateLimiter struct {
 	requests map[int64][]time.Time
 	mu       sync.RWMutex
@@ -23,8 +17,7 @@ type RateLimiter struct {
 	logger   *zap.Logger
 }
 
-var _ RateLimiterInterface = (*RateLimiter)(nil)
-
+// NewRateLimiter creates a new RateLimiter instance.
 func NewRateLimiter(limit int, window time.Duration, logger *zap.Logger) *RateLimiter {
 	return &RateLimiter{
 		requests: make(map[int64][]time.Time),
@@ -34,15 +27,8 @@ func NewRateLimiter(limit int, window time.Duration, logger *zap.Logger) *RateLi
 	}
 }
 
-func (rl *RateLimiter) AllowRequest(userID int64) bool {
-	return rl.allowRequest(userID)
-}
-
+// Allow determines if the user has remaining quota in the current window.
 func (rl *RateLimiter) Allow(userID int64) bool {
-	return rl.allowRequest(userID)
-}
-
-func (rl *RateLimiter) allowRequest(userID int64) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
@@ -55,28 +41,25 @@ func (rl *RateLimiter) allowRequest(userID int64) bool {
 		return true
 	}
 
-	var validRequests []time.Time
-	for _, reqTime := range requests {
-		if reqTime.After(windowStart) {
-			validRequests = append(validRequests, reqTime)
-		}
-	}
+	requests = slices.DeleteFunc(requests, func(reqTime time.Time) bool {
+		return !reqTime.After(windowStart)
+	})
 
-	if len(validRequests) >= rl.limit {
+	if len(requests) >= rl.limit {
 		rl.logger.Warn("Rate limit exceeded",
 			zap.Int64("user_id", userID),
-			zap.Int("requests", len(validRequests)),
+			zap.Int("requests", len(requests)),
 			zap.Int("limit", rl.limit))
 		return false
 	}
 
-	validRequests = append(validRequests, now)
-	rl.requests[userID] = validRequests
+	requests = append(requests, now)
+	rl.requests[userID] = requests
 
 	return true
 }
 
-// Cleanup removes expired records.
+// Cleanup removes expired request records from the tracking map.
 func (rl *RateLimiter) Cleanup() {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -85,12 +68,9 @@ func (rl *RateLimiter) Cleanup() {
 	windowStart := now.Add(-rl.window)
 
 	for userID, requests := range rl.requests {
-		var validRequests []time.Time
-		for _, reqTime := range requests {
-			if reqTime.After(windowStart) {
-				validRequests = append(validRequests, reqTime)
-			}
-		}
+		validRequests := slices.DeleteFunc(requests, func(reqTime time.Time) bool {
+			return !reqTime.After(windowStart)
+		})
 
 		if len(validRequests) == 0 {
 			delete(rl.requests, userID)

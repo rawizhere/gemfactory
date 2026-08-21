@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: gemfactory
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: gemfactory123
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gemfactory123}
     ports:
       - "5432:5432"
     volumes:
@@ -23,27 +23,25 @@ services:
 
   # GemFactory Application
   app:
-    image: rawizhere/gemfactory:latest
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
     container_name: gemfactory
+    env_file:
+      - ../.env
     environment:
       # Database connection
-      DB_DSN: postgres://postgres:gemfactory123@postgres:5432/gemfactory?sslmode=disable
+      DB_DSN: postgres://postgres:${POSTGRES_PASSWORD:-gemfactory123}@postgres:5432/gemfactory?sslmode=disable
       # Telegram Bot
-      BOT_TOKEN: YOUR_TELEGRAM_BOT_TOKEN_HERE
-      ADMIN_USERNAME: YOUR_TELEGRAM_USERNAME_HERE
-      # Spotify
-      SPOTIFY_CLIENT_ID: YOUR_SPOTIFY_CLIENT_ID_HERE
-      SPOTIFY_CLIENT_SECRET: YOUR_SPOTIFY_CLIENT_SECRET_HERE
-      PLAYLIST_URL: https://open.spotify.com/playlist/YOUR_PLAYLIST_ID_HERE
+      BOT_TOKEN: ${BOT_TOKEN}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
 
       # Application settings
       HEALTH_PORT: 8080
-      LOG_LEVEL: info
-      SCRAPER_REQUEST_DELAY: 2s
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SCRAPER_REQUEST_DELAY: ${SCRAPER_REQUEST_DELAY:-2s}
     ports:
       - "8080:8080"
-    # volumes:
-    # - ./logs:/app/logs:rw  # Disabled - logging to console only
     restart: unless-stopped
     depends_on:
       postgres:
@@ -52,8 +50,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 512M
+          cpus: "2.0"
+          memory: 2048M
         reservations:
           cpus: "0.5"
           memory: 256M
@@ -68,7 +66,6 @@ services:
 
 volumes:
   postgres_data:
-
 
 networks:
   gemfactory:

@@ -6,37 +6,38 @@ import (
 	"fmt"
 	"gemfactory/internal/config"
 	"gemfactory/internal/health"
+	"gemfactory/internal/keyboard"
 	"gemfactory/internal/middleware"
 	"gemfactory/internal/service"
 	"gemfactory/internal/storage"
 	"gemfactory/internal/telegram"
 	"gemfactory/internal/worker"
-	"gemfactory/pkg/logger"
+	"os"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 )
 
-// Bot maintains the state and orchestration for the bot's core systems.
+// Bot coordinates the lifecycle of all services, workers, and the Telegram client.
 type Bot struct {
-	config        *config.Config
-	logger        *zap.Logger
-	db            *storage.Postgres
-	telegram      *telegram.Client
-	health        *health.Server
-	services      *service.Services
-	middleware    *middleware.Middleware
-	workerManager *worker.Manager
-	stopChan      chan struct{}
-	wg            sync.WaitGroup
-	ctx           context.Context
-	cancel        context.CancelFunc
-	loggerWrapper *logger.Logger
+	config         *config.Config
+	logger         *zap.Logger
+	db             *storage.Postgres
+	telegram       *telegram.Client
+	health         *health.Server
+	services       *service.Services
+	middleware     *middleware.Middleware
+	keyboard       *keyboard.Manager
+	router         *Router
+	releaseChecker *worker.ReleaseChecker
+	wg             sync.WaitGroup
+	ctx            context.Context
+	cancel         context.CancelFunc
 }
 
-// NewBot initializes a new Bot instance with basic configuration.
-func NewBot(cfg *config.Config, logger *zap.Logger) (*Bot, error) {
+// NewBot initializes all subsystems and returns a ready-to-run Bot instance.
+func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config cannot be nil")
 	}
@@ -44,31 +45,53 @@ func NewBot(cfg *config.Config, logger *zap.Logger) (*Bot, error) {
 		return nil, fmt.Errorf("logger cannot be nil")
 	}
 
-	// Create context for lifecycle management
-	ctx, cancel := context.WithCancel(context.Background())
-
-	bot := &Bot{
-		config:   cfg,
-		logger:   logger,
-		stopChan: make(chan struct{}),
-		ctx:      ctx,
-		cancel:   cancel,
+	if err := os.MkdirAll(cfg.AppDataDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create app data directory: %w", err)
 	}
 
-	logger.Info("Bot structure created successfully")
-	return bot, nil
-}
-
-// NewBotWithFactory creates a new Bot instance using a component factory.
-func NewBotWithFactory(ctx context.Context, cfg *config.Config, l *logger.Logger) (*Bot, error) {
-	factory, err := NewComponentFactory(ctx, cfg, l)
+	db, err := storage.NewPostgres(ctx, cfg.DatabaseURL, logger)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create component factory: %w", err)
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
-	return factory.CreateBot(ctx)
+
+	services := service.NewServices(db, cfg, logger)
+	tgClient, err := telegram.NewClient(cfg.BotToken, logger)
+	if err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("failed to create telegram client: %w", err)
+	}
+
+	keyboardManager := keyboard.NewManager(services.Release, cfg, logger)
+	keyboardManager.SetTelegramClient(tgClient)
+
+	router := NewRouter(services, cfg, keyboardManager, logger, tgClient)
+
+	var healthServer *health.Server
+	if cfg.HealthCheckEnabled {
+		healthServer = health.NewServer(cfg.HealthPort, logger, db)
+	}
+
+	releaseChecker := worker.NewReleaseChecker(services.Release, logger, cfg.ReleaseCheckInterval)
+
+	botCtx, botCancel := context.WithCancel(ctx)
+
+	return &Bot{
+		config:         cfg,
+		logger:         logger,
+		db:             db,
+		telegram:       tgClient,
+		health:         healthServer,
+		services:       services,
+		middleware:     middleware.New(cfg, logger),
+		keyboard:       keyboardManager,
+		router:         router,
+		releaseChecker: releaseChecker,
+		ctx:            botCtx,
+		cancel:         botCancel,
+	}, nil
 }
 
-// Start initiates all background services and the main update processing loop.
+// Start launches the health server, periodic cleanup, background release checker, and long-polling.
 func (b *Bot) Start(ctx context.Context) error {
 	b.logger.Info("Starting bot")
 
@@ -76,200 +99,72 @@ func (b *Bot) Start(ctx context.Context) error {
 		b.wg.Add(1)
 		go func() {
 			defer b.wg.Done()
+			if err := b.health.Start(); err != nil && err.Error() != "http: Server closed" {
+				b.logger.Error("Health check server failed", zap.Error(err))
+			}
+		}()
+	}
+
+	b.wg.Add(1)
+	go func() {
+		defer b.wg.Done()
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		for {
 			select {
+			case <-ticker.C:
+				b.middleware.Cleanup()
 			case <-b.ctx.Done():
-				b.logger.Info("Health check server cancelled by context")
 				return
-			default:
-				if err := b.health.Start(); err != nil {
-					if err.Error() == "http: Server closed" {
-						b.logger.Info("Health check server stopped normally")
-					} else {
-						b.logger.Error("Health check server failed", zap.Error(err))
-					}
-				}
 			}
-		}()
-	}
+		}
+	}()
 
-	// Start middleware cleanup with context
-	if b.middleware != nil {
-		b.wg.Add(1)
-		go func() {
-			defer b.wg.Done()
-			ticker := time.NewTicker(5 * time.Minute) // Cleanup every 5 minutes
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-ticker.C:
-					b.middleware.Cleanup()
-				case <-b.ctx.Done():
-					b.logger.Info("Middleware cleanup stopped by context")
-					return
-				case <-b.stopChan:
-					b.logger.Info("Middleware cleanup stopped by stop signal")
-					return
-				}
-			}
-		}()
-	}
+	b.wg.Add(1)
+	go func() {
+		defer b.wg.Done()
+		b.releaseChecker.Start(b.ctx)
+	}()
 
 	b.logger.Info("Bot started successfully")
 
-	// Load playlist on startup
-	if b.services.Playlist != nil {
-		b.wg.Add(1)
-		go func() {
-			defer b.wg.Done()
-			b.logger.Info("Loading playlist on startup...")
-			// Update playlist
-			if err := b.services.Playlist.Reload(ctx); err != nil {
-				b.logger.Error("Failed to load playlist on startup", zap.Error(err))
-			} else {
-				b.logger.Info("Playlist loaded successfully on startup")
-			}
-		}()
-	} else {
-		b.logger.Warn("Playlist service not available, skipping initial playlist load")
-	}
-
-	// Start configuration watcher
-	if b.services.ConfigWatcher != nil {
-		b.wg.Add(1)
-		go func() {
-			defer b.wg.Done()
-			b.services.ConfigWatcher.Start(b.ctx)
-		}()
-		b.logger.Info("Config watcher started successfully")
-	}
-
-	// Start background workers
-	if b.workerManager != nil {
-		b.workerManager.Start(b.ctx)
-	}
-
-	// Main update processing loop
-	maxRestartAttempts := 10
-	restartAttempts := 0
-	restartDelay := 10 * time.Second
-
-	for {
-		select {
-		case <-b.ctx.Done():
-			b.logger.Info("Bot main loop cancelled by context")
-			return b.ctx.Err()
-		case <-b.stopChan:
-			b.logger.Info("Bot main loop stopped by stop signal")
-			return nil
-		default:
-			if err := b.runUpdateLoop(ctx); err != nil {
-				if err.Error() == "context canceled" || err == context.Canceled {
-					b.logger.Info("Update loop stopped due to context cancellation")
-					return err
-				}
-
-				restartAttempts++
-				b.logger.Error("Update loop error",
-					zap.Error(err),
-					zap.Int("restart_attempt", restartAttempts),
-					zap.Int("max_attempts", maxRestartAttempts))
-
-				if restartAttempts > maxRestartAttempts {
-					b.logger.Fatal("Max restart attempts reached, bot is shutting down")
-					return fmt.Errorf("max restart attempts reached: %w", err)
-				}
-
-				delay := time.Duration(restartAttempts) * restartDelay
-				if delay > 5*time.Minute {
-					delay = 5 * time.Minute
-				}
-
-				b.logger.Info("Waiting before restart", zap.Duration("delay", delay))
-				select {
-				case <-b.ctx.Done():
-					return b.ctx.Err()
-				case <-time.After(delay):
-					continue
-				}
-			} else {
-				restartAttempts = 0
-			}
-		}
-	}
+	return b.telegram.Start(ctx, b.router)
 }
 
-// Stop performs a graceful shutdown of all bot services and connections.
+// Stop gracefully shuts down background workers, servers, and database connections.
 func (b *Bot) Stop() error {
 	b.logger.Info("Stopping bot gracefully")
 
-	// Stop configuration watcher
-	if b.services.ConfigWatcher != nil {
-		b.logger.Info("Stopping config watcher")
-		b.services.ConfigWatcher.Stop()
-	}
-
-	// Cancel context to stop all goroutines
 	if b.cancel != nil {
-		b.logger.Debug("Cancelling bot context")
 		b.cancel()
 	}
 
-	// Send stop signal (for backward compatibility)
-	select {
-	case <-b.stopChan:
-		b.logger.Debug("Stop channel already closed")
-	default:
-		b.logger.Debug("Closing stop channel")
-		close(b.stopChan)
+	if b.keyboard != nil {
+		b.keyboard.Stop()
 	}
 
-	// Create context with timeout for graceful shutdown
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
-
-	b.logger.Debug("Graceful shutdown timeout set", zap.Duration("timeout", 30*time.Second))
-
-	// Stop health check server with context
 	if b.health != nil {
-		b.logger.Debug("Stopping health check server")
-		if err := b.health.Stop(); err != nil {
-			b.logger.Error("Failed to stop health check server", zap.Error(err))
-		} else {
-			b.logger.Debug("Health check server stopped successfully")
-		}
+		_ = b.health.Stop()
 	}
 
-	// Wait for all goroutines to complete with timeout
-	done := make(chan struct{})
+	stopped := make(chan struct{})
 	go func() {
-		defer close(done)
-		b.logger.Debug("Waiting for all goroutines to complete")
 		b.wg.Wait()
+		close(stopped)
 	}()
 
 	select {
-	case <-done:
-		b.logger.Info("All goroutines stopped successfully")
-	case <-shutdownCtx.Done():
-		b.logger.Warn("Graceful shutdown timeout exceeded, forcing stop")
+	case <-stopped:
+		b.logger.Info("All background workers stopped cleanly")
+	case <-time.After(15 * time.Second):
+		b.logger.Warn("Shutdown timed out waiting for background workers")
 	}
 
-	// Close database connection
-	if err := b.db.Close(); err != nil {
-		b.logger.Error("Failed to close database connection", zap.Error(err))
+	if b.db != nil {
+		_ = b.db.Close()
 	}
 
 	b.logger.Info("Bot stopped successfully")
 	return nil
-}
-
-// runUpdateLoop initializes the router and begins fetching updates from Telegram.
-func (b *Bot) runUpdateLoop(ctx context.Context) error {
-	b.logger.Info("Starting update loop")
-
-	// Create router
-	router := NewRouterWithBotAPI(b.services, b.config, b.logger, b.telegram.GetBotAPI())
-
-	return b.telegram.Start(ctx, router)
 }

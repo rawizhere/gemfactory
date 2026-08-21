@@ -2,7 +2,7 @@ package service
 
 import (
 	"fmt"
-	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -32,7 +32,6 @@ func ParseReleaseDate(dateStr string) (time.Time, error) {
 	return parseDate(dateStr)
 }
 
-// parseDate is an internal helper that handles the final mapping of cleaned date strings.
 func parseDate(dateStr string) (time.Time, error) {
 	// Handle dot separators (DD.MM.YY).
 	if strings.Contains(dateStr, ".") && len(strings.Split(dateStr, ".")) == 3 {
@@ -60,18 +59,12 @@ func parseDate(dateStr string) (time.Time, error) {
 	}
 
 	dateStrLower := strings.ToLower(dateStr)
-	validMonth := false
-	for _, m := range months {
-		if strings.Contains(dateStrLower, m) {
-			validMonth = true
-			break
-		}
-	}
-	if !validMonth {
+	if !slices.ContainsFunc(months, func(m string) bool {
+		return strings.Contains(dateStrLower, m)
+	}) {
 		return time.Time{}, fmt.Errorf("invalid date string: %s", dateStr)
 	}
 
-	// Handle "Month Day Year" formats.
 	parts := strings.Fields(strings.ReplaceAll(dateStr, ",", ""))
 	if len(parts) < 2 {
 		return time.Time{}, fmt.Errorf("invalid date format: %s", dateStr)
@@ -81,7 +74,6 @@ func parseDate(dateStr string) (time.Time, error) {
 		return time.Parse("January 2 2006", strings.Join(parts[:3], " "))
 	}
 
-	// Handle "Month Day" format, assuming current year.
 	return time.Parse("January 2 2006", strings.Join(parts[:2], " ")+" "+CurrentYear())
 }
 
@@ -112,8 +104,7 @@ func ParseReleaseTime(timeStr string) (time.Time, error) {
 func CleanReleaseTitle(title string) string {
 	title = strings.TrimSpace(title)
 	title = strings.Trim(title, "{}")
-	title = regexp.MustCompile(`\s+`).ReplaceAllString(title, " ")
-	return title
+	return strings.Join(strings.Fields(title), " ")
 }
 
 // CleanLink filters and normalizes links, removing invalid or unwanted YouTube URLs.
@@ -121,7 +112,11 @@ func CleanLink(link string) string {
 	if link == "" {
 		return ""
 	}
-	if strings.Contains(link, "youtube.com/@") || strings.Contains(link, "youtube.com/channel") {
+	low := strings.ToLower(link)
+	if strings.Contains(low, "youtube.com/@") ||
+		strings.Contains(low, "youtube.com/channel/") ||
+		strings.Contains(low, "youtube.com/user/") ||
+		strings.Contains(low, "youtube.com/c/") {
 		return ""
 	}
 	return link

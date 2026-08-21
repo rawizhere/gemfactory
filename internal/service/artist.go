@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"gemfactory/internal/model"
 	"gemfactory/internal/storage/repository"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/uptrace/bun"
@@ -35,7 +35,7 @@ func (s *ArtistService) Add(ctx context.Context, artists []string, isFemale bool
 	var models []model.Artist
 	for _, artistName := range artists {
 		models = append(models, model.Artist{
-			Name:     strings.TrimSpace(artistName),
+			Name:     model.NewUniqueString(strings.TrimSpace(artistName)),
 			Gender:   model.FromBool(isFemale),
 			IsActive: true,
 		})
@@ -73,34 +73,20 @@ func (s *ArtistService) Remove(ctx context.Context, artists []string) (int, erro
 	return removedCount, nil
 }
 
-// Deactivate marks artists as inactive instead of deleting them.
+// Deactivate marks artists as inactive in a single batch query.
 func (s *ArtistService) Deactivate(ctx context.Context, artists []string) (int, error) {
-	deactivatedCount := 0
-	for _, artistName := range artists {
-		artist, err := s.repo.GetByName(ctx, artistName)
-		if err != nil {
-			return deactivatedCount, fmt.Errorf("failed to get artist %s: %w", artistName, err)
-		}
-
-		if artist == nil {
-			s.logger.Warn("Artist not found", zap.String("artist", artistName))
-			continue
-		}
-
-		if !artist.IsActive {
-			s.logger.Info("Artist already deactivated", zap.String("artist", artistName))
-			continue
-		}
-
-		artist.IsActive = false
-		err = s.repo.Update(ctx, artist)
-		if err != nil {
-			return deactivatedCount, fmt.Errorf("failed to deactivate artist %s: %w", artistName, err)
-		}
-		deactivatedCount++
+	if len(artists) == 0 {
+		return 0, nil
 	}
 
-	return deactivatedCount, nil
+	cleanNames := make([]string, 0, len(artists))
+	for _, a := range artists {
+		if trimmed := strings.TrimSpace(a); trimmed != "" {
+			cleanNames = append(cleanNames, trimmed)
+		}
+	}
+
+	return s.repo.DeactivateByNames(ctx, cleanNames)
 }
 
 // GetFemaleArtists retrieves names of all active female artists.
@@ -110,11 +96,10 @@ func (s *ArtistService) GetFemaleArtists(ctx context.Context) ([]string, error) 
 		return nil, fmt.Errorf("failed to get female artists: %w", err)
 	}
 
-	var names []string
+	names := make([]string, 0, len(artists))
 	for _, artist := range artists {
-		names = append(names, artist.Name)
+		names = append(names, artist.Name.String())
 	}
-
 	return names, nil
 }
 
@@ -125,15 +110,14 @@ func (s *ArtistService) GetMaleArtists(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("failed to get male artists: %w", err)
 	}
 
-	var names []string
+	names := make([]string, 0, len(artists))
 	for _, artist := range artists {
-		names = append(names, artist.Name)
+		names = append(names, artist.Name.String())
 	}
-
 	return names, nil
 }
 
-// GetAll retrieves all artist records from the repository.
+// GetAll retrieves all artist records.
 func (s *ArtistService) GetAll(ctx context.Context) ([]model.Artist, error) {
 	return s.repo.GetAll(ctx)
 }
@@ -149,7 +133,6 @@ func (s *ArtistService) Export(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get all artists: %w", err)
 	}
-
 	return s.formatArtists(allArtists), nil
 }
 
@@ -159,7 +142,6 @@ func (s *ArtistService) FormatList(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get active artists: %w", err)
 	}
-
 	return s.formatArtists(artists), nil
 }
 
@@ -169,34 +151,31 @@ func (s *ArtistService) formatArtists(artists []model.Artist) string {
 
 	for _, artist := range artists {
 		if artist.IsFemale() {
-			femaleArtists = append(femaleArtists, artist.Name)
+			femaleArtists = append(femaleArtists, artist.Name.String())
 		} else {
-			maleArtists = append(maleArtists, artist.Name)
+			maleArtists = append(maleArtists, artist.Name.String())
 		}
 	}
 
 	var response strings.Builder
-
 	response.WriteString("<b>Female Artists:</b>\n")
 	if len(femaleArtists) == 0 {
 		response.WriteString("empty\n")
 	} else {
-		sort.Strings(femaleArtists)
-		response.WriteString(fmt.Sprintf("<code>%s</code>\n", strings.Join(femaleArtists, ", ")))
+		slices.Sort(femaleArtists)
+		fmt.Fprintf(&response, "<code>%s</code>\n", strings.Join(femaleArtists, ", "))
 	}
 
-	response.WriteString("\n")
-
-	response.WriteString("<b>Male Artists:</b>\n")
+	response.WriteString("\n<b>Male Artists:</b>\n")
 	if len(maleArtists) == 0 {
 		response.WriteString("empty\n")
 	} else {
-		sort.Strings(maleArtists)
-		response.WriteString(fmt.Sprintf("<code>%s</code>\n", strings.Join(maleArtists, ", ")))
+		slices.Sort(maleArtists)
+		fmt.Fprintf(&response, "<code>%s</code>\n", strings.Join(maleArtists, ", "))
 	}
 
-	response.WriteString(fmt.Sprintf("\n📊 Total Artists: %d\n💃 Female: %d\n🤦‍♂️ Male: %d",
-		len(femaleArtists)+len(maleArtists), len(femaleArtists), len(maleArtists)))
+	fmt.Fprintf(&response, "\n📊 Total Artists: %d\n💃 Female: %d\n🤦‍♂️ Male: %d",
+		len(femaleArtists)+len(maleArtists), len(femaleArtists), len(maleArtists))
 
 	return response.String()
 }
@@ -207,9 +186,6 @@ func (s *ArtistService) GetCounts(ctx context.Context) (femaleCount, maleCount, 
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("failed to get active artists: %w", err)
 	}
-
-	femaleCount = 0
-	maleCount = 0
 
 	for _, artist := range artists {
 		switch artist.Gender {

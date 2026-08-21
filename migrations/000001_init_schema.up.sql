@@ -1,11 +1,13 @@
 -- GemFactory Consolidated Initialization Schema
--- This file merges all previous migrations (001-007) into a single baseline.
-
--- 1. Schema & Environment
 CREATE SCHEMA IF NOT EXISTS gemfactory;
 SET search_path TO gemfactory, public;
 
--- 2. Tables
+-- Drop legacy/removed tables if they exist
+DROP TABLE IF EXISTS gemfactory.playlist_tracks CASCADE;
+DROP TABLE IF EXISTS gemfactory.homeworks CASCADE;
+DROP TABLE IF EXISTS gemfactory.tasks CASCADE;
+
+-- 1. Artists Table
 CREATE TABLE IF NOT EXISTS gemfactory.artists (
     artist_id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL UNIQUE,
@@ -15,6 +17,7 @@ CREATE TABLE IF NOT EXISTS gemfactory.artists (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 2. Releases Table
 CREATE TABLE IF NOT EXISTS gemfactory.releases (
     release_id SERIAL PRIMARY KEY,
     artist_id INTEGER NOT NULL REFERENCES gemfactory.artists(artist_id) ON DELETE CASCADE,
@@ -30,6 +33,7 @@ CREATE TABLE IF NOT EXISTS gemfactory.releases (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 3. Config Table
 CREATE TABLE IF NOT EXISTS gemfactory.config (
     id SERIAL PRIMARY KEY,
     key VARCHAR(255) NOT NULL UNIQUE,
@@ -39,75 +43,48 @@ CREATE TABLE IF NOT EXISTS gemfactory.config (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Tasks table removed as logic moved to workers
+-- Delete deprecated config keys
+DELETE FROM gemfactory.config WHERE key IN ('SPOTIFY_CLIENT_ID', 'SPOTIFY_CLIENT_SECRET', 'PLAYLIST_URL', 'HOMEWORK_RESET_TIME');
 
-CREATE TABLE IF NOT EXISTS gemfactory.homeworks (
-    id SERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL,
-    track_id VARCHAR(255) NOT NULL,
-    spotify_id VARCHAR(255) NOT NULL,
-    play_count INTEGER NOT NULL DEFAULT 1,
-    issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    completed_at TIMESTAMP,
-    is_completed BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, track_id, spotify_id)
+-- Clean up legacy duplicate releases (keeping the one with links or highest ID)
+DELETE FROM gemfactory.releases r1
+WHERE EXISTS (
+    SELECT 1 FROM gemfactory.releases r2
+    WHERE r2.artist_id = r1.artist_id
+      AND r2.date = r1.date
+      AND (
+          (COALESCE(r2.mv, '') != '' AND COALESCE(r1.mv, '') = '')
+          OR (COALESCE(r2.spotify, '') != '' AND COALESCE(r1.spotify, '') = '')
+          OR (COALESCE(r2.mv, '') = COALESCE(r1.mv, '') AND COALESCE(r2.spotify, '') = COALESCE(r1.spotify, '') AND r2.release_id > r1.release_id)
+      )
 );
 
-CREATE TABLE IF NOT EXISTS gemfactory.playlist_tracks (
-    id SERIAL PRIMARY KEY,
-    spotify_id VARCHAR(255) NOT NULL,
-    track_id VARCHAR(255) NOT NULL,
-    artist VARCHAR(255) NOT NULL,
-    title VARCHAR(500) NOT NULL,
-    album VARCHAR(500),
-    duration_ms INTEGER,
-    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(spotify_id, track_id)
-);
-
--- 3. Indices
+-- 4. Indices
+CREATE UNIQUE INDEX IF NOT EXISTS idx_releases_artist_date_source ON gemfactory.releases(artist_id, date, source_url);
 CREATE INDEX IF NOT EXISTS idx_releases_artist_id ON gemfactory.releases(artist_id);
 CREATE INDEX IF NOT EXISTS idx_releases_date ON gemfactory.releases(date);
 CREATE INDEX IF NOT EXISTS idx_releases_artist_date_track ON gemfactory.releases(artist_id, date, title_track);
+CREATE INDEX IF NOT EXISTS idx_releases_source_url ON gemfactory.releases(source_url);
 CREATE INDEX IF NOT EXISTS idx_artists_name ON gemfactory.artists(name);
 CREATE INDEX IF NOT EXISTS idx_artists_gender ON gemfactory.artists(gender);
 CREATE INDEX IF NOT EXISTS idx_artists_active ON gemfactory.artists(is_active);
-CREATE INDEX IF NOT EXISTS idx_homeworks_user_id ON gemfactory.homeworks(user_id);
-CREATE INDEX IF NOT EXISTS idx_homeworks_track_id ON gemfactory.homeworks(track_id);
-CREATE INDEX IF NOT EXISTS idx_homeworks_spotify_id ON gemfactory.homeworks(spotify_id);
-CREATE INDEX IF NOT EXISTS idx_homeworks_completed ON gemfactory.homeworks(is_completed);
-CREATE INDEX IF NOT EXISTS idx_homeworks_user_completed ON gemfactory.homeworks(user_id, is_completed);
-CREATE INDEX IF NOT EXISTS idx_playlist_tracks_spotify_id ON gemfactory.playlist_tracks(spotify_id);
-CREATE INDEX IF NOT EXISTS idx_playlist_tracks_track_id ON gemfactory.playlist_tracks(track_id);
-CREATE INDEX IF NOT EXISTS idx_playlist_tracks_artist ON gemfactory.playlist_tracks(artist);
-CREATE INDEX IF NOT EXISTS idx_releases_source_url ON gemfactory.releases(source_url);
 
--- 4. Initial Seeding
+-- 5. Initial Seeding
 INSERT INTO gemfactory.config (key, value, description) VALUES
 ('RATE_LIMIT_REQUESTS', '10', 'Rate limit requests per window'),
 ('RATE_LIMIT_WINDOW', '60', 'Rate limit window in seconds'),
-('SCRAPER_DELAY', '1', 'Scraper delay between requests in seconds'),
-('SCRAPER_TIMEOUT', '30', 'Scraper request timeout in seconds'),
+('SCRAPER_DELAY', '2s', 'Scraper delay between requests'),
 ('LOG_LEVEL', 'info', 'Logging level (debug, info, warn, error, fatal)'),
 ('BOT_TOKEN', '', 'Telegram bot token'),
 ('ADMIN_USERNAME', '', 'Administrator username'),
-('SPOTIFY_CLIENT_ID', '', 'Spotify client ID'),
-('SPOTIFY_CLIENT_SECRET', '', 'Spotify client secret'),
-('PLAYLIST_URL', '', 'Spotify playlist URL'),
 ('DB_DSN', '', 'Database connection string'),
 ('HEALTH_PORT', '8080', 'Health check port'),
 ('TIMEZONE', 'Europe/Moscow', 'Application timezone'),
 ('APP_DATA_DIR', './data', 'Application data directory'),
-('RELEASE_CHECK_INTERVAL', '8h', 'Interval between release checks (e.g., 1h, 24h, 30m)')
+('RELEASE_CHECK_INTERVAL', '24h', 'Interval between release checks')
 ON CONFLICT (key) DO NOTHING;
 
--- Tasks seeding removed
-
--- Artist Seeding
+-- 6. Artists Seeding
 INSERT INTO gemfactory.artists (name, gender, is_active) VALUES
 ('ARTMS', 'female', true), ('Apink', 'female', true), ('AtHeart', 'female', true), ('BABYMONSTER', 'female', true), ('BADVILLAIN', 'female', true),
 ('BEWAVE', 'female', true), ('BIBI', 'female', true), ('BLACKPINK', 'female', true), ('BURVEY', 'female', true), ('Baby DONT Cry', 'female', true),
@@ -139,5 +116,5 @@ INSERT INTO gemfactory.artists (name, gender, is_active) VALUES
 ('NouerA', 'male', true), ('P1Harmony', 'male', true), ('RIIZE', 'male', true), ('Stray Kids', 'male', true), ('TAEMIN', 'male', true),
 ('TAEYONG', 'male', true), ('TEN', 'male', true), ('THE BOYZ', 'male', true), ('TXT', 'male', true), ('WAKER', 'male', true),
 ('WHIB', 'male', true), ('WayV', 'male', true), ('Xdinary Heroes', 'male', true), ('ZEROBASEONE', 'male', true), 
-('idntt', 'male', true), ('&TEAM', 'male', true), ('xikers', 'male', true)
+('idntt', 'male', true), ('xikers', 'male', true)
 ON CONFLICT (name) DO NOTHING;

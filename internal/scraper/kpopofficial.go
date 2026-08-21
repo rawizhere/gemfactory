@@ -2,7 +2,9 @@ package scraper
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"iter"
 	"regexp"
 	"strings"
 	"sync"
@@ -15,61 +17,63 @@ import (
 )
 
 // ParseKProfilesMonthlyPage extracts releases using chromedp to handle dynamic tabs and pagination.
-func (f *fetcherImpl) ParseKProfilesMonthlyPage(ctx context.Context, pageURL, month, year string) ([]Release, error) {
-	f.logger.Info("Starting browser-based parse", zap.String("url", pageURL))
+func (f *fetcherImpl) ParseKProfilesMonthlyPage(ctx context.Context, pageURL, month, year string) iter.Seq2[Release, error] {
+	return func(yield func(Release, error) bool) {
+		f.logger.Info("Starting browser-based parse", zap.String("url", pageURL))
 
-	// Quick 404 check
-	status, err := f.httpClient.CheckStatus(ctx, pageURL)
-	if err == nil && status == 404 {
-		f.logger.Warn("month page 404, skipping", zap.String("url", pageURL))
-		return nil, fmt.Errorf("page not found: 404")
-	}
+		// Quick 404 check
+		status, err := f.httpClient.CheckStatus(ctx, pageURL)
+		if err == nil && status == 404 {
+			f.logger.Warn("month page 404, skipping", zap.String("url", pageURL))
+			yield(Release{}, fmt.Errorf("page not found: 404"))
+			return
+		}
 
-	// Browser setup
-	timeoutCtx, cancelTimeout := context.WithTimeout(ctx, 10*time.Minute)
-	defer cancelTimeout()
+		// Browser setup
+		timeoutCtx, cancelTimeout := context.WithTimeout(ctx, 10*time.Minute)
+		defer cancelTimeout()
 
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.NoSandbox,
-		chromedp.DisableGPU,
-		chromedp.Flag("disable-dev-shm-usage", true),
-		chromedp.Flag("remote-debugging-port", "9222"),
-		chromedp.Flag("disable-software-rasterizer", true),
-		chromedp.Flag("disable-extensions", true),
-		chromedp.Flag("disable-background-networking", true),
-		chromedp.Flag("disable-sync", true),
-		chromedp.Flag("disable-translate", true),
-		chromedp.Flag("metrics-recording-only", true),
-		chromedp.Flag("no-first-run", true),
-		chromedp.Flag("safebrowsing-disable-auto-update", true),
-		chromedp.Flag("blink-settings", "imagesEnabled=false"),
-		chromedp.Flag("headless", "new"),
-		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
-	)
-	allocCtx, cancel := chromedp.NewExecAllocator(timeoutCtx, opts...)
-	defer cancel()
+		opts := append(chromedp.DefaultExecAllocatorOptions[:],
+			chromedp.NoSandbox,
+			chromedp.DisableGPU,
+			chromedp.Flag("disable-dev-shm-usage", true),
+			chromedp.Flag("remote-debugging-port", "9222"),
+			chromedp.Flag("disable-software-rasterizer", true),
+			chromedp.Flag("disable-extensions", true),
+			chromedp.Flag("disable-background-networking", true),
+			chromedp.Flag("disable-sync", true),
+			chromedp.Flag("disable-translate", true),
+			chromedp.Flag("metrics-recording-only", true),
+			chromedp.Flag("no-first-run", true),
+			chromedp.Flag("safebrowsing-disable-auto-update", true),
+			chromedp.Flag("blink-settings", "imagesEnabled=false"),
+			chromedp.Flag("headless", "new"),
+			chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+		)
+		allocCtx, cancel := chromedp.NewExecAllocator(timeoutCtx, opts...)
+		defer cancel()
 
-	taskCtx, cancel := chromedp.NewContext(allocCtx)
-	defer cancel()
+		taskCtx, taskCancel := chromedp.NewContext(allocCtx)
+		defer taskCancel()
 
-	var finalHTML string
-	err = chromedp.Run(taskCtx,
-		chromedp.EmulateViewport(1920, 1080),
-		chromedp.Navigate(pageURL),
-		chromedp.WaitVisible(`body`, chromedp.ByQuery),
-		// Kill alerts/dialogs that might hang the browser
-		chromedp.Evaluate(`window.alert = window.confirm = window.prompt = function() {};`, nil),
-		chromedp.WaitReady(`.gspbgrid_item_link, .wp-block-greenshift-blocks-querygrid`, chromedp.ByQuery),
-		chromedp.Sleep(time.Duration(f.config.RequestDelay)*2),
+		var finalHTML string
+		err = chromedp.Run(taskCtx,
+			chromedp.EmulateViewport(1920, 1080),
+			chromedp.Navigate(pageURL),
+			chromedp.WaitVisible(`body`, chromedp.ByQuery),
+			// Kill alerts/dialogs that might hang the browser
+			chromedp.Evaluate(`window.alert = window.confirm = window.prompt = function() {};`, nil),
+			chromedp.WaitReady(`.gspbgrid_item_link, .wp-block-greenshift-blocks-querygrid`, chromedp.ByQuery),
+			chromedp.Sleep(time.Duration(f.config.RequestDelay)*2),
 
-		// Switch to correct month tab
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			f.logger.Info("selecting release tab", zap.String("month", month))
-			var result struct {
-				Success bool   `json:"success"`
-				Match   string `json:"match"`
-			}
-			err := chromedp.Evaluate(fmt.Sprintf(`
+			// Switch to correct month tab
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				f.logger.Info("selecting release tab", zap.String("month", month))
+				var result struct {
+					Success bool   `json:"success"`
+					Match   string `json:"match"`
+				}
+				err := chromedp.Evaluate(fmt.Sprintf(`
 				(function() {
 					const m = "%s".toLowerCase();
 					const y = "%s";
@@ -88,33 +92,33 @@ func (f *fetcherImpl) ParseKProfilesMonthlyPage(ctx context.Context, pageURL, mo
 				})()
 			`, month, year), &result).Do(ctx)
 
-			if err != nil {
-				return fmt.Errorf("tab selection failed: %w", err)
-			}
-			if result.Success {
-				f.logger.Info("tab switched", zap.String("pattern", result.Match))
-			} else {
-				f.logger.Warn("could not find specific month tab, staying on default")
-			}
-			return nil
-		}),
-
-		chromedp.Sleep(3*time.Second),
-		chromedp.Evaluate(`window.scrollBy(0, 400);`, nil),
-
-		// Load more content
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			f.logger.Info("loading more content...")
-			var lastCount int
-			var stagnant int
-
-			for i := 0; i < 40; i++ {
-				var res struct {
-					Found bool `json:"found"`
-					Count int  `json:"count"`
+				if err != nil {
+					return fmt.Errorf("tab selection failed: %w", err)
 				}
+				if result.Success {
+					f.logger.Info("tab switched", zap.String("pattern", result.Match))
+				} else {
+					f.logger.Warn("could not find specific month tab, staying on default")
+				}
+				return nil
+			}),
 
-				err := chromedp.Evaluate(`
+			chromedp.Sleep(3*time.Second),
+			chromedp.Evaluate(`window.scrollBy(0, 400);`, nil),
+
+			// Load more content
+			chromedp.ActionFunc(func(ctx context.Context) error {
+				f.logger.Info("loading more content...")
+				var lastCount int
+				var stagnant int
+
+				for i := 0; i < 40; i++ {
+					var res struct {
+						Found bool `json:"found"`
+						Count int  `json:"count"`
+					}
+
+					err := chromedp.Evaluate(`
 					(function() {
 						const items = document.querySelectorAll('.gspbgrid_item_link').length;
 						const btn = Array.from(document.querySelectorAll('span, button, .gspb-loadmore-btn'))
@@ -132,141 +136,176 @@ func (f *fetcherImpl) ParseKProfilesMonthlyPage(ctx context.Context, pageURL, mo
 					})()
 				`, &res).Do(ctx)
 
-				if err != nil {
-					f.logger.Error("pagination eval error", zap.Error(err))
-					break
-				}
-
-				if i%2 == 0 {
-					f.logger.Info("parsing batch", zap.Int("i", i), zap.Int("items", res.Count))
-				}
-
-				if !res.Found {
-					break
-				}
-
-				if res.Count > 0 && res.Count == lastCount {
-					stagnant++
-					if stagnant >= 3 {
-						f.logger.Warn("pagination stagnant, breaking", zap.Int("count", res.Count))
+					if err != nil {
+						f.logger.Error("pagination eval error", zap.Error(err))
 						break
 					}
-				} else {
-					stagnant = 0
-					lastCount = res.Count
+
+					if i%2 == 0 {
+						f.logger.Info("parsing batch", zap.Int("i", i), zap.Int("items", res.Count))
+					}
+
+					if !res.Found {
+						break
+					}
+
+					if res.Count > 0 && res.Count == lastCount {
+						stagnant++
+						if stagnant >= 3 {
+							f.logger.Warn("pagination stagnant, breaking", zap.Int("count", res.Count))
+							break
+						}
+					} else {
+						stagnant = 0
+						lastCount = res.Count
+					}
+
+					_ = chromedp.Sleep(5 * time.Second).Do(ctx)
+					_ = chromedp.Evaluate(`window.scrollBy(0, 300);`, nil).Do(ctx)
 				}
+				return nil
+			}),
+			chromedp.OuterHTML(`html`, &finalHTML),
+		)
 
-				_ = chromedp.Sleep(5 * time.Second).Do(ctx)
-				_ = chromedp.Evaluate(`window.scrollBy(0, 300);`, nil).Do(ctx)
+		var doc *goquery.Document
+		if err != nil {
+			f.logger.Warn("Chromedp failed, falling back to static HTML parsing", zap.Error(err))
+			staticDoc, staticErr := f.httpClient.GetHTML(ctx, pageURL)
+			if staticErr != nil {
+				yield(Release{}, fmt.Errorf("chromedp failed: %w; static fallback failed: %w", err, staticErr))
+				return
 			}
-			return nil
-		}),
-		chromedp.OuterHTML(`html`, &finalHTML),
-		// Manual GC trigger for better stability
-		chromedp.Evaluate(`window.gc && window.gc();`, nil),
-	)
-
-	if err != nil {
-		return nil, fmt.Errorf("chromedp failed: %w", err)
-	}
-
-	// Extract links from rendered HTML
-	doc, err := goquery.NewDocumentFromReader(strings.NewReader(finalHTML))
-	if err != nil {
-		return nil, err
-	}
-
-	var links []string
-	doc.Find("a").Each(func(i int, s *goquery.Selection) {
-		href, _ := s.Attr("href")
-		if strings.Contains(href, "/album/") {
-			if strings.HasPrefix(href, "/") {
-				href = "https://kpopofficial.com" + href
+			doc = staticDoc
+		} else {
+			parsedDoc, parseErr := goquery.NewDocumentFromReader(strings.NewReader(finalHTML))
+			if parseErr != nil {
+				yield(Release{}, parseErr)
+				return
 			}
-			links = append(links, href)
+			doc = parsedDoc
 		}
-	})
 
-	links = uniqueStrings(links)
-	f.logger.Info("Discovered release links", zap.Int("count", len(links)))
-	if len(links) == 0 {
-		f.logger.Debug("HTML Preview (first 500 chars)", zap.String("html", truncateString(finalHTML, 500)))
-	}
-
-	// Sub-crawl logic
-	type queueItem struct {
-		url   string
-		depth int
-	}
-
-	queue := make([]queueItem, 0, len(links))
-	visited := make(map[string]bool)
-	for _, u := range links {
-		visited[u] = true
-		queue = append(queue, queueItem{url: u, depth: 1})
-	}
-
-	var releases []Release
-	totalProcessed := 0
-	const maxLinks = 200
-
-	for len(queue) > 0 && totalProcessed < maxLinks {
-		currentBatch := queue
-		queue = []queueItem{}
-		g, batchCtx := errgroup.WithContext(ctx)
-		const maxConcurrency = 8
-		sem := make(chan struct{}, maxConcurrency)
-		var mtx sync.Mutex
-
-		for _, item := range currentBatch {
-			it := item
-			g.Go(func() error {
-				sem <- struct{}{}
-				defer func() { <-sem }()
-
-				// Jitter
-				delay := f.config.RequestDelay
-				if delay == 0 {
-					delay = 200 * time.Millisecond
+		var links []string
+		doc.Find("a").Each(func(i int, s *goquery.Selection) {
+			href, _ := s.Attr("href")
+			if strings.Contains(href, "/album/") {
+				if strings.HasPrefix(href, "/") {
+					href = "https://kpopofficial.com" + href
 				}
-				time.Sleep(delay)
+				links = append(links, href)
+			}
+		})
 
-				pageReleases, discoveredLinks, err := f.parseEventPage(batchCtx, it.url, it.depth)
-				if err != nil {
+		links = uniqueStrings(links)
+		f.logger.Info("Discovered release links", zap.Int("count", len(links)))
+
+		// Sub-crawl logic
+		type queueItem struct {
+			url   string
+			depth int
+		}
+
+		type batchResult struct {
+			releases []*Release
+			links    []string
+			depth    int
+		}
+
+		queue := make([]queueItem, 0, len(links))
+		visited := make(map[string]bool)
+		for _, u := range links {
+			normU := normalizeURL(u)
+			if !visited[normU] {
+				visited[normU] = true
+				queue = append(queue, queueItem{url: u, depth: 1})
+			}
+		}
+
+		seenReleases := make(map[string]bool)
+		totalProcessed := 0
+		const maxLinks = 200
+
+		for len(queue) > 0 && totalProcessed < maxLinks {
+			currentBatch := queue
+			queue = []queueItem{}
+			g, batchCtx := errgroup.WithContext(ctx)
+			const maxConcurrency = 3
+			sem := make(chan struct{}, maxConcurrency)
+
+			var batchMtx sync.Mutex
+			var batchResults []batchResult
+			var batchErrors []error
+
+			for _, item := range currentBatch {
+				it := item
+				g.Go(func() error {
+					sem <- struct{}{}
+					defer func() { <-sem }()
+
+					delay := f.config.RequestDelay
+					if delay == 0 {
+						delay = 200 * time.Millisecond
+					}
+					time.Sleep(delay)
+
+					pageReleases, discoveredLinks, err := f.parseEventPage(batchCtx, it.url, it.depth)
+					if err != nil {
+						batchMtx.Lock()
+						batchErrors = append(batchErrors, fmt.Errorf("page %s: %w", it.url, err))
+						batchMtx.Unlock()
+						return nil
+					}
+
+					batchMtx.Lock()
+					batchResults = append(batchResults, batchResult{
+						releases: pageReleases,
+						links:    discoveredLinks,
+						depth:    it.depth,
+					})
+					batchMtx.Unlock()
 					return nil
-				}
+				})
+			}
 
-				mtx.Lock()
+			if err := g.Wait(); err != nil {
+				yield(Release{}, err)
+				return
+			}
+
+			if len(batchErrors) > 0 {
+				f.logger.Warn("Errors occurred during batch crawl", zap.Error(errors.Join(batchErrors...)))
+			}
+
+			for _, res := range batchResults {
 				totalProcessed++
-				for _, r := range pageReleases {
-					releases = append(releases, *r)
+				for _, r := range res.releases {
+					relKey := fmt.Sprintf("%s|%s|%s|%s", r.Artist, r.Date.Format("2006-01-02"), r.Title, normalizeURL(r.SourceURL))
+					if seenReleases[relKey] {
+						continue
+					}
+					seenReleases[relKey] = true
+
+					if !yield(*r, nil) {
+						return
+					}
 				}
-				if it.depth > 0 {
-					for _, dl := range discoveredLinks {
-						if !visited[dl] {
-							visited[dl] = true
-							queue = append(queue, queueItem{url: dl, depth: it.depth - 1})
+				if res.depth > 0 {
+					for _, dl := range res.links {
+						normDL := normalizeURL(dl)
+						if !visited[normDL] {
+							visited[normDL] = true
+							queue = append(queue, queueItem{url: dl, depth: res.depth - 1})
 						}
 					}
 				}
-				mtx.Unlock()
-				return nil
-			})
-		}
-		if err := g.Wait(); err != nil {
-			return nil, err
+			}
 		}
 	}
-	return releases, nil
 }
 
 func (f *fetcherImpl) parseEventPage(ctx context.Context, url string, depth int) ([]*Release, []string, error) {
-	var doc *goquery.Document
-	err := WithRetry(ctx, f.logger, f.config.RetryConfig, func() error {
-		var err error
-		doc, err = f.httpClient.GetHTML(ctx, url)
-		return err
-	})
+	doc, err := f.httpClient.GetHTML(ctx, url)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -274,7 +313,6 @@ func (f *fetcherImpl) parseEventPage(ctx context.Context, url string, depth int)
 	if depth > 0 {
 		return rels, links, err
 	}
-	// Stop recursion
 	return rels, nil, err
 }
 
@@ -409,7 +447,19 @@ func (f *fetcherImpl) parseEventPageFromDoc(doc *goquery.Document, url string) (
 		}
 		yt = "https://www.youtube.com/watch?v=" + id
 	}
+
 	sp, _ := doc.Find("a[href*='open.spotify.com']").Attr("href")
+	if sp == "" {
+		spIframe, _ := doc.Find("iframe[src*='open.spotify.com']").Attr("src")
+		if spIframe != "" {
+			sp = strings.Replace(spIframe, "/embed/", "/", 1)
+		}
+	}
+	if sp != "" {
+		if idx := strings.Index(sp, "?"); idx != -1 {
+			sp = sp[:idx]
+		}
+	}
 
 	var releases []*Release
 	for _, ev := range events {
@@ -440,6 +490,20 @@ func (f *fetcherImpl) parseEventPageFromDoc(doc *goquery.Document, url string) (
 			})
 		}
 	}
+
+	// Also discover album links from content bodies (discography lists, related album cards)
+	doc.Find(".entry-content a, .post a, .post-inner a, .wp-block-post-template a, .gspbgrid_item_link").Each(func(j int, tag *goquery.Selection) {
+		href, _ := tag.Attr("href")
+		if strings.Contains(href, "/album/") {
+			if strings.HasPrefix(href, "/") {
+				href = "https://kpopofficial.com" + href
+			}
+			if normalizeURL(href) != normalizeURL(url) {
+				subLinks = append(subLinks, href)
+			}
+		}
+	})
+
 	return releases, uniqueStrings(subLinks), nil
 }
 
@@ -473,15 +537,14 @@ func splitTitle(in string) (string, string) {
 }
 
 func findDateInString(t string) string {
-	re := regexp.MustCompile(`(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}`)
-	return re.FindString(t)
-}
-
-func truncateString(s string, l int) string {
-	if len(s) <= l {
-		return s
+	t = strings.ReplaceAll(t, "\u00a0", " ")
+	re := regexp.MustCompile(`(?i)(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})`)
+	m := re.FindStringSubmatch(t)
+	if len(m) == 4 {
+		month := strings.ToUpper(m[1][:1]) + strings.ToLower(m[1][1:])
+		return fmt.Sprintf("%s %s, %s", month, m[2], m[3])
 	}
-	return s[:l] + "..."
+	return ""
 }
 
 func cleanArtistName(s string) string {

@@ -1,4 +1,3 @@
-// Package main serves as the entry point for the GemFactory bot application.
 package main
 
 import (
@@ -14,47 +13,31 @@ import (
 )
 
 func main() {
-	// Initialize logger.
-	l, err := logger.NewWithLevel()
+	l, err := logger.New()
 	if err != nil {
 		panic(err)
 	}
 	log := l.Logger
 
-	// Load configuration.
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatal("Failed to load configuration", zap.Error(err))
 	}
 
-	// Create context and setup signal handling.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	go func() {
-		<-sigChan
-		log.Info("Shutdown signal received")
-		cancel()
-	}()
-
-	// Initialize bot via factory.
-	bot, err := app.NewBotWithFactory(ctx, cfg, l)
+	bot, err := app.NewBot(ctx, cfg, log)
 	if err != nil {
 		log.Fatal("Failed to create bot", zap.Error(err))
 	}
 
-	// Start bot execution.
-	if err := bot.Start(ctx); err != nil {
+	if err := bot.Start(ctx); err != nil && err != context.Canceled {
 		log.Error("Bot stopped with error", zap.Error(err))
-		if err := bot.Stop(); err != nil {
-			log.Error("Failed to stop bot after start error", zap.Error(err))
-		}
+		_ = bot.Stop()
 		os.Exit(1)
 	}
 
-	// Graceful shutdown.
 	if err := bot.Stop(); err != nil {
 		log.Error("Failed to stop bot gracefully", zap.Error(err))
 	}

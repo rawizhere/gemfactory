@@ -1,75 +1,64 @@
+// Package telegram provides abstractions and implementations for Telegram bot interactions.
 package telegram
 
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/mymmrac/telego"
+	"github.com/mymmrac/telego/telegoutil"
 	"go.uber.org/zap"
 )
 
-// RouterInterface defines methods for routing update events.
-type RouterInterface interface {
-	HandleUpdate(update telego.Update)
+const maxMessageLength = 4000
+
+// Router defines methods for routing update events.
+type Router interface {
+	HandleUpdate(ctx context.Context, update telego.Update)
 	RegisterBotCommands() []telego.BotCommand
 }
 
-// Client maintains the state for a Telegram bot.
+// Client manages Telegram bot communication, update polling, and message sending.
 type Client struct {
 	bot    *telego.Bot
-	botAPI BotAPI
-	router RouterInterface
+	router Router
 	logger *zap.Logger
-	config ConfigInterface
 	wg     sync.WaitGroup
 }
 
-// NewClient initializes a new bot client.
-func NewClient(botToken string, config ConfigInterface, logger *zap.Logger) (*Client, error) {
+// NewClient initializes a new Telegram bot client.
+func NewClient(botToken string, logger *zap.Logger) (*Client, error) {
 	bot, err := telego.NewBot(botToken)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create bot API: %w", err)
 	}
 
-	// Create BotAPI wrapper.
-	botAPI := NewTelegramBotAPI(bot, logger)
-
 	return &Client{
 		bot:    bot,
-		botAPI: botAPI,
 		logger: logger,
-		config: config,
 	}, nil
 }
 
-// Start begins long-polling for updates.
-func (c *Client) Start(ctx context.Context, router RouterInterface) error {
+// Start begins long-polling for updates and dispatches them to the router.
+func (c *Client) Start(ctx context.Context, router Router) error {
 	c.router = router
 
-	// Get bot info.
 	me, err := c.bot.GetMe(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get bot info: %w", err)
 	}
 	c.logger.Info("Bot started", zap.String("username", me.Username))
 
-	// Remove webhook if exists.
-	err = c.bot.DeleteWebhook(ctx, &telego.DeleteWebhookParams{DropPendingUpdates: true})
-	if err != nil {
-		c.logger.Error("Failed to delete webhook", zap.Error(err))
-		return fmt.Errorf("failed to delete webhook: %w", err)
-	}
+	_ = c.bot.DeleteWebhook(ctx, &telego.DeleteWebhookParams{DropPendingUpdates: true})
 
-	// Configure bot commands.
 	commands := c.router.RegisterBotCommands()
-	err = c.botAPI.SetBotCommands(ctx, commands)
-	if err != nil {
+	if err := c.SetBotCommands(ctx, commands); err != nil {
 		c.logger.Error("Failed to set bot commands", zap.Error(err))
-		return fmt.Errorf("failed to set bot commands: %w", err)
 	}
 
-	// Configure long polling.
 	c.logger.Info("Starting to fetch updates")
 	updatesChan, err := c.bot.UpdatesViaLongPolling(ctx, nil)
 	if err != nil {
@@ -80,49 +69,31 @@ func (c *Client) Start(ctx context.Context, router RouterInterface) error {
 		select {
 		case <-ctx.Done():
 			c.logger.Info("Update loop cancelled by context")
+			c.wg.Wait()
 			return ctx.Err()
 		case update, ok := <-updatesChan:
 			if !ok {
 				c.logger.Warn("Update channel closed")
+				c.wg.Wait()
 				return fmt.Errorf("update channel closed")
 			}
 
-			// Process update concurrently.
 			c.wg.Add(1)
 			go func(upd telego.Update) {
 				defer c.wg.Done()
-				c.processUpdate(upd)
+				updateCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+				defer cancel()
+				c.processUpdate(updateCtx, upd)
 			}(update)
 		}
 	}
 }
 
-// processUpdate handles a single Telegram update.
-func (c *Client) processUpdate(update telego.Update) {
-	c.logger.Debug("Processing update",
-		zap.Int("update_id", update.UpdateID),
-		zap.Int64("user_id", getUserID(update)),
-		zap.String("command", extractCommand(update)),
-		zap.String("update_type", getUpdateType(update)),
-	)
-
-	if update.Message != nil {
-		c.logger.Debug("Received message",
-			zap.String("text", update.Message.Text),
-			zap.Int64("chat_id", update.Message.Chat.ID),
-			zap.String("user", GetUserIdentifier(update.Message.From)))
-	} else if update.CallbackQuery != nil && update.CallbackQuery.Message != nil {
-		c.logger.Info("Received callback",
-			zap.String("data", update.CallbackQuery.Data),
-			zap.Int64("chat_id", update.CallbackQuery.Message.GetChat().ID),
-			zap.String("user", GetUserIdentifier(&update.CallbackQuery.From)))
-	}
-
+func (c *Client) processUpdate(ctx context.Context, update telego.Update) {
 	if update.Message == nil && update.CallbackQuery == nil {
 		return
 	}
 
-	// Skip documents and non-commands
 	if update.Message != nil {
 		if update.Message.Document != nil {
 			return
@@ -139,48 +110,93 @@ func (c *Client) processUpdate(update telego.Update) {
 		}
 	}
 
-	c.router.HandleUpdate(update)
+	c.router.HandleUpdate(ctx, update)
 }
 
-func (c *Client) GetBotAPI() BotAPI {
-	return c.botAPI
-}
-
-func getUserID(update telego.Update) int64 {
-	if update.Message != nil && update.Message.From != nil {
-		return update.Message.From.ID
-	}
-	if update.CallbackQuery != nil {
-		return update.CallbackQuery.From.ID
-	}
-	return 0
-}
-
-func extractCommand(update telego.Update) string {
-	if update.Message != nil {
-		for _, entity := range update.Message.Entities {
-			if entity.Type == telego.EntityTypeBotCommand && entity.Offset == 0 {
-				return update.Message.Text[1:entity.Length]
-			}
+// SendMessage sends an HTML formatted text message, safely splitting if exceeding limit.
+func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) error {
+	chunks := splitMessage(text, maxMessageLength)
+	for _, chunk := range chunks {
+		params := telegoutil.Message(telegoutil.ID(chatID), chunk).WithParseMode(telego.ModeHTML)
+		params.LinkPreviewOptions = &telego.LinkPreviewOptions{IsDisabled: true}
+		_, err := c.bot.SendMessage(ctx, params)
+		if err != nil {
+			c.logger.Error("Failed to send message", zap.Int64("chat_id", chatID), zap.Error(err))
+			return err
 		}
 	}
-	if update.CallbackQuery != nil {
-		return "callback"
-	}
-	return ""
+	return nil
 }
 
-func getUpdateType(update telego.Update) string {
-	if update.Message != nil {
-		for _, entity := range update.Message.Entities {
-			if entity.Type == telego.EntityTypeBotCommand && entity.Offset == 0 {
-				return "command"
-			}
+// SendMessageWithMarkup sends an HTML message with reply markup attached to the final chunk.
+func (c *Client) SendMessageWithMarkup(ctx context.Context, chatID int64, text string, markup telego.ReplyMarkup) error {
+	chunks := splitMessage(text, maxMessageLength)
+	for i, chunk := range chunks {
+		params := telegoutil.Message(telegoutil.ID(chatID), chunk).WithParseMode(telego.ModeHTML)
+		params.LinkPreviewOptions = &telego.LinkPreviewOptions{IsDisabled: true}
+
+		// Attach markup to the last chunk
+		if i == len(chunks)-1 && markup != nil {
+			params.ReplyMarkup = markup
 		}
-		return "message"
+
+		_, err := c.bot.SendMessage(ctx, params)
+		if err != nil {
+			c.logger.Error("Failed to send message with markup", zap.Int64("chat_id", chatID), zap.Error(err))
+			return err
+		}
 	}
-	if update.CallbackQuery != nil {
-		return "callback"
+	return nil
+}
+
+// EditMessageReplyMarkup updates an existing message's keyboard.
+func (c *Client) EditMessageReplyMarkup(ctx context.Context, chatID int64, messageID int, markup *telego.InlineKeyboardMarkup) error {
+	params := &telego.EditMessageReplyMarkupParams{
+		ChatID:      telegoutil.ID(chatID),
+		MessageID:   messageID,
+		ReplyMarkup: markup,
 	}
-	return "unknown"
+
+	_, err := c.bot.EditMessageReplyMarkup(ctx, params)
+	if err != nil {
+		c.logger.Error("Failed to edit message reply markup", zap.Int64("chat_id", chatID), zap.Int("message_id", messageID), zap.Error(err))
+	}
+	return err
+}
+
+// SetBotCommands registers bot commands with Telegram.
+func (c *Client) SetBotCommands(ctx context.Context, commands []telego.BotCommand) error {
+	err := c.bot.SetMyCommands(ctx, &telego.SetMyCommandsParams{Commands: commands})
+	if err != nil {
+		c.logger.Error("Failed to set bot commands", zap.Error(err))
+	}
+	return err
+}
+
+func splitMessage(text string, limit int) []string {
+	if len(text) <= limit {
+		return []string{text}
+	}
+
+	var chunks []string
+	lines := strings.Split(text, "\n")
+	var current strings.Builder
+
+	for _, line := range lines {
+		if current.Len()+len(line)+1 > limit && current.Len() > 0 {
+			chunks = append(chunks, current.String())
+			current.Reset()
+		}
+
+		if current.Len() > 0 {
+			current.WriteString("\n")
+		}
+		current.WriteString(line)
+	}
+
+	if current.Len() > 0 {
+		chunks = append(chunks, current.String())
+	}
+
+	return chunks
 }

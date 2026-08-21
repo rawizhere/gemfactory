@@ -3,89 +3,65 @@ package worker
 import (
 	"context"
 	"fmt"
-	"gemfactory/internal/model"
 	"gemfactory/internal/service"
 	"strings"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
 )
 
-// ReleaseCheckerWorker orchestrates periodic scans for new vulnerability music releases.
-type ReleaseCheckerWorker struct {
-	releaseService service.ReleaseServiceInterface
+// ReleaseChecker orchestrates periodic scans for new music releases.
+type ReleaseChecker struct {
+	releaseService *service.ReleaseService
 	logger         *zap.Logger
 	interval       time.Duration
-	intervalUpdate chan time.Duration
 }
 
-// NewReleaseCheckerWorker initializes a new ReleaseCheckerWorker with a default interval.
-func NewReleaseCheckerWorker(releaseService service.ReleaseServiceInterface, logger *zap.Logger, initialInterval time.Duration) *ReleaseCheckerWorker {
+// NewReleaseChecker initializes a new ReleaseChecker with the given interval.
+func NewReleaseChecker(releaseService *service.ReleaseService, logger *zap.Logger, initialInterval time.Duration) *ReleaseChecker {
 	if initialInterval <= 0 {
 		initialInterval = 24 * time.Hour
 	}
-	return &ReleaseCheckerWorker{
+	return &ReleaseChecker{
 		releaseService: releaseService,
 		logger:         logger,
 		interval:       initialInterval,
-		intervalUpdate: make(chan time.Duration, 1),
 	}
 }
 
-// Start initiates the worker's main loop.
-func (w *ReleaseCheckerWorker) Start(ctx context.Context, wg *sync.WaitGroup) {
-	defer wg.Done()
-	w.logger.Info("Release checker worker started", zap.Duration("interval", w.interval))
+// Start initiates the checker's periodic scanning loop until ctx is cancelled.
+func (w *ReleaseChecker) Start(ctx context.Context) {
+	w.logger.Info("Release checker started", zap.Duration("interval", w.interval))
 
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 
-	// Initial check on startup (with delay to let system settle)
-	go func() {
-		select {
-		case <-time.After(30 * time.Second):
-			w.checkReleases(ctx)
-		case <-ctx.Done():
-			return
-		}
-	}()
+	// Initial check on startup after a brief delay
+	startupTimer := time.NewTimer(30 * time.Second)
+	defer startupTimer.Stop()
+
+	select {
+	case <-startupTimer.C:
+		w.checkReleases(ctx)
+	case <-ctx.Done():
+		return
+	}
 
 	for {
 		select {
 		case <-ticker.C:
 			w.checkReleases(ctx)
-		case newInterval := <-w.intervalUpdate:
-			w.logger.Info("Updating release checker interval", zap.Duration("new", newInterval))
-			ticker.Stop()
-			ticker = time.NewTicker(newInterval)
-			w.interval = newInterval
 		case <-ctx.Done():
-			w.logger.Info("Release checker worker stopped")
+			w.logger.Info("Release checker stopped")
 			return
 		}
 	}
 }
 
-// ApplyConfig dynamically updates the worker's polling interval based on configuration changes.
-func (w *ReleaseCheckerWorker) ApplyConfig(ctx context.Context, configs []model.Config) error {
-	for _, c := range configs {
-		if c.Key == "RELEASE_CHECK_INTERVAL" {
-			d, err := time.ParseDuration(c.Value)
-			if err != nil {
-				return fmt.Errorf("invalid RELEASE_CHECK_INTERVAL from DB: %w", err)
-			}
-			w.intervalUpdate <- d
-		}
-	}
-	return nil
-}
-
-func (w *ReleaseCheckerWorker) checkReleases(ctx context.Context) {
+func (w *ReleaseChecker) checkReleases(ctx context.Context) {
 	w.logger.Info("Checking for new releases (previous + current + 3 months ahead)...")
 
 	now := time.Now()
-	// Scan previous, current and next 3 months
 	for i := -1; i <= 3; i++ {
 		targetDate := now.AddDate(0, i, 0)
 		monthName := strings.ToLower(targetDate.Format("January"))
@@ -95,7 +71,6 @@ func (w *ReleaseCheckerWorker) checkReleases(ctx context.Context) {
 
 		count, err := w.releaseService.ParseReleasesForMonth(ctx, fmt.Sprintf("%s-%s", monthName, yearStr))
 		if err != nil {
-			// Stop forward scan on 404/not found
 			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
 				w.logger.Warn("Monthly page not found, stopping forward scan for this cycle",
 					zap.String("month", monthName),

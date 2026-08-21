@@ -27,5 +27,4 @@ type ConfigRepository interface {
 	Set(ctx context.Context, key, value string) error
 	Delete(ctx context.Context, key string) error
 	Reset(ctx context.Context) error
-	GetDefaultConfig() map[string]string
 }

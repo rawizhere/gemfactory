@@ -1,9 +1,11 @@
+// Package app handles command and callback routing for incoming Telegram updates.
 package app
 
 import (
 	"context"
 	"gemfactory/internal/config"
 	"gemfactory/internal/handlers"
+	"gemfactory/internal/keyboard"
 	"gemfactory/internal/middleware"
 	"gemfactory/internal/service"
 	"gemfactory/internal/telegram"
@@ -12,7 +14,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// Router directs incoming updates to handlers.
+// Router dispatches updates to their respective handlers through the middleware pipeline.
 type Router struct {
 	handlers   *handlers.Handlers
 	middleware *middleware.Middleware
@@ -21,9 +23,10 @@ type Router struct {
 	logger     *zap.Logger
 }
 
-func NewRouterWithBotAPI(services *service.Services, config *config.Config, logger *zap.Logger, botAPI telegram.BotAPI) *Router {
+// NewRouter initializes a Router instance.
+func NewRouter(services *service.Services, config *config.Config, keyboard *keyboard.Manager, logger *zap.Logger, tg *telegram.Client) *Router {
 	return &Router{
-		handlers:   handlers.RegisterRoutesWithBotAPI(services, config, logger, botAPI),
+		handlers:   handlers.New(services, config, keyboard, logger, tg),
 		middleware: middleware.New(config, logger),
 		config:     config,
 		services:   services,
@@ -31,10 +34,8 @@ func NewRouterWithBotAPI(services *service.Services, config *config.Config, logg
 	}
 }
 
-// HandleUpdate processes a Telegram update.
-func (r *Router) HandleUpdate(update telego.Update) {
-	ctx := context.Background()
-
+// HandleUpdate processes a Telegram update with context through the middleware stack.
+func (r *Router) HandleUpdate(ctx context.Context, update telego.Update) {
 	r.middleware.ProcessWithMiddleware(update, func(update telego.Update) {
 		if update.Message != nil {
 			r.handleMessage(ctx, update.Message)
@@ -45,7 +46,6 @@ func (r *Router) HandleUpdate(update telego.Update) {
 	})
 }
 
-// handleMessage handles text commands.
 func (r *Router) handleMessage(ctx context.Context, message *telego.Message) {
 	command := ""
 	for _, entity := range message.Entities {
@@ -60,7 +60,6 @@ func (r *Router) handleMessage(ctx context.Context, message *telego.Message) {
 	}
 
 	switch command {
-	// User commands
 	case "start":
 		r.handlers.User.Start(ctx, message)
 	case "help":
@@ -74,13 +73,6 @@ func (r *Router) handleMessage(ctx context.Context, message *telego.Message) {
 	case "metrics":
 		r.handlers.User.Metrics(ctx, message)
 
-	// Homework commands
-	case "homework":
-		r.handlers.Homework.Homework(ctx, message)
-	case "playlist":
-		r.handlers.Homework.Playlist(ctx, message)
-
-	// Admin commands (permission check is done inside the handler)
 	case "admin":
 		r.handlers.Admin.Admin(ctx, message)
 	case "add_artist":
@@ -89,6 +81,8 @@ func (r *Router) handleMessage(ctx context.Context, message *telego.Message) {
 		r.handlers.Admin.RemoveArtist(ctx, message)
 	case "export":
 		r.handlers.Admin.Export(ctx, message)
+	case "config":
+		r.handlers.Admin.Config(ctx, message)
 	case "parse":
 		r.handlers.Admin.Parse(ctx, message)
 	}
@@ -98,6 +92,7 @@ func (r *Router) handleCallbackQuery(ctx context.Context, query *telego.Callback
 	r.handlers.HandleCallbackQuery(ctx, query)
 }
 
+// RegisterBotCommands returns the list of public bot commands for Telegram UI.
 func (r *Router) RegisterBotCommands() []telego.BotCommand {
 	return r.handlers.RegisterBotCommands()
 }

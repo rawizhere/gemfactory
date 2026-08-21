@@ -1,13 +1,11 @@
-// Package logger provides a configured zap.Logger with file rotation and dynamic level support.
+// Package logger provides a configured zap.Logger with stdout logging and dynamic level support.
 package logger
 
 import (
 	"os"
-	"path/filepath"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // Logger wraps zap.Logger for runtime level updates.
@@ -16,8 +14,8 @@ type Logger struct {
 	Level zap.AtomicLevel
 }
 
-// NewWithLevel initializes a logger with a configured log level.
-func NewWithLevel() (*Logger, error) {
+// New initializes a logger with the level configured via LOG_LEVEL.
+func New() (*Logger, error) {
 	atomicLevel := zap.NewAtomicLevelAt(getLogLevel())
 
 	encoderConfig := zap.NewProductionEncoderConfig()
@@ -25,34 +23,11 @@ func NewWithLevel() (*Logger, error) {
 	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
 
-	var core zapcore.Core
-
-	consoleCore := zapcore.NewCore(
+	core := zapcore.NewCore(
 		zapcore.NewJSONEncoder(encoderConfig),
 		zapcore.AddSync(os.Stdout),
 		atomicLevel,
 	)
-
-	logPath := getLogPath()
-
-	// Use lumberjack for log rotation
-	lumberjackLogger := &lumberjack.Logger{
-		Filename:   logPath,
-		MaxSize:    100, // megabytes
-		MaxBackups: 3,
-		MaxAge:     28, // days
-		Compress:   true,
-	}
-
-	fileWriter := zapcore.AddSync(lumberjackLogger)
-
-	fileCore := zapcore.NewCore(
-		zapcore.NewJSONEncoder(encoderConfig),
-		fileWriter,
-		atomicLevel,
-	)
-
-	core = zapcore.NewTee(consoleCore, fileCore)
 
 	zapLogger := zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
 
@@ -82,7 +57,6 @@ func (l *Logger) SetLevel(levelStr string) {
 	l.Level.SetLevel(level)
 }
 
-// getLogLevel reads the LOG_LEVEL environment variable.
 func getLogLevel() zapcore.Level {
 	level := os.Getenv("LOG_LEVEL")
 	switch level {
@@ -99,26 +73,4 @@ func getLogLevel() zapcore.Level {
 	default:
 		return zapcore.InfoLevel
 	}
-}
-
-// getLogPath determines the log file location.
-func getLogPath() string {
-	if logPath := os.Getenv("LOG_PATH"); logPath != "" {
-		dir := filepath.Dir(logPath)
-		if err := os.MkdirAll(dir, 0777); err == nil {
-			return logPath
-		}
-	}
-
-	if dataDir := os.Getenv("APP_DATA_DIR"); dataDir != "" {
-		if err := os.MkdirAll(dataDir, 0777); err == nil {
-			return filepath.Join(dataDir, "app.log")
-		}
-	}
-
-	if err := os.MkdirAll("logs", 0777); err == nil {
-		return "logs/app.log"
-	}
-
-	return "app.log"
 }

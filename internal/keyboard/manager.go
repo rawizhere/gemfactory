@@ -1,4 +1,4 @@
-// Package keyboard implements the Telegram bot's inline keyboard navigation system.
+// Package keyboard provides inline keyboard construction and update routines for Telegram.
 package keyboard
 
 import (
@@ -8,6 +8,7 @@ import (
 	"gemfactory/internal/service"
 	"gemfactory/internal/telegram"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mymmrac/telego"
@@ -17,21 +18,21 @@ import (
 	"golang.org/x/text/language"
 )
 
-// Manager handles inline keyboard generation and updates.
+// Manager handles the generation and lifecycle of month navigation inline keyboards.
 type Manager struct {
-	releaseService    service.ReleaseServiceInterface
+	releaseService    *service.ReleaseService
 	logger            *zap.Logger
 	config            *config.Config
-	botAPI            telegram.BotAPI
+	tg                *telegram.Client
 	allMonthsKeyboard telego.InlineKeyboardMarkup
 	mainMonthKeyboard telego.InlineKeyboardMarkup
+	lastMonth         int
+	mu                sync.RWMutex
 	stopChan          chan struct{}
 }
 
-var _ ManagerInterface = (*Manager)(nil)
-
-// NewKeyboardManager creates a new Manager.
-func NewKeyboardManager(releaseService service.ReleaseServiceInterface, config *config.Config, logger *zap.Logger) *Manager {
+// NewManager initializes keyboards and starts the periodic update ticker.
+func NewManager(releaseService *service.ReleaseService, config *config.Config, logger *zap.Logger) *Manager {
 	k := &Manager{
 		releaseService: releaseService,
 		logger:         logger,
@@ -40,25 +41,21 @@ func NewKeyboardManager(releaseService service.ReleaseServiceInterface, config *
 	}
 
 	k.initKeyboards()
-
 	go k.updateMainMonthKeyboardLoop()
 
 	return k
 }
 
-// SetBotAPI sets the Telegram Bot API instance.
-func (k *Manager) SetBotAPI(botAPI telegram.BotAPI) {
-	k.botAPI = botAPI
+// SetTelegramClient assigns the Telegram client instance for sending responses.
+func (k *Manager) SetTelegramClient(tg *telegram.Client) {
+	k.tg = tg
 }
 
-// initKeyboards prepares all static and dynamic keyboards.
 func (k *Manager) initKeyboards() {
 	k.initAllMonthsKeyboard()
-
 	k.updateMainMonthKeyboard()
 }
 
-// initAllMonthsKeyboard creates the month selection grid.
 func (k *Manager) initAllMonthsKeyboard() {
 	months := []string{
 		"january", "february", "march", "april", "may", "june",
@@ -76,7 +73,6 @@ func (k *Manager) initAllMonthsKeyboard() {
 		rows = append(rows, row)
 	}
 
-	// Add "Back" button
 	rows = append(rows, telegoutil.InlineKeyboardRow(
 		telegoutil.InlineKeyboardButton("Back").WithCallbackData("back_to_main"),
 	))
@@ -84,7 +80,6 @@ func (k *Manager) initAllMonthsKeyboard() {
 	k.allMonthsKeyboard = *telegoutil.InlineKeyboard(rows...)
 }
 
-// updateMainMonthKeyboard creates the primary month selection row.
 func (k *Manager) updateMainMonthKeyboard() {
 	loc, err := time.LoadLocation(k.config.Timezone)
 	if err != nil {
@@ -93,6 +88,10 @@ func (k *Manager) updateMainMonthKeyboard() {
 	}
 
 	currentMonth := int(time.Now().In(loc).Month())
+	if currentMonth == k.lastMonth {
+		return
+	}
+
 	prevMonth := currentMonth - 1
 	if prevMonth < 1 {
 		prevMonth = 12
@@ -117,50 +116,42 @@ func (k *Manager) updateMainMonthKeyboard() {
 		telegoutil.InlineKeyboardButton("...").WithCallbackData("show_all_months"),
 	}
 
+	k.mu.Lock()
+	k.lastMonth = currentMonth
 	k.mainMonthKeyboard = *telegoutil.InlineKeyboard(telegoutil.InlineKeyboardRow(buttons...))
+	k.mu.Unlock()
 
 	k.logger.Info("Updated main month keyboard", zap.String("current_month", months[currentMonth-1]))
 }
 
-// updateMainMonthKeyboardLoop updates the keyboard as time progresses.
 func (k *Manager) updateMainMonthKeyboardLoop() {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
 	for {
 		select {
+		case <-ticker.C:
+			k.updateMainMonthKeyboard()
 		case <-k.stopChan:
 			return
-		default:
-			loc, err := time.LoadLocation(k.config.Timezone)
-			if err != nil {
-				k.logger.Error("Failed to load timezone", zap.String("timezone", k.config.Timezone), zap.Error(err))
-				loc = time.UTC
-			}
-
-			now := time.Now().In(loc)
-			nextMonth := now.AddDate(0, 1, 0)
-			firstOfNextMonth := time.Date(nextMonth.Year(), nextMonth.Month(), 1, 0, 0, 0, 0, loc)
-			durationUntilFirst := firstOfNextMonth.Sub(now)
-
-			select {
-			case <-time.After(durationUntilFirst):
-				k.updateMainMonthKeyboard()
-			case <-k.stopChan:
-				return
-			}
 		}
 	}
 }
 
-// GetMainKeyboard returns the primary navigation keyboard.
+// GetMainKeyboard returns a pointer to the thread-safe cached 3-month keyboard.
 func (k *Manager) GetMainKeyboard() *telego.InlineKeyboardMarkup {
-	return &k.mainMonthKeyboard
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	kb := k.mainMonthKeyboard
+	return &kb
 }
 
-// GetAllMonthsKeyboard retrieves the full twelve-month navigation grid.
+// GetAllMonthsKeyboard returns the full 12-month selection keyboard.
 func (k *Manager) GetAllMonthsKeyboard() *telego.InlineKeyboardMarkup {
 	return &k.allMonthsKeyboard
 }
 
-// HandleCallbackQuery processes incoming Telegram inline button clicks.
+// HandleCallbackQuery dispatches button clicks to their respective handler functions.
 func (k *Manager) HandleCallbackQuery(ctx context.Context, callback *telego.CallbackQuery) error {
 	data := callback.Data
 	if callback.Message == nil {
@@ -186,23 +177,15 @@ func (k *Manager) HandleCallbackQuery(ctx context.Context, callback *telego.Call
 	return fmt.Errorf("unknown callback query: %s", data)
 }
 
-// handleMonthCallback responds to specific month selection.
 func (k *Manager) handleMonthCallback(ctx context.Context, callback *telego.CallbackQuery) error {
-	data := callback.Data
 	if callback.Message == nil {
 		return fmt.Errorf("callback query message is nil")
 	}
 	chatID := callback.Message.GetChat().ID
 
-	month := strings.TrimPrefix(data, "month_")
+	month := strings.TrimPrefix(callback.Data, "month_")
 	currentYear := time.Now().Year()
-
 	monthWithYear := fmt.Sprintf("%s-%d", month, currentYear)
-
-	k.logger.Debug("Processing month callback",
-		zap.String("month", month),
-		zap.Int("year", currentYear),
-		zap.String("month_with_year", monthWithYear))
 
 	releases, err := k.releaseService.GetReleasesForMonth(ctx, monthWithYear, false, false)
 	if err != nil {
@@ -210,26 +193,17 @@ func (k *Manager) handleMonthCallback(ctx context.Context, callback *telego.Call
 		return fmt.Errorf("failed to get releases for month %s: %w", monthWithYear, err)
 	}
 
-	response := releases // Assuming releases is now the string response or needs formatting
+	response := releases
 	if response == "" {
-		k.logger.Warn("Empty response for month", zap.String("month", month))
 		response = fmt.Sprintf("No releases found for %s.", month)
 	}
 
-	if k.botAPI != nil {
-		err := k.botAPI.SendMessageWithMarkup(ctx, chatID, response, k.GetMainKeyboard())
-		if err != nil {
-			k.logger.Error("Failed to send message with markup", zap.Int64("chat_id", chatID), zap.Error(err))
-			return err
-		}
-	} else {
-		k.logger.Warn("BotAPI not available, cannot send message", zap.Int64("chat_id", chatID))
+	if k.tg != nil {
+		return k.tg.SendMessageWithMarkup(ctx, chatID, response, k.GetMainKeyboard())
 	}
-
 	return nil
 }
 
-// handleShowAllMonthsCallback replaces the current keyboard with the full month grid.
 func (k *Manager) handleShowAllMonthsCallback(ctx context.Context, callback *telego.CallbackQuery) error {
 	if callback.Message == nil {
 		return fmt.Errorf("callback query message is nil")
@@ -237,22 +211,12 @@ func (k *Manager) handleShowAllMonthsCallback(ctx context.Context, callback *tel
 	chatID := callback.Message.GetChat().ID
 	messageID := callback.Message.GetMessageID()
 
-	k.logger.Debug("Showing all months keyboard")
-
-	if k.botAPI != nil {
-		err := k.botAPI.EditMessageReplyMarkup(ctx, chatID, messageID, k.GetAllMonthsKeyboard())
-		if err != nil {
-			k.logger.Error("Failed to edit message markup", zap.Int64("chat_id", chatID), zap.Error(err))
-			return err
-		}
-	} else {
-		k.logger.Warn("BotAPI not available, cannot edit message", zap.Int64("chat_id", chatID))
+	if k.tg != nil {
+		return k.tg.EditMessageReplyMarkup(ctx, chatID, messageID, k.GetAllMonthsKeyboard())
 	}
-
 	return nil
 }
 
-// handleBackToMainCallback restores the primary monthly keyboard.
 func (k *Manager) handleBackToMainCallback(ctx context.Context, callback *telego.CallbackQuery) error {
 	if callback.Message == nil {
 		return fmt.Errorf("callback query message is nil")
@@ -260,22 +224,17 @@ func (k *Manager) handleBackToMainCallback(ctx context.Context, callback *telego
 	chatID := callback.Message.GetChat().ID
 	messageID := callback.Message.GetMessageID()
 
-	k.logger.Debug("Returning to main keyboard")
-
-	if k.botAPI != nil {
-		err := k.botAPI.EditMessageReplyMarkup(ctx, chatID, messageID, k.GetMainKeyboard())
-		if err != nil {
-			k.logger.Error("Failed to edit message markup", zap.Int64("chat_id", chatID), zap.Error(err))
-			return err
-		}
-	} else {
-		k.logger.Warn("BotAPI not available, cannot edit message", zap.Int64("chat_id", chatID))
+	if k.tg != nil {
+		return k.tg.EditMessageReplyMarkup(ctx, chatID, messageID, k.GetMainKeyboard())
 	}
-
 	return nil
 }
 
-// Stop halts the background update loop.
+// Stop terminates the background keyboard update loop.
 func (k *Manager) Stop() {
-	close(k.stopChan)
+	select {
+	case <-k.stopChan:
+	default:
+		close(k.stopChan)
+	}
 }

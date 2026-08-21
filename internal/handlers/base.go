@@ -1,3 +1,4 @@
+// Package handlers implements command and event handlers for the Telegram bot.
 package handlers
 
 import (
@@ -12,66 +13,57 @@ import (
 	"go.uber.org/zap"
 )
 
-// BaseHandler provides common dependencies for handlers.
+// BaseHandler encapsulates shared dependencies and utility methods for all handlers.
 type BaseHandler struct {
 	Services *service.Services
 	Config   *config.Config
 	Logger   *zap.Logger
-	Keyboard keyboard.ManagerInterface
-	BotAPI   telegram.BotAPI
+	Keyboard *keyboard.Manager
+	TG       *telegram.Client
 }
 
-// NewBaseHandler initializes a new BaseHandler instance.
-func NewBaseHandler(services *service.Services, config *config.Config, keyboard keyboard.ManagerInterface, logger *zap.Logger, botAPI telegram.BotAPI) *BaseHandler {
+// NewBaseHandler creates a new BaseHandler.
+func NewBaseHandler(services *service.Services, config *config.Config, keyboard *keyboard.Manager, logger *zap.Logger, tg *telegram.Client) *BaseHandler {
 	return &BaseHandler{
 		Services: services,
 		Config:   config,
 		Logger:   logger,
 		Keyboard: keyboard,
-		BotAPI:   botAPI,
+		TG:       tg,
 	}
 }
 
-// IsAdmin checks if the user has admin privileges.
+// IsAdmin checks if the given Telegram user matches the configured admin username.
 func (h *BaseHandler) IsAdmin(user *telego.User) bool {
 	if user == nil || user.Username == "" {
 		return false
 	}
-
 	adminUser := strings.TrimPrefix(h.Config.AdminUsername, "@")
-	match := strings.EqualFold(user.Username, adminUser)
-
-	if !match {
-		h.Logger.Warn("Admin access denied",
-			zap.String("user", user.Username),
-			zap.String("expected", adminUser))
-	}
-
-	return match
+	return strings.EqualFold(user.Username, adminUser)
 }
 
-// SendMessage sends a plain text message.
+// SendMessage sends a plain text message to the specified chat.
 func (h *BaseHandler) SendMessage(ctx context.Context, chatID int64, text string) error {
-	return h.BotAPI.SendMessage(ctx, chatID, text)
+	return h.TG.SendMessage(ctx, chatID, text)
 }
 
-// SendMessageWithMarkup sends a message with reply markup.
-func (h *BaseHandler) SendMessageWithMarkup(ctx context.Context, chatID int64, text string, markup any) error {
-	return h.BotAPI.SendMessageWithMarkup(ctx, chatID, text, markup)
+// SendMessageWithMarkup sends a message with an attached custom reply markup.
+func (h *BaseHandler) SendMessageWithMarkup(ctx context.Context, chatID int64, text string, markup telego.ReplyMarkup) error {
+	return h.TG.SendMessageWithMarkup(ctx, chatID, text, markup)
 }
 
-// SendMessageWithKeyboard sends a message with the default navigation keyboard.
+// SendMessageWithKeyboard sends a message with the default inline keyboard.
 func (h *BaseHandler) SendMessageWithKeyboard(ctx context.Context, chatID int64, text string) error {
-	return h.BotAPI.SendMessageWithMarkup(ctx, chatID, text, h.Keyboard.GetMainKeyboard())
+	return h.TG.SendMessageWithMarkup(ctx, chatID, text, h.Keyboard.GetMainKeyboard())
 }
 
-// HandleError logs and notifies the user about an error.
+// HandleError logs the error and sends a formatted notification back to the user.
 func (h *BaseHandler) HandleError(ctx context.Context, chatID int64, err error, userMessage string) {
 	h.Logger.Error(userMessage, zap.Error(err), zap.Int64("chat_id", chatID))
-	_ = h.BotAPI.SendMessage(ctx, chatID, "❌ "+userMessage)
+	_ = h.TG.SendMessage(ctx, chatID, "❌ "+userMessage)
 }
 
-// GetMainKeyboard retrieves the primary navigation markup from the keyboard manager.
+// GetMainKeyboard retrieves the current dynamic month keyboard.
 func (h *BaseHandler) GetMainKeyboard() *telego.InlineKeyboardMarkup {
 	return h.Keyboard.GetMainKeyboard()
 }

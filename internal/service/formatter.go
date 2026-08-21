@@ -16,21 +16,20 @@ func escapeHTML(s string) string {
 func FormatReleaseForTelegram(release *model.Release) string {
 	var artistName string
 	if release.Artist != nil {
-		artistName = release.Artist.Name
+		artistName = release.Artist.Name.String()
 	}
 	artist := "<b>" + escapeHTML(artistName) + "</b>"
 
-	album := cleanReleaseString(release.AlbumName)
-	title := cleanReleaseString(release.Title)
-	track := cleanReleaseString(release.TitleTrack)
+	album := cleanReleaseString(release.AlbumName.String())
+	title := cleanReleaseString(release.Title.String())
+	track := cleanReleaseString(release.TitleTrack.String())
 
 	// Determine what is the main 'event' text
 	var mainEvent string
-	isPre := strings.Contains(strings.ToLower(release.Title), "pre-release") ||
-		strings.Contains(strings.ToLower(release.AlbumName), "pre-release")
+	isPre := strings.Contains(strings.ToLower(release.Title.String()), "pre-release") ||
+		strings.Contains(strings.ToLower(release.AlbumName.String()), "pre-release")
 
 	if isPre {
-		// For pre-releases, prioritize showing the specific pre-release title
 		if title != "" && strings.Contains(strings.ToLower(title), "pre-release") {
 			mainEvent = title
 		} else {
@@ -40,26 +39,22 @@ func FormatReleaseForTelegram(release *model.Release) string {
 			}
 		}
 	} else {
-		// For main releases, use the album name
 		mainEvent = album
 		if mainEvent == "" {
 			mainEvent = title
 		}
 	}
 
-	// Filter out technical placeholders
 	lowEvent := strings.ToLower(mainEvent)
 	if lowEvent == "release date" || lowEvent == "album release" || lowEvent == "offline release" {
 		mainEvent = album
 	}
 
-	// Add Title Track if it's unique and present
 	secondary := ""
 	if track != "" && !isTBA(track) && !strings.EqualFold(track, mainEvent) && !strings.EqualFold(track, album) {
 		secondary = track
 	}
 
-	// Build the final string
 	dateStr := release.Date.Format("02.01")
 	line := fmt.Sprintf("%s | %s | %s", dateStr, artist, escapeHTML(mainEvent))
 
@@ -67,13 +62,12 @@ func FormatReleaseForTelegram(release *model.Release) string {
 		line += " | " + escapeHTML(secondary)
 	}
 
-	// Links
 	var links []string
-	if release.MV != "" && release.MV != "N/A" {
-		links = append(links, fmt.Sprintf("<a href=\"%s\">YT</a>", release.MV))
+	if release.MV.String() != "" && release.MV.String() != "N/A" {
+		links = append(links, fmt.Sprintf("<a href=\"%s\">YT</a>", release.MV.String()))
 	}
-	if release.Spotify != "" && release.Spotify != "N/A" {
-		links = append(links, fmt.Sprintf("<a href=\"%s\">SP</a>", release.Spotify))
+	if release.Spotify.String() != "" && release.Spotify.String() != "N/A" {
+		links = append(links, fmt.Sprintf("<a href=\"%s\">SP</a>", release.Spotify.String()))
 	}
 
 	if len(links) > 0 {
@@ -90,7 +84,6 @@ func cleanReleaseString(s string) string {
 
 	s = strings.TrimSpace(s)
 
-	// Only unwrap if string starts and ends with matching quotes/brackets
 	for {
 		changed := false
 		pairs := [][2]string{{"“", "”"}, {"\"", "\""}, {"'", "'"}, {"[", "]"}, {"(", ")"}, {"{", "}"}}
@@ -105,7 +98,6 @@ func cleanReleaseString(s string) string {
 		}
 	}
 
-	// Check for "Pre-release" specifically
 	low := strings.ToLower(s)
 	if strings.HasPrefix(low, "pre-release") {
 		sub := strings.TrimSpace(s[len("pre-release"):])
@@ -116,7 +108,6 @@ func cleanReleaseString(s string) string {
 		return "Pre-release"
 	}
 
-	// Handle standard "Prefix – Name" format
 	separators := []string{" – ", " — ", " - "}
 	for _, sep := range separators {
 		if parts := strings.SplitN(s, sep, 2); len(parts) == 2 {
@@ -140,32 +131,31 @@ func isTBA(s string) bool {
 func FormatReleaseForDisplay(release *model.Release) string {
 	var parts []string
 
-	// Artist
 	var artistName string
 	if release.Artist != nil {
-		artistName = release.Artist.Name
+		artistName = release.Artist.Name.String()
 	}
 	parts = append(parts, fmt.Sprintf("🎤 %s", artistName))
 
-	// Title
-	title := release.Title
-	if release.AlbumName != "" && release.AlbumName != "N/A" {
-		title = release.AlbumName
+	title := release.Title.String()
+	if release.AlbumName.String() != "" && release.AlbumName.String() != "N/A" {
+		title = release.AlbumName.String()
 	}
 	parts = append(parts, fmt.Sprintf("💿 %s", title))
 
-	// Title Track
-	if release.TitleTrack != "" && release.TitleTrack != "N/A" {
-		parts = append(parts, fmt.Sprintf("🎵 %s", release.TitleTrack))
+	if release.TitleTrack.String() != "" && release.TitleTrack.String() != "N/A" {
+		parts = append(parts, fmt.Sprintf("🎵 %s", release.TitleTrack.String()))
 	}
 
-	// Date and time
 	dateStr := release.Date.Format("02.01.06")
 	parts = append(parts, fmt.Sprintf("📅 %s", dateStr))
 
-	// MV
-	if release.MV != "" && release.MV != "N/A" {
-		parts = append(parts, fmt.Sprintf("🎬 [MV](%s)", release.MV))
+	if release.MV.String() != "" && release.MV.String() != "N/A" {
+		parts = append(parts, fmt.Sprintf("🎬 [MV](%s)", release.MV.String()))
+	}
+
+	if release.Spotify.String() != "" && release.Spotify.String() != "N/A" {
+		parts = append(parts, fmt.Sprintf("🎧 [Spotify](%s)", release.Spotify.String()))
 	}
 
 	return strings.Join(parts, "\n")
