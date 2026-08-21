@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -16,9 +17,18 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// ParseKProfilesMonthlyPage extracts releases using chromedp to handle dynamic tabs and pagination.
+// ParseKProfilesMonthlyPage extracts releases for a given month. It prefers
+// the WordPress REST API (a handful of JSON requests), and falls back to a
+// headless-browser crawl of the monthly schedule page when the API is
+// unavailable.
 func (f *fetcherImpl) ParseKProfilesMonthlyPage(ctx context.Context, pageURL, month, year string) iter.Seq2[Release, error] {
 	return func(yield func(Release, error) bool) {
+		if f.parseMonthlyViaREST(ctx, month, year, yield) {
+			return
+		}
+
+		f.logger.Warn("REST parse failed, falling back to browser-based crawl",
+			zap.String("month", month), zap.String("year", year))
 		f.logger.Info("Starting browser-based parse", zap.String("url", pageURL))
 
 		// Quick 404 check
@@ -151,7 +161,7 @@ func (f *fetcherImpl) ParseKProfilesMonthlyPage(ctx context.Context, pageURL, mo
 
 					if res.Count > 0 && res.Count == lastCount {
 						stagnant++
-						if stagnant >= 3 {
+						if stagnant >= 6 {
 							f.logger.Warn("pagination stagnant, breaking", zap.Int("count", res.Count))
 							break
 						}
@@ -160,7 +170,7 @@ func (f *fetcherImpl) ParseKProfilesMonthlyPage(ctx context.Context, pageURL, mo
 						lastCount = res.Count
 					}
 
-					_ = chromedp.Sleep(5 * time.Second).Do(ctx)
+					_ = chromedp.Sleep(3 * time.Second).Do(ctx)
 					_ = chromedp.Evaluate(`window.scrollBy(0, 300);`, nil).Do(ctx)
 				}
 				return nil
@@ -190,6 +200,7 @@ func (f *fetcherImpl) ParseKProfilesMonthlyPage(ctx context.Context, pageURL, mo
 		doc.Find("a").Each(func(i int, s *goquery.Selection) {
 			href, _ := s.Attr("href")
 			if strings.Contains(href, "/album/") {
+				href = cleanAlbumURL(href)
 				if strings.HasPrefix(href, "/") {
 					href = "https://kpopofficial.com" + href
 				}
@@ -280,7 +291,10 @@ func (f *fetcherImpl) ParseKProfilesMonthlyPage(ctx context.Context, pageURL, mo
 			for _, res := range batchResults {
 				totalProcessed++
 				for _, r := range res.releases {
-					relKey := fmt.Sprintf("%s|%s|%s|%s", r.Artist, r.Date.Format("2006-01-02"), r.Title, normalizeURL(r.SourceURL))
+					if !releaseInMonth(r.Date, month, year) {
+						continue
+					}
+					relKey := fmt.Sprintf("%s|%s|%s|%s", r.Artist, r.Date.Format("2006-01-02"), strings.ToLower(r.AlbumName), strings.ToLower(r.Title))
 					if seenReleases[relKey] {
 						continue
 					}
@@ -314,6 +328,64 @@ func (f *fetcherImpl) parseEventPage(ctx context.Context, url string, depth int)
 		return rels, links, err
 	}
 	return rels, nil, err
+}
+
+// parseMonthlyViaREST yields all releases for the requested month using the
+// WordPress REST API. It reports whether the REST path handled the request;
+// on transport errors the caller should fall back to the legacy crawl.
+func (f *fetcherImpl) parseMonthlyViaREST(ctx context.Context, month, year string, yield func(Release, error) bool) bool {
+	after, before, err := monthWindow(month, year)
+	if err != nil {
+		f.logger.Warn("Cannot build REST window", zap.String("month", month), zap.String("year", year), zap.Error(err))
+		return false
+	}
+
+	posts, err := f.httpClient.FetchAlbumsWindow(ctx, after, before)
+	if err != nil {
+		f.logger.Warn("REST album fetch failed", zap.Error(err))
+		return false
+	}
+	f.logger.Info("Fetched albums via REST",
+		zap.Int("count", len(posts)),
+		zap.String("month", month),
+		zap.String("year", year))
+
+	seen := make(map[string]bool)
+	for _, post := range posts {
+		if ctx.Err() != nil {
+			return true
+		}
+		if post.Link == "" || post.Content.Rendered == "" {
+			continue
+		}
+		wrapped := "<h1 class=\"entry-title\">" + post.Title.Rendered + "</h1>" +
+			"<div class=\"entry-content\">" + post.Content.Rendered + "</div>"
+		doc, docErr := goquery.NewDocumentFromReader(strings.NewReader(wrapped))
+		if docErr != nil {
+			continue
+		}
+
+		rels, _, parseErr := f.parseEventPageFromDoc(doc, post.Link)
+		if parseErr != nil {
+			continue
+		}
+
+		for _, r := range rels {
+			if !releaseInMonth(r.Date, month, year) {
+				continue
+			}
+			key := fmt.Sprintf("%s|%s|%s|%s", r.Artist, r.Date.Format("2006-01-02"), strings.ToLower(r.AlbumName), strings.ToLower(r.Title))
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+
+			if !yield(*r, nil) {
+				return true
+			}
+		}
+	}
+	return true
 }
 
 func (f *fetcherImpl) parseEventPageFromDoc(doc *goquery.Document, url string) ([]*Release, []string, error) {
@@ -378,6 +450,7 @@ func (f *fetcherImpl) parseEventPageFromDoc(doc *goquery.Document, url string) (
 		cells.Eq(1).Find("a").Each(func(j int, tag *goquery.Selection) {
 			href, _ := tag.Attr("href")
 			if strings.Contains(href, "/album/") {
+				href = cleanAlbumURL(href)
 				if strings.HasPrefix(href, "/") {
 					href = "https://kpopofficial.com" + href
 				}
@@ -433,6 +506,7 @@ func (f *fetcherImpl) parseEventPageFromDoc(doc *goquery.Document, url string) (
 				events = append(events, eventRaw{Name: title, Date: dateStr, Link: evtLink})
 			}
 
+			evtLink = cleanAlbumURL(evtLink)
 			if evtLink != "" && normalizeURL(evtLink) != normalizeURL(url) {
 				subLinks = append(subLinks, evtLink)
 			}
@@ -495,6 +569,7 @@ func (f *fetcherImpl) parseEventPageFromDoc(doc *goquery.Document, url string) (
 	doc.Find(".entry-content a, .post a, .post-inner a, .wp-block-post-template a, .gspbgrid_item_link").Each(func(j int, tag *goquery.Selection) {
 		href, _ := tag.Attr("href")
 		if strings.Contains(href, "/album/") {
+			href = cleanAlbumURL(href)
 			if strings.HasPrefix(href, "/") {
 				href = "https://kpopofficial.com" + href
 			}
@@ -507,9 +582,49 @@ func (f *fetcherImpl) parseEventPageFromDoc(doc *goquery.Document, url string) (
 	return releases, uniqueStrings(subLinks), nil
 }
 
+// releaseInMonth reports whether the release date falls into the requested
+// month/year. Sub-crawling discovers pages from adjacent months, so out-of-month
+// releases are skipped instead of being yielded and stored.
+func releaseInMonth(d time.Time, month, year string) bool {
+	if d.IsZero() {
+		return false
+	}
+	m := monthNumber(month)
+	if m == 0 {
+		return true
+	}
+	if int(d.Month()) != m {
+		return false
+	}
+	if y, err := strconv.Atoi(strings.TrimSpace(year)); err == nil && y > 0 {
+		return d.Year() == y
+	}
+	return true
+}
+
+func monthNumber(name string) int {
+	months := []string{"january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"}
+	for i, m := range months {
+		if strings.ToLower(strings.TrimSpace(name)) == m {
+			return i + 1
+		}
+	}
+	return 0
+}
+
 func normalizeURL(u string) string {
+	u = cleanAlbumURL(u)
 	u = strings.TrimSuffix(u, "/")
 	return strings.ToLower(u)
+}
+
+// cleanAlbumURL strips query strings and fragments such as "?share=facebook",
+// which are share-link variants of the same page and always fail to load.
+func cleanAlbumURL(u string) string {
+	if idx := strings.IndexAny(u, "?#"); idx != -1 {
+		u = u[:idx]
+	}
+	return u
 }
 
 func uniqueStrings(in []string) []string {
