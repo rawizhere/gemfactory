@@ -340,6 +340,22 @@ func (f *fetcherImpl) parseMonthlyViaREST(ctx context.Context, month, year strin
 		return false
 	}
 
+	// The site backfills album pages for old releases long after the fact, so
+	// a publication-date window misses them. For months older than
+	// backfillHorizon, fetch all album posts and filter by release date instead.
+	const backfillHorizon = 90 * 24 * time.Hour
+	if m := monthNumber(month); m > 0 {
+		y, convErr := strconv.Atoi(strings.TrimSpace(year))
+		if convErr == nil && y > 0 {
+			monthStart := time.Date(y, time.Month(m), 1, 0, 0, 0, 0, time.UTC)
+			if time.Since(monthStart) > backfillHorizon {
+				f.logger.Info("Old month requested, fetching all albums for backfill coverage",
+					zap.String("month", month), zap.String("year", year))
+				after, before = time.Time{}, time.Time{}
+			}
+		}
+	}
+
 	posts, err := f.httpClient.FetchAlbumsWindow(ctx, after, before)
 	if err != nil {
 		f.logger.Warn("REST album fetch failed", zap.Error(err))

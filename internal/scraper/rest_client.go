@@ -40,8 +40,12 @@ func (c *HTTPClient) FetchAlbumsWindow(ctx context.Context, after, before time.T
 		q := url.Values{}
 		q.Set("per_page", strconv.Itoa(albumsPerPage))
 		q.Set("page", strconv.Itoa(page))
-		q.Set("after", after.Format(time.RFC3339))
-		q.Set("before", before.Format(time.RFC3339))
+		if !after.IsZero() {
+			q.Set("after", after.Format(time.RFC3339))
+		}
+		if !before.IsZero() {
+			q.Set("before", before.Format(time.RFC3339))
+		}
 		q.Set("_fields", "link,title,content")
 		apiURL := "https://kpopofficial.com/wp-json/wp/v2/album?" + q.Encode()
 
