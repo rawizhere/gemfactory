@@ -1,4 +1,3 @@
-// Package telegram provides abstractions and implementations for Telegram bot interactions.
 package telegram
 
 import (
@@ -6,25 +5,25 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/mymmrac/telego"
+	"github.com/mymmrac/telego/telegoapi"
 	"github.com/mymmrac/telego/telegoutil"
 	"go.uber.org/zap"
 )
 
 const maxMessageLength = 4000
 
-// Router defines methods for routing update events.
 type Router interface {
 	HandleUpdate(ctx context.Context, update telego.Update)
 	RegisterBotCommands() []telego.BotCommand
 }
 
-// Client manages Telegram bot communication, update polling, and message sending.
 type Client struct {
 	bot    *telego.Bot
 	router Router
@@ -32,7 +31,6 @@ type Client struct {
 	wg     sync.WaitGroup
 }
 
-// NewClient initializes a new Telegram bot client.
 func NewClient(botToken string, logger *zap.Logger) (*Client, error) {
 	bot, err := telego.NewBot(botToken)
 	if err != nil {
@@ -45,7 +43,6 @@ func NewClient(botToken string, logger *zap.Logger) (*Client, error) {
 	}, nil
 }
 
-// Start begins long-polling for updates and dispatches them to the router.
 func (c *Client) Start(ctx context.Context, router Router) error {
 	c.router = router
 
@@ -106,7 +103,6 @@ func (c *Client) processUpdate(ctx context.Context, update telego.Update) {
 	c.router.HandleUpdate(ctx, update)
 }
 
-// SendMessage sends an HTML formatted text message, safely splitting if exceeding limit.
 func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) error {
 	chunks := splitMessage(text, maxMessageLength)
 	for _, chunk := range chunks {
@@ -121,14 +117,12 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) err
 	return nil
 }
 
-// SendMessageWithMarkup sends an HTML message with reply markup attached to the final chunk.
 func (c *Client) SendMessageWithMarkup(ctx context.Context, chatID int64, text string, markup telego.ReplyMarkup) error {
 	chunks := splitMessage(text, maxMessageLength)
 	for i, chunk := range chunks {
 		params := telegoutil.Message(telegoutil.ID(chatID), chunk).WithParseMode(telego.ModeHTML)
 		params.LinkPreviewOptions = &telego.LinkPreviewOptions{IsDisabled: true}
 
-		// Attach markup to the last chunk
 		if i == len(chunks)-1 && markup != nil {
 			params.ReplyMarkup = markup
 		}
@@ -142,7 +136,6 @@ func (c *Client) SendMessageWithMarkup(ctx context.Context, chatID int64, text s
 	return nil
 }
 
-// EditMessageReplyMarkup updates an existing message's keyboard.
 func (c *Client) EditMessageReplyMarkup(ctx context.Context, chatID int64, messageID int, markup *telego.InlineKeyboardMarkup) error {
 	params := &telego.EditMessageReplyMarkupParams{
 		ChatID:      telegoutil.ID(chatID),
@@ -157,14 +150,17 @@ func (c *Client) EditMessageReplyMarkup(ctx context.Context, chatID int64, messa
 	return err
 }
 
-// SendMessageRaw sends an HTML message and returns the created message.
-func (c *Client) SendMessageRaw(ctx context.Context, chatID int64, text string) (*telego.Message, error) {
+func (c *Client) SendMessageRaw(ctx context.Context, chatID int64, text string, replyToMsgID ...int) (*telego.Message, error) {
 	params := telegoutil.Message(telegoutil.ID(chatID), text).WithParseMode(telego.ModeHTML)
 	params.LinkPreviewOptions = &telego.LinkPreviewOptions{IsDisabled: true}
+	if len(replyToMsgID) > 0 && replyToMsgID[0] > 0 {
+		params.ReplyParameters = &telego.ReplyParameters{
+			MessageID: replyToMsgID[0],
+		}
+	}
 	return c.bot.SendMessage(ctx, params)
 }
 
-// EditMessageText updates the text of an existing HTML message. Errors are logged and returned.
 func (c *Client) EditMessageText(ctx context.Context, chatID int64, messageID int, text string) error {
 	params := &telego.EditMessageTextParams{
 		ChatID:    telegoutil.ID(chatID),
@@ -180,8 +176,6 @@ func (c *Client) EditMessageText(ctx context.Context, chatID int64, messageID in
 	return err
 }
 
-// probeVideoMeta returns the video width, height, and duration (in seconds) via ffprobe.
-// Best-effort: errors are ignored and default values are returned.
 func probeVideoMeta(filePath string) (int, int, int) {
 	out, err := exec.Command("ffprobe", "-v", "error",
 		"-show_entries", "stream=width,height:format=duration",
@@ -203,23 +197,131 @@ func probeVideoMeta(filePath string) (int, int, int) {
 	return w, h, dur
 }
 
-// SendVideoFile uploads a local video file to the chat with an optional caption.
-func (c *Client) SendVideoFile(ctx context.Context, chatID int64, filePath, caption string) error {
+func generateVideoThumbnail(filePath string) string {
+	thumbPath := strings.TrimSuffix(filePath, filepath.Ext(filePath)) + "_thumb.jpg"
+	cmd := exec.Command("ffmpeg", "-y", "-nostdin",
+		"-ss", "00:00:00.500",
+		"-i", filePath,
+		"-vframes", "1",
+		"-q:v", "2",
+		"-vf", "scale=320:-2",
+		thumbPath)
+	if err := cmd.Run(); err != nil {
+		cmd0 := exec.Command("ffmpeg", "-y", "-nostdin",
+			"-ss", "00:00:00.000",
+			"-i", filePath,
+			"-vframes", "1",
+			"-q:v", "2",
+			"-vf", "scale=320:-2",
+			thumbPath)
+		if err0 := cmd0.Run(); err0 != nil {
+			return ""
+		}
+	}
+	if info, err := os.Stat(thumbPath); err == nil && info.Size() > 0 {
+		return thumbPath
+	}
+	return ""
+}
+
+type UploadProgressCallback func(pct int, speed, sizeStr string)
+
+type progressFileReader struct {
+	file       *os.File
+	total      int64
+	read       int64
+	lastRead   int64
+	lastEmitAt time.Time
+	onProgress UploadProgressCallback
+}
+
+func newProgressFileReader(f *os.File, total int64, onProgress UploadProgressCallback) *progressFileReader {
+	return &progressFileReader{
+		file:       f,
+		total:      total,
+		lastEmitAt: time.Now(),
+		onProgress: onProgress,
+	}
+}
+
+func (p *progressFileReader) Read(b []byte) (int, error) {
+	n, err := p.file.Read(b)
+	if n > 0 {
+		p.read += int64(n)
+		if p.onProgress != nil && p.total > 0 {
+			now := time.Now()
+			elapsed := now.Sub(p.lastEmitAt)
+			if elapsed >= 1500*time.Millisecond || p.read >= p.total {
+				pct := int(float64(p.read) / float64(p.total) * 100)
+				if pct > 100 {
+					pct = 100
+				}
+				bytesDiff := p.read - p.lastRead
+				var speedStr string
+				if elapsed.Seconds() > 0 && bytesDiff > 0 {
+					speedBps := float64(bytesDiff) / elapsed.Seconds()
+					speedStr = formatSpeed(speedBps)
+				}
+				sizeStr := fmt.Sprintf("%.1f / %.1f MB", float64(p.read)/(1024*1024), float64(p.total)/(1024*1024))
+				p.lastEmitAt = now
+				p.lastRead = p.read
+				p.onProgress(pct, speedStr, sizeStr)
+			}
+		}
+	}
+	return n, err
+}
+
+func (p *progressFileReader) Name() string {
+	return p.file.Name()
+}
+
+func formatSpeed(bytesPerSec float64) string {
+	if bytesPerSec >= 1024*1024 {
+		return fmt.Sprintf("%.1f MB/s", bytesPerSec/(1024*1024))
+	}
+	if bytesPerSec >= 1024 {
+		return fmt.Sprintf("%.0f KB/s", bytesPerSec/1024)
+	}
+	return fmt.Sprintf("%.0f B/s", bytesPerSec)
+}
+
+func (c *Client) SendVideoFile(ctx context.Context, chatID int64, filePath, caption string, onProgress UploadProgressCallback, replyToMsgID int) error {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("open video file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
-	video := telegoutil.Video(telegoutil.ID(chatID), telegoutil.File(f))
+	var fileReader telegoapi.NamedReader = f
+	if stat, statErr := f.Stat(); statErr == nil && stat.Size() > 0 && onProgress != nil {
+		fileReader = newProgressFileReader(f, stat.Size(), onProgress)
+	}
+
+	video := telegoutil.Video(telegoutil.ID(chatID), telegoutil.File(fileReader))
 	if caption != "" {
 		video = video.WithCaption(caption).WithParseMode(telego.ModeHTML)
 	}
 	video = video.WithSupportsStreaming()
+	if replyToMsgID > 0 {
+		video.ReplyParameters = &telego.ReplyParameters{
+			MessageID:                replyToMsgID,
+			AllowSendingWithoutReply: true,
+		}
+	}
 	if w, h, dur := probeVideoMeta(filePath); w > 0 && h > 0 {
 		video = video.WithWidth(w).WithHeight(h)
 		if dur > 0 {
 			video = video.WithDuration(dur)
+		}
+	}
+
+	if thumbPath := generateVideoThumbnail(filePath); thumbPath != "" {
+		defer func() { _ = os.Remove(thumbPath) }()
+		if thumbFile, err := os.Open(thumbPath); err == nil {
+			defer func() { _ = thumbFile.Close() }()
+			thumb := telegoutil.File(thumbFile)
+			video = video.WithThumbnail(&thumb)
 		}
 	}
 
@@ -230,17 +332,27 @@ func (c *Client) SendVideoFile(ctx context.Context, chatID int64, filePath, capt
 	return nil
 }
 
-// SendAudioFile uploads a local audio file to the chat with an optional caption.
-func (c *Client) SendAudioFile(ctx context.Context, chatID int64, filePath, caption string) error {
+func (c *Client) SendAudioFile(ctx context.Context, chatID int64, filePath, caption string, onProgress UploadProgressCallback, replyToMsgID int) error {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("open audio file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
-	audio := telegoutil.Audio(telegoutil.ID(chatID), telegoutil.File(f))
+	var fileReader telegoapi.NamedReader = f
+	if stat, statErr := f.Stat(); statErr == nil && stat.Size() > 0 && onProgress != nil {
+		fileReader = newProgressFileReader(f, stat.Size(), onProgress)
+	}
+
+	audio := telegoutil.Audio(telegoutil.ID(chatID), telegoutil.File(fileReader))
 	if caption != "" {
 		audio = audio.WithCaption(caption).WithParseMode(telego.ModeHTML)
+	}
+	if replyToMsgID > 0 {
+		audio.ReplyParameters = &telego.ReplyParameters{
+			MessageID:                replyToMsgID,
+			AllowSendingWithoutReply: true,
+		}
 	}
 
 	if _, err := c.bot.SendAudio(ctx, audio); err != nil {
@@ -250,7 +362,6 @@ func (c *Client) SendAudioFile(ctx context.Context, chatID int64, filePath, capt
 	return nil
 }
 
-// DeleteMessage removes a message from the chat.
 func (c *Client) DeleteMessage(ctx context.Context, chatID int64, messageID int) error {
 	return c.bot.DeleteMessage(ctx, &telego.DeleteMessageParams{
 		ChatID:    telegoutil.ID(chatID),
@@ -258,7 +369,6 @@ func (c *Client) DeleteMessage(ctx context.Context, chatID int64, messageID int)
 	})
 }
 
-// SetBotCommands registers bot commands with Telegram.
 func (c *Client) SetBotCommands(ctx context.Context, commands []telego.BotCommand) error {
 	err := c.bot.SetMyCommands(ctx, &telego.SetMyCommandsParams{Commands: commands})
 	if err != nil {

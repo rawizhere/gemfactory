@@ -8,38 +8,35 @@ import (
 	"github.com/mymmrac/telego"
 )
 
-// UserHandlers processes public user commands and queries.
 type UserHandlers struct {
 	*BaseHandler
 }
 
-// NewUserHandlers creates a new UserHandlers instance.
 func NewUserHandlers(base *BaseHandler) *UserHandlers {
 	return &UserHandlers{BaseHandler: base}
 }
 
-// Start displays the welcome message and month selection keyboard.
 func (h *UserHandlers) Start(ctx context.Context, message *telego.Message) {
 	text := "Welcome! Please choose a month:"
 	_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, text, h.GetMainKeyboard())
 }
 
-// Help provides usage instructions and available bot commands.
 func (h *UserHandlers) Help(ctx context.Context, message *telego.Message) {
-	text := "Available commands:\n" +
-		"\n/start - Start the bot\n" +
-		"/help - Show this message\n" +
-		"/month [month] - Releases for the current year\n" +
-		"/month [month] [year] - Releases for the selected period\n" +
-		"/search [artist] - Search by artist\n" +
-		"/artists - Artist lists\n" +
-		"/metrics - System metrics\n" +
-		"\n" +
+	text := "<b>Commands:</b>\n\n" +
+		"/clip &lt;url&gt; &lt;start&gt; &lt;end&gt; [hq] - Cut video clip\n" +
+		"/gif &lt;url&gt; &lt;start&gt; &lt;end&gt; [hq] - Cut clip without audio\n" +
+		"/subs &lt;url&gt; &lt;start&gt; &lt;end&gt; [lang] [hq] - Cut clip with subtitles\n" +
+		"/mp3 &lt;url&gt; [start] [end] - Extract audio track\n" +
+		"/month [month] [year] [-f|-m] - Releases for a month\n" +
+		"/search &lt;artist&gt; - Search releases by artist\n" +
+		"/artists - List tracked artists\n" +
+		"/metrics - Show system metrics\n" +
+		"\nDirect links: Send TikTok or YouTube Shorts directly.\n" +
+		"Topic help: <code>/help clip</code>, <code>/help subs</code>, etc.\n\n" +
 		fmt.Sprintf("Admin: @%s", h.Config.AdminUsername)
 	_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, text, h.GetMainKeyboard())
 }
 
-// Month retrieves and lists releases for a specific month and year, optionally filtered by gender.
 func (h *UserHandlers) Month(ctx context.Context, message *telego.Message) {
 	parts := strings.Fields(message.Text)
 	if len(parts) < 2 {
@@ -80,7 +77,6 @@ func (h *UserHandlers) Month(ctx context.Context, message *telego.Message) {
 	_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, response, h.GetMainKeyboard())
 }
 
-// Artists returns formatted lists of all tracked male and female artists.
 func (h *UserHandlers) Artists(ctx context.Context, message *telego.Message) {
 	response, err := h.Services.Artist.FormatList(ctx)
 	if err != nil {
@@ -90,7 +86,6 @@ func (h *UserHandlers) Artists(ctx context.Context, message *telego.Message) {
 	_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, response, h.GetMainKeyboard())
 }
 
-// Search queries releases matching the given artist name.
 func (h *UserHandlers) Search(ctx context.Context, message *telego.Message) {
 	parts := strings.SplitN(message.Text, " ", 2)
 	if len(parts) < 2 {
@@ -107,16 +102,15 @@ func (h *UserHandlers) Search(ctx context.Context, message *telego.Message) {
 	_ = h.SendMessage(ctx, message.Chat.ID, response)
 }
 
-// Metrics reports database totals for artists and releases.
 func (h *UserHandlers) Metrics(ctx context.Context, message *telego.Message) {
 	fCount, mCount, tCount, _ := h.Services.Artist.GetCounts(ctx)
 	rCount, _ := h.Services.Release.GetTotalReleaseCount(ctx)
 
-	text := fmt.Sprintf("📊 <b>GemFactory Metrics:</b>\n\n"+
-		"🎤 Total Artists: %d\n"+
-		"💃 Female: %d\n"+
-		"🕺 Male: %d\n\n"+
-		"🎵 Total Releases: %d",
+	text := fmt.Sprintf("<b>GemFactory Metrics:</b>\n\n"+
+		"Total Artists: %d\n"+
+		"Female: %d\n"+
+		"Male: %d\n\n"+
+		"Total Releases: %d",
 		tCount, fCount, mCount, rCount)
 
 	_ = h.SendMessage(ctx, message.Chat.ID, text)

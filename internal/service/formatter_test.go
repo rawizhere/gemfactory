@@ -57,3 +57,42 @@ func TestCleanReleaseString(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanReleaseTitle(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"{Title with braces}", "Title with braces"},
+		{"   Spaced   Title   ", "Spaced Title"},
+		{"Clean Title", "Clean Title"},
+	}
+
+	for _, tt := range tests {
+		got := CleanReleaseTitle(tt.input)
+		if got != tt.want {
+			t.Errorf("CleanReleaseTitle(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestCleanLink(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"https://youtube.com/watch?v=123", "https://youtube.com/watch?v=123"},
+		{"https://youtube.com/@channelName", ""},
+		{"https://youtube.com/channel/UC12345", ""},
+		{"https://youtube.com/user/userName", ""},
+		{"https://youtube.com/c/customName", ""},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		got := CleanLink(tt.input)
+		if got != tt.want {
+			t.Errorf("CleanLink(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}

@@ -1,0 +1,64 @@
+name: gemfactory-test
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: gemfactory-test-db
+    environment:
+      POSTGRES_DB: gemfactory_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gemfactory123}
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    command: postgres -c max_connections=100
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d gemfactory_test" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - gemfactory-test-net
+
+  app:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+    container_name: gemfactory-test-app
+    env_file:
+      - ../.env.test
+    environment:
+      DB_DSN: postgres://postgres:${POSTGRES_PASSWORD:-gemfactory123}@postgres:5432/gemfactory_test?sslmode=disable
+      BOT_TOKEN: ${BOT_TOKEN}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      HEALTH_CHECK_ENABLED: "true"
+      HEALTH_PORT: 8080
+      WEB_ENABLED: ${WEB_ENABLED:-true}
+      WEB_PORT: 9090
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      SCRAPER_REQUEST_DELAY: ${SCRAPER_REQUEST_DELAY:-2s}
+    ports:
+      - "8085:8080"
+      - "9095:9090"
+    volumes:
+      - app_test_data:/app/data
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health" ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - gemfactory-test-net
+
+volumes:
+  postgres_test_data:
+  app_test_data:
+
+networks:
+  gemfactory-test-net:
+    driver: bridge

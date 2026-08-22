@@ -1,4 +1,3 @@
-// Package middleware provides request interceptors for rate limiting, debouncing, logging, and recovery.
 package middleware
 
 import (
@@ -9,7 +8,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// Middleware orchestrates rate limiting and debounce checks for Telegram updates.
 type Middleware struct {
 	rateLimiter *RateLimiter
 	debouncer   *Debouncer
@@ -17,7 +15,6 @@ type Middleware struct {
 	config      *config.Config
 }
 
-// New initializes the middleware pipeline.
 func New(config *config.Config, logger *zap.Logger) *Middleware {
 	return &Middleware{
 		rateLimiter: NewRateLimiter(10, 60*time.Second, logger),
@@ -27,7 +24,6 @@ func New(config *config.Config, logger *zap.Logger) *Middleware {
 	}
 }
 
-// Process evaluates whether the incoming update passes rate limits.
 func (m *Middleware) Process(update telego.Update) bool {
 	if update.Message != nil && update.Message.From != nil {
 		userID := update.Message.From.ID
@@ -39,7 +35,6 @@ func (m *Middleware) Process(update telego.Update) bool {
 	return true
 }
 
-// ProcessWithMiddleware executes the full middleware chain around the target handler.
 func (m *Middleware) ProcessWithMiddleware(update telego.Update, handler func(telego.Update)) {
 	Recovery(m.logger)(update, func(update telego.Update) {
 		Logging(m.logger)(update, func(update telego.Update) {
@@ -54,7 +49,6 @@ func (m *Middleware) ProcessWithMiddleware(update telego.Update, handler func(te
 	})
 }
 
-// Cleanup purges stale rate limiter and debouncer records.
 func (m *Middleware) Cleanup() {
 	m.rateLimiter.Cleanup()
 	m.debouncer.Cleanup()

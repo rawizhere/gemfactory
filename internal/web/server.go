@@ -1,4 +1,3 @@
-// Package web serves a lightweight admin page for managing artists and releases.
 package web
 
 import (
@@ -20,34 +19,32 @@ import (
 	"gemfactory/internal/downloader"
 	"gemfactory/internal/model"
 	"gemfactory/internal/service"
-	"gemfactory/internal/storage/repository"
+	"gemfactory/internal/storage"
 )
 
 //go:embed static
 var staticFS embed.FS
 
-// Server runs the admin HTTP server.
 type Server struct {
 	server     *http.Server
 	logger     *zap.Logger
 	appCfg     *config.Config
-	artists    *repository.ArtistRepository
-	releases   *repository.ReleaseRepository
+	artists    *storage.ArtistRepository
+	releases   *storage.ReleaseRepository
 	configs    model.ConfigRepository
 	cookies    model.CookieRepository
 	downloads  *downloader.Service
 	releaseSvc *service.ReleaseService
 }
 
-// NewServer initializes the admin server with its routes.
 func NewServer(port string, logger *zap.Logger, db *bun.DB, appCfg *config.Config, downloads *downloader.Service, releaseSvc *service.ReleaseService) *Server {
 	s := &Server{
 		logger:     logger,
 		appCfg:     appCfg,
-		artists:    repository.NewArtistRepository(db, logger),
-		releases:   repository.NewReleaseRepository(db, logger),
-		configs:    repository.NewConfigRepository(db, logger),
-		cookies:    repository.NewCookieRepository(db, logger),
+		artists:    storage.NewArtistRepository(db, logger),
+		releases:   storage.NewReleaseRepository(db, logger),
+		configs:    storage.NewConfigRepository(db, logger),
+		cookies:    storage.NewCookieRepository(db, logger),
 		downloads:  downloads,
 		releaseSvc: releaseSvc,
 	}
@@ -59,6 +56,7 @@ func NewServer(port string, logger *zap.Logger, db *bun.DB, appCfg *config.Confi
 	mux.HandleFunc("GET /api/artists", s.listArtists)
 	mux.HandleFunc("POST /api/artists", s.createArtist)
 	mux.HandleFunc("POST /api/artists/batch", s.createArtists)
+	mux.HandleFunc("POST /api/artists/import-json", s.importArtistsJSON)
 	mux.HandleFunc("PATCH /api/artists/{id}", s.updateArtist)
 	mux.HandleFunc("DELETE /api/artists/{id}", s.deleteArtist)
 	mux.HandleFunc("GET /api/releases", s.listReleases)
@@ -76,6 +74,9 @@ func NewServer(port string, logger *zap.Logger, db *bun.DB, appCfg *config.Confi
 	mux.HandleFunc("GET /api/downloads", s.listDownloads)
 	mux.HandleFunc("GET /api/downloads/{id}", s.getDownload)
 	mux.HandleFunc("GET /api/downloads/{id}/file", s.downloadFile)
+	mux.HandleFunc("GET /api/translation", s.getTranslationConfig)
+	mux.HandleFunc("POST /api/translation", s.updateTranslationConfig)
+	mux.HandleFunc("POST /api/translation/test", s.testTranslation)
 
 	static, _ := fs.Sub(staticFS, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
@@ -87,13 +88,11 @@ func NewServer(port string, logger *zap.Logger, db *bun.DB, appCfg *config.Confi
 	return s
 }
 
-// Start listens and serves incoming requests.
 func (s *Server) Start() error {
 	s.logger.Info("Starting admin web server", zap.String("addr", s.server.Addr))
 	return s.server.ListenAndServe()
 }
 
-// Stop gracefully shuts down the server.
 func (s *Server) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -205,6 +204,62 @@ func (s *Server) createArtists(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]any{"added": added, "skipped": skipped})
+}
+
+func (s *Server) importArtistsJSON(w http.ResponseWriter, r *http.Request) {
+	var req map[string][]string
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body (expected JSON object with gender keys)", http.StatusBadRequest)
+		return
+	}
+
+	existing, err := s.artists.GetAll(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	known := make(map[string]bool, len(existing))
+	for _, a := range existing {
+		known[strings.ToLower(a.Name.String())] = true
+	}
+
+	added, skipped := 0, []string{}
+	seen := make(map[string]bool)
+
+	for rawGender, names := range req {
+		var gender model.Gender
+		switch strings.ToLower(strings.TrimSpace(rawGender)) {
+		case "male", "m":
+			gender = model.GenderMale
+		case "female", "f":
+			gender = model.GenderFemale
+		case "mixed", "mix":
+			gender = model.GenderMixed
+		default:
+			continue
+		}
+
+		for _, raw := range names {
+			name := strings.TrimSpace(raw)
+			if name == "" || seen[strings.ToLower(name)] {
+				continue
+			}
+			seen[strings.ToLower(name)] = true
+			if known[strings.ToLower(name)] {
+				skipped = append(skipped, name)
+				continue
+			}
+			artist := &model.Artist{Name: model.NewUniqueString(name), Gender: gender}
+			if err := s.artists.Create(r.Context(), artist); err != nil {
+				s.fail(w, err)
+				return
+			}
+			known[strings.ToLower(name)] = true
+			added++
+		}
+	}
+
+	writeJSON(w, map[string]any{"added": added, "skipped": skipped, "total": added + len(skipped)})
 }
 
 func (s *Server) runParser(w http.ResponseWriter, r *http.Request) {

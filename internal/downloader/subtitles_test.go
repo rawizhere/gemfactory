@@ -3,6 +3,7 @@ package downloader
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -114,29 +115,28 @@ func TestTrimVTTFileEmptyResult(t *testing.T) {
 }
 
 func TestTrimVTTFileYouTubeAutoSubFormat(t *testing.T) {
-	// Mirrors the real YouTube auto-caption (rolling cue) format: word-level
-	// <c>/<00:00:00.546> tags, whitespace-only filler lines and echo cues.
+	// Mirrors the real YouTube auto-caption (rolling cue) format: word-level <c>/<00:00:00.546> tags, whitespace-only filler lines and echo cues.
 	in := writeTemp(t, `WEBVTT
 Kind: captions
-Language: ru
+Language: en
 
 00:00:00.080 --> 00:00:03.310 align:start position:0%
  
-Увидят <00:00:00.546><c>ли </c><00:00:01.012><c>это </c>
+Will <00:00:00.546><c>they </c><00:00:01.012><c>see </c>
 
 00:00:03.310 --> 00:00:03.320 align:start position:0%
-Увидят ли это
+Will they see
  
 00:00:10.000 --> 00:00:12.000 align:start position:0%
  
-До <00:00:11.000><c>окна </c>
+To <00:00:11.000><c>window </c>
 
 00:00:12.000 --> 00:00:12.010 align:start position:0%
-До окна
+To window
  
 00:00:23.500 --> 00:00:26.000 align:start position:0%
  
-Внутри <00:00:24.000><c>предела </c>
+Inside <00:00:24.000><c>limits </c>
 `)
 	out := filepath.Join(t.TempDir(), "trimmed.vtt")
 
@@ -151,11 +151,11 @@ Language: ru
 		t.Errorf("want 1 cue, got %d:\n%s", n, got)
 	}
 	// Text of cues outside the window must not leak in as timing-less blocks.
-	if strings.Contains(got, "Увидят") || strings.Contains(got, "окна") || strings.Contains(got, "До") {
+	if strings.Contains(got, "Will") || strings.Contains(got, "window") || strings.Contains(got, "To") {
 		t.Errorf("text from skipped cues leaked into output:\n%s", got)
 	}
 	// Every kept block must carry a timing line; inline tags stripped.
-	if !strings.Contains(got, "00:00:00.500 --> 00:00:03.000\nВнутри предела") {
+	if !strings.Contains(got, "00:00:00.500 --> 00:00:03.000\nInside limits") {
 		t.Errorf("kept cue missing or malformed:\n%s", got)
 	}
 	if strings.Contains(got, "<c>") || strings.Contains(got, "<00:00:") {
@@ -165,11 +165,11 @@ Language: ru
 
 func TestVideoIDFromURL(t *testing.T) {
 	cases := map[string]string{
-		"https://www.youtube.com/watch?v=dQw4w9WgXcQ":         "dQw4w9WgXcQ",
-		"https://youtu.be/dQw4w9WgXcQ?t=42":                   "dQw4w9WgXcQ",
-		"https://www.youtube.com/shorts/dQw4w9WgXcQ":          "dQw4w9WgXcQ",
-		"https://www.youtube.com/live/dQw4w9WgXcQ?feature=x":  "dQw4w9WgXcQ",
-		"dQw4w9WgXcQ":                                         "dQw4w9WgXcQ",
+		"https://www.youtube.com/watch?v=dQw4w9WgXcQ":        "dQw4w9WgXcQ",
+		"https://youtu.be/dQw4w9WgXcQ?t=42":                  "dQw4w9WgXcQ",
+		"https://www.youtube.com/shorts/dQw4w9WgXcQ":         "dQw4w9WgXcQ",
+		"https://www.youtube.com/live/dQw4w9WgXcQ?feature=x": "dQw4w9WgXcQ",
+		"dQw4w9WgXcQ": "dQw4w9WgXcQ",
 		"https://www.tiktok.com/@user/video/7123456789012345": "tt_7123456789012345",
 		"https://vm.tiktok.com/ZM8abc123/":                    "tt_ZM8abc123",
 	}
@@ -182,42 +182,67 @@ func TestVideoIDFromURL(t *testing.T) {
 	if _, err := videoIDFromURL("https://example.com/video"); err == nil {
 		t.Error("expected error for unsupported URL")
 	}
+
+	if !IsTikTokURL("https://www.tiktok.com/@user/video/123") || !IsShortsURL("https://youtube.com/shorts/abc") || !IsDirectDownloadURL("https://vm.tiktok.com/123") {
+		t.Error("expected true for direct download helpers")
+	}
+	if first := ExtractFirstURL("Check this: https://youtu.be/dQw4w9WgXcQ!"); first != "https://youtu.be/dQw4w9WgXcQ" {
+		t.Errorf("ExtractFirstURL = %q, want %q", first, "https://youtu.be/dQw4w9WgXcQ")
+	}
 }
 
-func TestResolveSubsLanguage(t *testing.T) {
+func TestResolveSubtitleTrack(t *testing.T) {
 	meta := &SourceMeta{
 		Subtitles: map[string][]SubtitleTrack{
-			"en":    {{Ext: "vtt"}},
-			"en-US": {{Ext: "vtt"}},
-			"ko":    {{Ext: "vtt"}},
+			"en":    {{Ext: "vtt", URL: "https://example.com/en"}},
+			"en-US": {{Ext: "vtt", URL: "https://example.com/en-us"}},
+			"ko":    {{Ext: "vtt", URL: "https://example.com/ko"}},
 		},
 		AutomaticCaptions: map[string][]SubtitleTrack{
-			"ru":    {{Ext: "vtt"}},
-			"ru-en": {{Ext: "vtt"}},
-			"fr":    {{Ext: "vtt"}},
+			"fr": {{Ext: "vtt", URL: "https://example.com/auto-fr"}},
 		},
 	}
 
-	cases := []struct {
-		requested string
-		want      string
-		ok        bool
-	}{
-		{"ko", "ko", true},       // exact manual match
-		{"en-US", "en-US", true}, // exact regional manual match wins over en
-		{"fr", "fr", true},       // exact auto-caption match wins
-		{"de", "de-en", true},    // missing -> derived translation form
-	}
-	for _, c := range cases {
-		got, ok := ResolveSubsLanguage(meta, c.requested)
-		if got != c.want || ok != c.ok {
-			t.Errorf("ResolveSubsLanguage(%q) = (%q, %v), want (%q, %v)", c.requested, got, ok, c.want, c.ok)
-		}
+	// 1. Direct manual match
+	koRes, err := ResolveSubtitleTrack(meta, "ko")
+	if err != nil || koRes.FinalLang != "ko" || koRes.TargetLang != "" {
+		t.Errorf("ResolveSubtitleTrack(ko) = (%+v, %v), want ko direct", koRes, err)
 	}
 
-	enOnly := &SourceMeta{Subtitles: map[string][]SubtitleTrack{"en": {}}}
-	if lang, ok := ResolveSubsLanguage(enOnly, "en"); !ok || lang != "en" {
-		t.Errorf("ResolveSubsLanguage(en-only, en) = (%q, %v), want (en, true)", lang, ok)
+	// 2. Exact regional manual match wins over en
+	enUSRes, err := ResolveSubtitleTrack(meta, "en-US")
+	if err != nil || enUSRes.FinalLang != "en-US" || enUSRes.TargetLang != "" {
+		t.Errorf("ResolveSubtitleTrack(en-US) = (%+v, %v), want en-US direct", enUSRes, err)
+	}
+
+	// 3. RU requested: manual 'en' is translated to 'ru'
+	ruRes, err := ResolveSubtitleTrack(meta, "ru")
+	if err != nil || ruRes.FinalLang != "ru" || ruRes.TargetLang != "ru" || ruRes.SourceLang != "en" {
+		t.Errorf("ResolveSubtitleTrack(ru) = (%+v, %v), want translated from en to ru", ruRes, err)
+	}
+
+	// 4. Automatic captions only: direct match in auto-captions
+	autoFr := &SourceMeta{
+		AutomaticCaptions: map[string][]SubtitleTrack{"fr": {{Ext: "vtt", URL: "https://example.com/auto-fr"}}},
+	}
+	frRes, err := ResolveSubtitleTrack(autoFr, "fr")
+	if err != nil || frRes.FinalLang != "fr" || frRes.TargetLang != "" || frRes.TrackURL != "https://example.com/auto-fr" {
+		t.Errorf("ResolveSubtitleTrack(autoFr, fr) = (%+v, %v), want fr from auto captions", frRes, err)
+	}
+
+	// 5. Automatic captions only: translates auto 'ko' to 'en'
+	autoOnly := &SourceMeta{
+		AutomaticCaptions: map[string][]SubtitleTrack{"ko": {{Ext: "vtt", URL: "https://example.com/auto-ko"}}},
+	}
+	enAutoRes, err := ResolveSubtitleTrack(autoOnly, "en")
+	if err != nil || enAutoRes.FinalLang != "en" || enAutoRes.TargetLang != "en" || enAutoRes.SourceLang != "ko" {
+		t.Errorf("ResolveSubtitleTrack(autoOnly, en) = (%+v, %v), want translated from auto-ko to en", enAutoRes, err)
+	}
+
+	// 6. No subtitles at all -> error
+	emptyMeta := &SourceMeta{}
+	if _, err := ResolveSubtitleTrack(emptyMeta, "en"); err == nil {
+		t.Error("expected error when no subtitles exist")
 	}
 }
 
@@ -251,5 +276,114 @@ func TestFormatCaption(t *testing.T) {
 	}
 	if !strings.Contains(gotYT, "#Kep1er #WADADA #Kpop") {
 		t.Errorf("expected tags in caption, got: %s", gotYT)
+	}
+}
+
+func TestBuildFallbackChain(t *testing.T) {
+	tests := []struct {
+		primary string
+		want    []string
+	}{
+		{ProviderGoogle, []string{ProviderGoogle, ProviderGemini, ProviderGroq}},
+		{ProviderGemini, []string{ProviderGemini, ProviderGroq, ProviderGoogle}},
+		{ProviderGroq, []string{ProviderGroq, ProviderGemini, ProviderGoogle}},
+		{"unknown", []string{ProviderGoogle, ProviderGemini, ProviderGroq}},
+	}
+
+	for _, tt := range tests {
+		got := buildFallbackChain(tt.primary)
+		if !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("buildFallbackChain(%q) = %v, want %v", tt.primary, got, tt.want)
+		}
+	}
+}
+
+func TestParseNumberedLines(t *testing.T) {
+	raw := `1. Wow! Today's performance was legendary!
+2. So sweet! My heart skipped a beat.
+3. Unnie, you look absolutely gorgeous!`
+
+	res, err := parseNumberedLines(raw, 3)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(res) != 3 {
+		t.Fatalf("expected 3 lines, got %d", len(res))
+	}
+	if res[0] != "Wow! Today's performance was legendary!" {
+		t.Errorf("line 1 mismatch: %q", res[0])
+	}
+	if res[1] != "So sweet! My heart skipped a beat." {
+		t.Errorf("line 2 mismatch: %q", res[1])
+	}
+	if res[2] != "Unnie, you look absolutely gorgeous!" {
+		t.Errorf("line 3 mismatch: %q", res[2])
+	}
+}
+
+func TestParseNumberedLinesWithMarkdownAndParens(t *testing.T) {
+	raw := `**1.** Wow! Today's performance was legendary!
+2) So sweet!
+3. Unnie, you are beautiful!`
+
+	res, err := parseNumberedLines(raw, 3)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(res) != 3 {
+		t.Fatalf("expected 3 lines, got %d", len(res))
+	}
+	if res[0] != "Wow! Today's performance was legendary!" {
+		t.Errorf("line 1 mismatch: %q", res[0])
+	}
+	if res[1] != "So sweet!" {
+		t.Errorf("line 2 mismatch: %q", res[1])
+	}
+	if res[2] != "Unnie, you are beautiful!" {
+		t.Errorf("line 3 mismatch: %q", res[2])
+	}
+}
+
+func TestPreserveSpeakerTags(t *testing.T) {
+	orig := []string{
+		"[SUI] Pop off pop off",
+		"(CHORUS) Yeah we fly high",
+		"Regular line without speaker tag",
+		"[수이] 안녕하세요",
+		"KiiiKiii: Let's dance",
+	}
+
+	trans := []string{
+		"Pop off, pop off",
+		"Yeah, we are flying high",
+		"Regular line without speaker",
+		"Hello",
+		"Let's dance",
+	}
+
+	got := preserveSpeakerTags(orig, trans)
+
+	if got[0] != "[SUI] Pop off, pop off" {
+		t.Errorf("expected [SUI] preserved, got: %q", got[0])
+	}
+	if got[1] != "(CHORUS) Yeah, we are flying high" {
+		t.Errorf("expected (CHORUS) preserved, got: %q", got[1])
+	}
+	if got[2] != "Regular line without speaker" {
+		t.Errorf("expected no tag added, got: %q", got[2])
+	}
+	if got[3] != "[수이] Hello" {
+		t.Errorf("expected [수이] preserved, got: %q", got[3])
+	}
+	if got[4] != "KiiiKiii: Let's dance" {
+		t.Errorf("expected KiiiKiii: preserved, got: %q", got[4])
+	}
+
+	// If translation already preserved it, don't duplicate
+	alreadyPreserved := []string{"[SUI] Pop off, pop off"}
+	origSingle := []string{"[SUI] Pop off"}
+	gotSingle := preserveSpeakerTags(origSingle, alreadyPreserved)
+	if gotSingle[0] != "[SUI] Pop off, pop off" {
+		t.Errorf("expected no duplicate [SUI], got: %q", gotSingle[0])
 	}
 }

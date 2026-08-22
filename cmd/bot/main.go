@@ -4,7 +4,7 @@ import (
 	"context"
 	"gemfactory/internal/app"
 	"gemfactory/internal/config"
-	"gemfactory/pkg/logger"
+	"gemfactory/internal/logger"
 	"os"
 	"os/signal"
 	"syscall"

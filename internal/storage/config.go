@@ -1,5 +1,4 @@
-// Package repository contains database implementation.
-package repository
+package storage
 
 import (
 	"context"
@@ -10,13 +9,11 @@ import (
 	"go.uber.org/zap"
 )
 
-// ConfigRepository manages persistent storage for application configuration settings.
 type ConfigRepository struct {
 	db     *bun.DB
 	logger *zap.Logger
 }
 
-// NewConfigRepository initializes a new ConfigRepository.
 func NewConfigRepository(db *bun.DB, logger *zap.Logger) model.ConfigRepository {
 	return &ConfigRepository{
 		db:     db,
@@ -24,7 +21,6 @@ func NewConfigRepository(db *bun.DB, logger *zap.Logger) model.ConfigRepository 
 	}
 }
 
-// Get retrieves a configuration entry by its unique key.
 func (r *ConfigRepository) Get(ctx context.Context, key string) (*model.Config, error) {
 	config := new(model.Config)
 
@@ -43,7 +39,6 @@ func (r *ConfigRepository) Get(ctx context.Context, key string) (*model.Config, 
 	return config, nil
 }
 
-// GetAll retrieves all configuration settings, ordered by key.
 func (r *ConfigRepository) GetAll(ctx context.Context) ([]model.Config, error) {
 	var configs []model.Config
 
@@ -59,7 +54,6 @@ func (r *ConfigRepository) GetAll(ctx context.Context) ([]model.Config, error) {
 	return configs, nil
 }
 
-// Set inserts or updates a configuration setting.
 func (r *ConfigRepository) Set(ctx context.Context, key, value string) error {
 	config := &model.Config{
 		Key:   key,
@@ -78,7 +72,6 @@ func (r *ConfigRepository) Set(ctx context.Context, key, value string) error {
 	return nil
 }
 
-// Delete removes a configuration setting by key.
 func (r *ConfigRepository) Delete(ctx context.Context, key string) error {
 	_, err := r.db.NewDelete().
 		Model((*model.Config)(nil)).
@@ -92,7 +85,6 @@ func (r *ConfigRepository) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-// Reset clears all configuration settings and restores them to default values.
 func (r *ConfigRepository) Reset(ctx context.Context) error {
 	_, err := r.db.NewDelete().
 		Model((*model.Config)(nil)).

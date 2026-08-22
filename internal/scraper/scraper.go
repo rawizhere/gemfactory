@@ -10,7 +10,6 @@ type fetcherImpl struct {
 	httpClient *HTTPClient
 }
 
-// NewFetcher creates a new web Fetcher instance.
 func NewFetcher(config Config, logger *zap.Logger) Fetcher {
 	httpClient := NewHTTPClient(config.UserAgent, logger)
 

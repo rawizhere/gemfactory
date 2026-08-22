@@ -9,7 +9,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// Logging logs incoming bot commands and their execution duration.
 func Logging(logger *zap.Logger) func(update telego.Update, next func(telego.Update)) {
 	return func(update telego.Update, next func(telego.Update)) {
 		if update.Message == nil {

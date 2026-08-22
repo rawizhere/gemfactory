@@ -1,11 +1,14 @@
 # GemFactory
-Telegram bot for tracking music releases from kpopofficial.com.
+Telegram bot for tracking music releases from kpopofficial.com and downloading media clips.
 
 ## Features
 - **Release Schedule**: Fetches release dates from external sources.
 - **Filters**: View releases by month, filtered by gender (`-f` / `-m`) or user-defined artist lists.
 - **Auto-Updates**: Keeps the release calendar up to date in the background.
-- **Dynamic Configuration**: settings are stored in DB and updated in real-time via Config Watcher.
+- **Media & Clip Downloader**: Download video clips, MP3 audio, and translated subtitles via yt-dlp.
+- **Multi-Provider Subtitle Translation**: Subtitle translation using Google Translate, Gemini, or Groq with automatic fallback.
+- **Web Admin Panel**: Web UI to manage artists, releases, Netscape cookies, and translation settings.
+- **Dynamic Configuration**: Settings are stored in DB and updated in real-time.
 
 ## Commands
 
@@ -18,6 +21,8 @@ Telegram bot for tracking music releases from kpopofficial.com.
 - `/search [artist]` - Search releases by artist
 - `/artists` - Show active artists lists
 - `/playlist` - Playlist information
+- `/clip [url] [start] [end] [options]` - Download video clip (`-mp3`, `-q <res>`, `-sub [lang]`)
+- `/subs [url] [lang]` - Download subtitles with optional translation
 
 ### Admin Commands
 - `/add_artist [name] [-f|-m]` - Add artist to list
@@ -37,6 +42,7 @@ gemfactory/
 ├── internal/
 │   ├── app/                # App orchestration
 │   ├── config/             # Configuration management
+│   ├── downloader/         # yt-dlp downloader, ffmpeg & translator
 │   ├── handlers/           # Telegram command handlers
 │   ├── health/             # Health checks
 │   ├── keyboard/           # UI builders
@@ -48,6 +54,7 @@ gemfactory/
 │   ├── storage/            # Database repositories
 │   ├── telegram/           # Bot API client
 │   ├── validator/          # Input validation
+│   ├── web/                # Admin web panel & REST API
 │   └── worker/             # Background jobs
 ├── migrations/             # SQL migrations
 └── pkg/                    # Shared packages

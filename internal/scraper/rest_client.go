@@ -11,17 +11,14 @@ import (
 	"time"
 )
 
-// albumTitle is the title wrapper of a WordPress REST post.
 type albumTitle struct {
 	Rendered string `json:"rendered"`
 }
 
-// albumContent is the content wrapper of a WordPress REST post.
 type albumContent struct {
 	Rendered string `json:"rendered"`
 }
 
-// AlbumPost is a single album page fetched from the WordPress REST API.
 type AlbumPost struct {
 	Link    string       `json:"link"`
 	Title   albumTitle   `json:"title"`
@@ -30,9 +27,6 @@ type AlbumPost struct {
 
 const albumsPerPage = 100
 
-// FetchAlbumsWindow retrieves all album posts whose publication date falls
-// within [after, before], following REST pagination. It returns fully rendered
-// page bodies, so no headless browser or per-page crawling is required.
 func (c *HTTPClient) FetchAlbumsWindow(ctx context.Context, after, before time.Time) ([]AlbumPost, error) {
 	var all []AlbumPost
 
@@ -106,9 +100,6 @@ func (c *HTTPClient) FetchAlbumsWindow(ctx context.Context, after, before time.T
 	return all, nil
 }
 
-// monthWindow returns the publication-date window that is likely to contain
-// all album pages for releases in the given month: the month itself padded by
-// 45 days on each side.
 func monthWindow(month, year string) (time.Time, time.Time, error) {
 	m := monthNumber(month)
 	if m == 0 {
@@ -125,7 +116,6 @@ func monthWindow(month, year string) (time.Time, time.Time, error) {
 	return start.Add(-pad), end.Add(pad), nil
 }
 
-// yearWindow returns the publication-date window for an entire year (padded by 30 days before and 60 days after).
 func yearWindow(year string) (time.Time, time.Time, error) {
 	y, err := strconv.Atoi(strings.TrimSpace(year))
 	if err != nil || y <= 0 {

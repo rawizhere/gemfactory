@@ -12,14 +12,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// Handlers aggregates user, admin, and clip command handlers.
 type Handlers struct {
 	User  *UserHandlers
 	Admin *AdminHandlers
 	Clip  *ClipHandlers
 }
 
-// New initializes all handler collections.
 func New(services *service.Services, config *config.Config, keyboard *keyboard.Manager, logger *zap.Logger, tg *telegram.Client, downloads *downloader.Service) *Handlers {
 	base := NewBaseHandler(services, config, keyboard, logger, tg)
 
@@ -34,7 +32,6 @@ func New(services *service.Services, config *config.Config, keyboard *keyboard.M
 	}
 }
 
-// HandleCallbackQuery routes inline keyboard callback queries to the keyboard manager.
 func (h *Handlers) HandleCallbackQuery(ctx context.Context, query *telego.CallbackQuery) {
 	err := h.User.Keyboard.HandleCallbackQuery(ctx, query)
 	if err != nil {
@@ -42,18 +39,17 @@ func (h *Handlers) HandleCallbackQuery(ctx context.Context, query *telego.Callba
 	}
 }
 
-// RegisterBotCommands returns the command menu configuration for the Telegram bot.
 func (h *Handlers) RegisterBotCommands() []telego.BotCommand {
 	return []telego.BotCommand{
 		{Command: "start", Description: "Start the bot"},
-		{Command: "help", Description: "Show help"},
-		{Command: "clip", Description: "Вырезать клип из видео"},
-		{Command: "gif", Description: "Вырезать клип без звука"},
-		{Command: "subs", Description: "Клип с вшитыми субтитрами"},
-		{Command: "mp3", Description: "Извлечь аудиодорожку из видео"},
-		{Command: "month", Description: "Get releases for a month"},
+		{Command: "help", Description: "Show help and command usage"},
+		{Command: "clip", Description: "Cut video clip"},
+		{Command: "gif", Description: "Cut video clip without audio"},
+		{Command: "subs", Description: "Cut clip with burned-in subtitles"},
+		{Command: "mp3", Description: "Extract audio track as MP3"},
+		{Command: "month", Description: "View releases for a month"},
 		{Command: "search", Description: "Search releases by artist"},
-		{Command: "artists", Description: "Show artist lists"},
+		{Command: "artists", Description: "List tracked artists"},
 		{Command: "metrics", Description: "Show system metrics"},
 	}
 }

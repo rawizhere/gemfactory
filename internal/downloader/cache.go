@@ -13,8 +13,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// cacheMarker is stored next to a finished clip to make repeated requests
-// instant and to survive process restarts.
+// cacheMarker marks a finished clip so repeats survive restarts.
 type cacheMarker struct {
 	Title     string    `json:"title,omitempty"`
 	Caption   string    `json:"caption,omitempty"`
@@ -73,8 +72,7 @@ func (s *Service) StartCleanupLoop(ctx context.Context) {
 	}()
 }
 
-// CleanupOnce deletes download artifacts older than the retention period
-// (DOWNLOAD_RETENTION_HOURS, default 24h) and prunes empty directories and old in-memory jobs.
+// CleanupOnce deletes download artifacts older than DOWNLOAD_RETENTION_HOURS (default 24h).
 func (s *Service) CleanupOnce() (int, int64) {
 	retention := retentionPeriod()
 	cutoff := time.Now().Add(-retention)
@@ -112,7 +110,7 @@ func (s *Service) CleanupOnce() (int, int64) {
 
 	pruneEmptyDirs(s.dataDir)
 
-	// Prune completed in-memory jobs to avoid memory leaks over long uptimes.
+	// Prune completed in-memory jobs to bound memory usage.
 	s.mu.Lock()
 	if len(s.jobs) > 100 {
 		newJobs := make(map[string]*Job)
@@ -123,7 +121,6 @@ func (s *Service) CleanupOnce() (int, int64) {
 		}
 		for i, id := range s.order {
 			if j, ok := s.jobs[id]; ok {
-				// Keep active jobs or recent 50 jobs
 				if j.Status == StatusPending || j.Status == StatusDownloading || j.Status == StatusProcessing || i >= keepStart {
 					newJobs[id] = j
 					newOrder = append(newOrder, id)
@@ -138,8 +135,7 @@ func (s *Service) CleanupOnce() (int, int64) {
 	return removed, freed
 }
 
-// isRemovableArtifact reports whether the filename belongs to generated
-// download output (videos, subtitles, markers, metadata).
+// isRemovableArtifact reports whether the filename is generated download output.
 func isRemovableArtifact(name string) bool {
 	switch strings.ToLower(filepath.Ext(name)) {
 	case ".mp4", ".mkv", ".webm", ".mov", ".vtt", ".json":
@@ -158,9 +154,8 @@ func pruneEmptyDirs(root string) {
 		}
 		return nil
 	})
-	// Deepest first.
 	for i := len(dirs) - 1; i >= 0; i-- {
-		_ = os.Remove(dirs[i]) // succeeds only when empty
+		_ = os.Remove(dirs[i]) // only removes empty dirs
 	}
 }
 

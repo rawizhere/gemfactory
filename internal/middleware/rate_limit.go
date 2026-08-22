@@ -8,7 +8,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// RateLimiter enforces sliding-window request limits per user.
 type RateLimiter struct {
 	requests map[int64][]time.Time
 	mu       sync.RWMutex
@@ -17,7 +16,6 @@ type RateLimiter struct {
 	logger   *zap.Logger
 }
 
-// NewRateLimiter creates a new RateLimiter instance.
 func NewRateLimiter(limit int, window time.Duration, logger *zap.Logger) *RateLimiter {
 	return &RateLimiter{
 		requests: make(map[int64][]time.Time),
@@ -27,7 +25,6 @@ func NewRateLimiter(limit int, window time.Duration, logger *zap.Logger) *RateLi
 	}
 }
 
-// Allow determines if the user has remaining quota in the current window.
 func (rl *RateLimiter) Allow(userID int64) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -59,7 +56,6 @@ func (rl *RateLimiter) Allow(userID int64) bool {
 	return true
 }
 
-// Cleanup removes expired request records from the tracking map.
 func (rl *RateLimiter) Cleanup() {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()

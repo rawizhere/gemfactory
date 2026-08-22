@@ -1,4 +1,4 @@
-package repository
+package storage
 
 import (
 	"context"
@@ -10,18 +10,15 @@ import (
 	"go.uber.org/zap"
 )
 
-// CookieRepository manages persistent storage for yt-dlp cookies.
 type CookieRepository struct {
 	db     *bun.DB
 	logger *zap.Logger
 }
 
-// NewCookieRepository initializes a new CookieRepository.
 func NewCookieRepository(db *bun.DB, logger *zap.Logger) model.CookieRepository {
 	return &CookieRepository{db: db, logger: logger}
 }
 
-// GetByDomain retrieves a cookie record by domain. Returns nil when not found.
 func (r *CookieRepository) GetByDomain(ctx context.Context, domain string) (*model.Cookie, error) {
 	cookie := new(model.Cookie)
 	err := r.db.NewSelect().
@@ -37,7 +34,6 @@ func (r *CookieRepository) GetByDomain(ctx context.Context, domain string) (*mod
 	return cookie, nil
 }
 
-// GetAll retrieves all cookie domains without contents.
 func (r *CookieRepository) GetAll(ctx context.Context) ([]model.CookieSummary, error) {
 	var cookies []model.Cookie
 	err := r.db.NewSelect().
@@ -60,7 +56,6 @@ func (r *CookieRepository) GetAll(ctx context.Context) ([]model.CookieSummary, e
 	return summaries, nil
 }
 
-// Upsert inserts or updates cookies for the domain.
 func (r *CookieRepository) Upsert(ctx context.Context, domain, content string) error {
 	cookie := &model.Cookie{
 		Domain:  domain,
@@ -76,7 +71,6 @@ func (r *CookieRepository) Upsert(ctx context.Context, domain, content string) e
 	return nil
 }
 
-// Delete removes cookies for the domain and returns affected row count.
 func (r *CookieRepository) Delete(ctx context.Context, domain string) (int, error) {
 	res, err := r.db.NewDelete().
 		Model((*model.Cookie)(nil)).

@@ -15,7 +15,6 @@ import (
 
 var dateRegex = regexp.MustCompile(`(?i)(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})`)
 
-// ParseMonth yields all releases for the given month using WordPress REST API.
 func (f *fetcherImpl) ParseMonth(ctx context.Context, month, year string) iter.Seq2[Release, error] {
 	return func(yield func(Release, error) bool) {
 		after, before, err := monthWindow(month, year)
@@ -27,7 +26,6 @@ func (f *fetcherImpl) ParseMonth(ctx context.Context, month, year string) iter.S
 	}
 }
 
-// ParseYear yields all releases for the entire given year using WordPress REST API.
 func (f *fetcherImpl) ParseYear(ctx context.Context, year string) iter.Seq2[Release, error] {
 	return func(yield func(Release, error) bool) {
 		after, before, err := yearWindow(year)
@@ -110,14 +108,12 @@ func (f *fetcherImpl) parseEventPageFromDoc(doc *goquery.Document, url string) (
 	var events []eventRaw
 	var subLinks []string
 
-	// Single-pass extraction over table rows
 	doc.Find("tr").Each(func(i int, s *goquery.Selection) {
 		cells := s.Find("td")
 		if cells.Length() < 2 {
 			return
 		}
 
-		// Clean key cell
 		keyCell := cells.Eq(0).Clone()
 		keyCell.Find("a").Each(func(idx int, a *goquery.Selection) {
 			atxt := strings.ToLower(a.Text())
@@ -128,7 +124,6 @@ func (f *fetcherImpl) parseEventPageFromDoc(doc *goquery.Document, url string) (
 		key := strings.Join(strings.Fields(keyCell.Text()), " ")
 		lowKey := strings.ToLower(key)
 
-		// Clean value cell
 		valCell := cells.Eq(1).Clone()
 		valCell.Find("a").Each(func(idx int, a *goquery.Selection) {
 			atxt := strings.ToLower(a.Text())
@@ -139,7 +134,6 @@ func (f *fetcherImpl) parseEventPageFromDoc(doc *goquery.Document, url string) (
 		})
 		val := strings.TrimSpace(valCell.Text())
 
-		// Extract album links for subLinks
 		cells.Eq(1).Find("a").Each(func(j int, tag *goquery.Selection) {
 			href, _ := tag.Attr("href")
 			if strings.Contains(href, "/album/") {
@@ -232,7 +226,6 @@ func (f *fetcherImpl) parseEventPageFromDoc(doc *goquery.Document, url string) (
 		}
 	}
 
-	// Also discover album links from content bodies
 	doc.Find(".entry-content a, .post a, .post-inner a, .wp-block-post-template a, .gspbgrid_item_link").Each(func(j int, tag *goquery.Selection) {
 		href, _ := tag.Attr("href")
 		if strings.Contains(href, "/album/") {
@@ -249,7 +242,6 @@ func (f *fetcherImpl) parseEventPageFromDoc(doc *goquery.Document, url string) (
 	return releases, uniqueStrings(subLinks), nil
 }
 
-// releaseInMonth reports whether the release date falls into the requested month/year.
 func releaseInMonth(d time.Time, month, year string) bool {
 	if d.IsZero() {
 		return false
@@ -267,7 +259,6 @@ func releaseInMonth(d time.Time, month, year string) bool {
 	return true
 }
 
-// releaseInYear reports whether the release date falls into the requested year.
 func releaseInYear(d time.Time, year string) bool {
 	if d.IsZero() {
 		return false
@@ -294,7 +285,6 @@ func normalizeURL(u string) string {
 	return strings.ToLower(u)
 }
 
-// cleanAlbumURL strips query strings and fragments.
 func cleanAlbumURL(u string) string {
 	if idx := strings.IndexAny(u, "?#"); idx != -1 {
 		u = u[:idx]

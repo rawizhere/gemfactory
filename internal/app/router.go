@@ -26,7 +26,6 @@ type Router struct {
 	logger     *zap.Logger
 }
 
-// NewRouter initializes a Router instance.
 func NewRouter(services *service.Services, config *config.Config, keyboard *keyboard.Manager, logger *zap.Logger, tg *telegram.Client, downloads *downloader.Service) *Router {
 	return &Router{
 		handlers:   handlers.New(services, config, keyboard, logger, tg, downloads),
@@ -128,7 +127,6 @@ func (r *Router) isClipHelpTopic(message *telego.Message) bool {
 	}
 }
 
-// RegisterBotCommands returns the list of public bot commands for Telegram UI.
 func (r *Router) RegisterBotCommands() []telego.BotCommand {
 	return r.handlers.RegisterBotCommands()
 }

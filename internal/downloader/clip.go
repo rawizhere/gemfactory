@@ -4,24 +4,27 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
+	ytdlp "github.com/lrstanley/go-ytdlp"
 	"go.uber.org/zap"
 )
 
-// ytDlpProgressRe matches "[download]   42.3% of ..." lines (--newline).
-var ytDlpProgressRe = regexp.MustCompile(`^\[download\]\s+(\d+(?:\.\d+)?)%`)
+// ytDlpProgressRe matches "[download]   42.3% of ~  25.40MiB at  4.12MiB/s ETA 00:03" lines (--newline).
+var ytDlpProgressRe = regexp.MustCompile(`\[download\]\s+(\d+(?:\.\d+)?)%(?:\s+of\s+~?\s*([^\s]+))?(?:\s+at\s+([^\s]+))?(?:\s+ETA\s+([^\s]+))?`)
+var ffmpegSectionTimeRe = regexp.MustCompile(`time=(\d{2}:\d{2}:\d{2}(?:\.\d+)?)`)
+var ffmpegSectionSizeRe = regexp.MustCompile(`size=\s*([^\s]+)`)
+var ffmpegSectionSpeedRe = regexp.MustCompile(`speed=\s*([^\s]+)`)
 
-// formatSelector picks the yt-dlp -f expression:
-//   - audioOnly: best audio stream
-//   - shorts: best compatible MP4 stream, no height cap
-//   - hq: up to 2K (2560p)
-//   - default: up to maxHeight (1080)
+// formatSelector picks the yt-dlp -f expression for the given quality tier.
 func formatSelector(maxHeight int, hq, shorts, audioOnly bool) string {
 	if audioOnly {
 		return "bestaudio/best"
@@ -30,7 +33,7 @@ func formatSelector(maxHeight int, hq, shorts, audioOnly bool) string {
 	case shorts:
 		return "bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
 	case hq:
-		return "bestvideo[height<=2560]+bestaudio/best[height<=2560]"
+		return "bestvideo[height<=1440]+bestaudio/best[height<=1440]"
 	default:
 		if maxHeight <= 0 {
 			maxHeight = 1080
@@ -47,35 +50,37 @@ func (s *Service) baseYTDLPArgs(cookieFile string) []string {
 		"--no-playlist-reverse",
 		"--js-runtimes", "node",
 		"--remote-components", "ejs:github",
+		"--progress-template", "download:[download] %(progress._percent_str)s of %(progress._total_bytes_estimate_str|progress._total_bytes_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s",
 	}
 	args = append(args, s.authArgs(cookieFile)...)
 	return args
 }
 
 // downloadFullVideo downloads an entire video (shorts / tiktok) at best quality.
-func (s *Service) downloadFullVideo(ctx context.Context, req ClipRequest, outPath, cookieFile string, onProgress func(int)) error {
+func (s *Service) downloadFullVideo(ctx context.Context, req ClipRequest, outPath, cookieFile string, onProgress func(ProgressUpdate)) error {
 	return s.download(ctx, req, outPath, cookieFile, false, onProgress)
 }
 
-// downloadSegment downloads a video section via yt-dlp and merges it to mp4:
-//
-//	yt-dlp --ignore-config [auth] -f "bestvideo[height<=1080]+bestaudio/best[height<=1080]" \
-//	  --download-sections "*START-END" --force-keyframes-at-cuts \
-//	  --merge-output-format mp4 -o <out> <url>
-func (s *Service) downloadSegment(ctx context.Context, req ClipRequest, outPath, cookieFile string, onProgress func(int)) error {
+// downloadSegment downloads a video section via yt-dlp --download-sections and merges it to mp4.
+func (s *Service) downloadSegment(ctx context.Context, req ClipRequest, outPath, cookieFile string, onProgress func(ProgressUpdate)) error {
 	return s.download(ctx, req, outPath, cookieFile, true, onProgress)
 }
 
-// download runs the yt-dlp download; withSections adds --download-sections
-// and --force-keyframes-at-cuts using req.Start/req.End. onProgress receives
-// the 0..100 download percentage when non-nil.
-func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookieFile string, withSections bool, onProgress func(int)) error {
+// download runs the yt-dlp download; withSections adds --download-sections using req.Start/req.End.
+func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookieFile string, withSections bool, onProgress func(ProgressUpdate)) error {
 	bin, err := YTDLPBinary()
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
+	}
+
+	var expectedDurationMS float64
+	if withSections && req.Start != "" && req.End != "" {
+		if startMs, endMs, parseErr := parseIntervalPair(req.Start, req.End); parseErr == nil && endMs > startMs {
+			expectedDurationMS = endMs - startMs
+		}
 	}
 
 	format := formatSelector(req.Quality, req.HQ, req.Shorts, req.AudioOnly)
@@ -109,32 +114,93 @@ func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookie
 	if err != nil {
 		return fmt.Errorf("stdout pipe: %w", err)
 	}
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("stderr pipe: %w", err)
+	}
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start yt-dlp: %w", err)
 	}
 
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		if onProgress == nil {
-			continue
-		}
-		if m := ytDlpProgressRe.FindStringSubmatch(scanner.Text()); len(m) > 1 {
-			if pct, perr := strconv.ParseFloat(m[1], 64); perr == nil {
-				onProgress(int(pct))
+	var errBuf strings.Builder
+	var errMu sync.Mutex
+
+	var wg sync.WaitGroup
+	scanPipe := func(r io.Reader, isErr bool) {
+		defer wg.Done()
+		scanner := bufio.NewScanner(r)
+		scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+		scanner.Split(scanLinesOrCR)
+		for scanner.Scan() {
+			text := strings.TrimSpace(scanner.Text())
+			if text == "" {
+				continue
+			}
+			if isErr {
+				errMu.Lock()
+				if errBuf.Len() < 4000 {
+					errBuf.WriteString(text)
+					errBuf.WriteString("\n")
+				}
+				errMu.Unlock()
+			}
+			if onProgress != nil {
+				if m := ytDlpProgressRe.FindStringSubmatch(text); len(m) > 1 {
+					if pct, perr := strconv.ParseFloat(m[1], 64); perr == nil {
+						upd := ProgressUpdate{
+							Stage:   StageDownload,
+							Percent: int(pct),
+						}
+						if len(m) > 2 && m[2] != "" {
+							upd.Size = m[2]
+						}
+						if len(m) > 3 && m[3] != "" && !strings.EqualFold(m[3], "unknown") {
+							upd.Speed = m[3]
+						}
+						if len(m) > 4 && m[4] != "" && !strings.EqualFold(m[4], "unknown") {
+							upd.ETA = m[4]
+						}
+						onProgress(upd)
+					}
+				} else if tm := ffmpegSectionTimeRe.FindStringSubmatch(text); len(tm) > 1 && expectedDurationMS > 0 {
+					if curMS, perr := parseFFmpegTimeString(tm[1]); perr == nil {
+						pct := int(curMS / expectedDurationMS * 100.0)
+						if pct > 100 {
+							pct = 100
+						}
+						upd := ProgressUpdate{
+							Stage:   StageDownload,
+							Percent: pct,
+						}
+						if sm := ffmpegSectionSizeRe.FindStringSubmatch(text); len(sm) > 1 {
+							upd.Size = sm[1]
+						}
+						if spm := ffmpegSectionSpeedRe.FindStringSubmatch(text); len(spm) > 1 {
+							upd.Speed = spm[1]
+						}
+						onProgress(upd)
+					}
+				}
 			}
 		}
 	}
 
+	wg.Add(2)
+	go scanPipe(stdout, false)
+	go scanPipe(stderrPipe, true)
+	wg.Wait()
+
 	runErr := cmd.Wait()
+	errMu.Lock()
+	errText := errBuf.String()
+	errMu.Unlock()
+
 	if runErr != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return fmt.Errorf("yt-dlp failed: %w: %s", runErr, truncate(stderr.String(), 2000))
+		return fmt.Errorf("yt-dlp failed: %w: %s", runErr, truncate(errText, 2000))
 	}
 
 	// Probe common container extensions if exact outPath was not written directly.
@@ -145,14 +211,12 @@ func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookie
 				return os.Rename(alt, outPath)
 			}
 		}
-		return fmt.Errorf("segment output not found at %s: %s", outPath, truncate(stderr.String(), 500))
+		return fmt.Errorf("segment output not found at %s: %s", outPath, truncate(errText, 500))
 	}
 	return nil
 }
 
-// variantSuffix builds a distinguishing suffix for a request so that
-// different variants of the same interval never collide:
-// "-mp3", "-hq", "-gif", "-ru", or combinations like "-hq-gif-ru".
+// variantSuffix builds "-mp3", "-hq", "-gif", "-ru" etc. so variants of one interval never collide.
 func variantSuffix(req ClipRequest) string {
 	var parts []string
 	if req.AudioOnly {
@@ -187,4 +251,361 @@ func fileNameWithTimecodeVariant(videoID string, startMs, endMs float64, variant
 
 func sanitizeName(s string) string {
 	return strings.NewReplacer(":", "", ".", "-", " ", "", "/", "-", "\\", "-").Replace(s)
+}
+
+func scanLinesOrCR(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	for i, b := range data {
+		if b == '\n' || b == '\r' {
+			return i + 1, data[:i], nil
+		}
+	}
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
+}
+
+func parseFFmpegTimeString(ts string) (float64, error) {
+	parts := strings.Split(ts, ":")
+	switch len(parts) {
+	case 1:
+		s, err := strconv.ParseFloat(parts[0], 64)
+		if err != nil {
+			return 0, err
+		}
+		return s * 1000, nil
+	case 2:
+		m, err := strconv.ParseFloat(parts[0], 64)
+		if err != nil {
+			return 0, err
+		}
+		s, err := strconv.ParseFloat(parts[1], 64)
+		if err != nil {
+			return 0, err
+		}
+		return m*60000 + s*1000, nil
+	case 3:
+		h, err := strconv.ParseFloat(parts[0], 64)
+		if err != nil {
+			return 0, err
+		}
+		m, err := strconv.ParseFloat(parts[1], 64)
+		if err != nil {
+			return 0, err
+		}
+		s, err := strconv.ParseFloat(parts[2], 64)
+		if err != nil {
+			return 0, err
+		}
+		return h*3600000 + m*60000 + s*1000, nil
+	default:
+		return 0, fmt.Errorf("invalid time %q", ts)
+	}
+}
+
+func parseIntervalPair(startStr, endStr string) (float64, float64, error) {
+	startMs, err := ParseTimecode(startStr)
+	if err != nil {
+		return 0, 0, err
+	}
+	endMs, err := ParseTimecode(endStr)
+	if err != nil {
+		return 0, 0, err
+	}
+	return startMs, endMs, nil
+}
+
+var (
+	resolveMu   sync.Mutex
+	binaryPath  string
+	binaryReady bool
+)
+
+func EnsureYTDLP(ctx context.Context) error {
+	resolveMu.Lock()
+	defer resolveMu.Unlock()
+
+	if binaryReady {
+		return nil
+	}
+
+	if path, err := exec.LookPath("yt-dlp"); err == nil {
+		binaryPath = path
+		binaryReady = true
+		return nil
+	}
+
+	resolved, err := ytdlp.Install(ctx, &ytdlp.InstallOptions{AllowVersionMismatch: true})
+	if err != nil {
+		return fmt.Errorf("yt-dlp auto-install failed: %w", err)
+	}
+	binaryPath = resolved.Executable
+	binaryReady = true
+	return nil
+}
+
+func YTDLPBinary() (string, error) {
+	resolveMu.Lock()
+	defer resolveMu.Unlock()
+	if !binaryReady || binaryPath == "" {
+		return "", fmt.Errorf("yt-dlp is not available; install yt-dlp or restart the server")
+	}
+	return binaryPath, nil
+}
+
+func StartYTDLPUpdateLoop(ctx context.Context) {
+	go func() {
+		updateToNightly(ctx)
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				updateToNightly(ctx)
+			}
+		}
+	}()
+}
+
+func updateToNightly(parent context.Context) {
+	path, err := YTDLPBinary()
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(parent, 5*time.Minute)
+	defer cancel()
+	_, _ = exec.CommandContext(ctx, path, "--update-to", "nightly").CombinedOutput()
+}
+
+// subtitleStyle burns subs in Lato with a translucent outline box; needs libass + Lato on the host.
+const subtitleStyle = "Fontname=Lato\\,OutlineColour=&H40000000\\,BorderStyle=3"
+
+var ffmpegOutTimeRe = regexp.MustCompile(`^out_time_(?:us|ms)=(\d+)`)
+var ffmpegSpeedRe = regexp.MustCompile(`^speed=\s*([^\s]+)`)
+
+func (s *Service) ReencodeWithSubs(ctx context.Context, clipPath, trimmedVTT string, gif bool, expectedDurationMS float64, onProgress func(ProgressUpdate)) (string, error) {
+	bin := ffmpegBinary()
+	if bin == "" {
+		return "", fmt.Errorf("ffmpeg not found in PATH")
+	}
+
+	tmpPath := strings.TrimSuffix(clipPath, filepath.Ext(clipPath)) + "_reencoded.mp4"
+
+	// Fast path: no subtitles, no gif -> try ultra-fast remux if already Apple/H.264/AAC compatible.
+	if trimmedVTT == "" && !gif && isAppleCompatible(clipPath) {
+		fastCmd := exec.CommandContext(ctx, bin, "-y", "-nostdin", "-i", clipPath, "-c", "copy", "-movflags", "+faststart", tmpPath)
+		if out, err := fastCmd.CombinedOutput(); err == nil {
+			if renErr := os.Rename(tmpPath, clipPath); renErr == nil {
+				return clipPath, nil
+			}
+		} else {
+			s.logger.Debug("fast remux fallback to full reencode", zap.String("output", string(out)))
+			_ = os.Remove(tmpPath)
+		}
+	}
+
+	args := []string{"-y", "-nostdin", "-i", clipPath}
+	if trimmedVTT != "" {
+		subArg := escapeFilterPath(trimmedVTT)
+		args = append(args,
+			"-vf",
+			fmt.Sprintf("subtitles=%s:force_style=%s,scale=trunc(iw/2)*2:trunc(ih/2)*2", subArg, subtitleStyle),
+		)
+	} else {
+		// H.264 requires even dimensions.
+		args = append(args, "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2")
+	}
+	if gif {
+		args = append(args, "-an")
+	} else {
+		args = append(args, "-c:a", "aac", "-b:a", "192k")
+	}
+	if onProgress != nil && expectedDurationMS > 0 {
+		args = append(args, "-progress", "pipe:1", "-nostats")
+	}
+	args = append(args,
+		"-c:v", "libx264",
+		"-crf", "16",
+		"-preset", "fast",
+		"-pix_fmt", "yuv420p",
+		// moov atom first: Telegram can stream the upload without transcoding it server-side.
+		"-movflags", "+faststart",
+		tmpPath)
+
+	cmd := exec.CommandContext(ctx, bin, args...)
+	s.logger.Info("ffmpeg re-encode starting",
+		zap.String("input", clipPath),
+		zap.Bool("burn_subs", trimmedVTT != ""))
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("stdout pipe: %w", err)
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("start ffmpeg: %w", err)
+	}
+
+	var lastSpeed string
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		if onProgress == nil || expectedDurationMS <= 0 {
+			continue
+		}
+		line := scanner.Text()
+		if sm := ffmpegSpeedRe.FindStringSubmatch(line); len(sm) > 1 {
+			lastSpeed = strings.TrimSpace(sm[1])
+		}
+		if m := ffmpegOutTimeRe.FindStringSubmatch(line); len(m) > 1 {
+			if us, perr := strconv.ParseInt(m[1], 10, 64); perr == nil {
+				expectedUS := expectedDurationMS * 1000.0
+				pct := int(float64(us) / expectedUS * 100.0)
+				if pct > 100 {
+					pct = 100
+				}
+				onProgress(ProgressUpdate{
+					Stage:   StageReencode,
+					Percent: pct,
+					Speed:   lastSpeed,
+				})
+			}
+		}
+	}
+
+	runErr := cmd.Wait()
+	if runErr != nil {
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("ffmpeg failed: %w: %s", runErr, truncate(stderr.String(), 2000))
+	}
+
+	if err := os.Rename(tmpPath, clipPath); err != nil {
+		return "", fmt.Errorf("replace clip with re-encoded file: %w", err)
+	}
+	return clipPath, nil
+}
+
+func isAppleCompatible(filePath string) bool {
+	vCodec, pixFmt, aCodec := probeMediaCodecs(filePath)
+	if vCodec != "h264" || (pixFmt != "" && pixFmt != "yuv420p") {
+		return false
+	}
+	if aCodec != "" && aCodec != "aac" {
+		return false
+	}
+	return true
+}
+
+func probeMediaCodecs(filePath string) (vCodec, pixFmt, aCodec string) {
+	out, err := exec.Command("ffprobe", "-v", "error", "-show_entries", "stream=codec_type,codec_name,pix_fmt", "-of", "csv=p=0", filePath).Output()
+	if err != nil {
+		return "", "", ""
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for _, line := range lines {
+		parts := strings.Split(strings.TrimSpace(line), ",")
+		if len(parts) >= 2 {
+			switch parts[0] {
+			case "video":
+				if vCodec == "" {
+					vCodec = strings.ToLower(parts[1])
+					if len(parts) >= 3 {
+						pixFmt = strings.ToLower(parts[2])
+					}
+				}
+			case "audio":
+				if aCodec == "" {
+					aCodec = strings.ToLower(parts[1])
+				}
+			}
+		}
+	}
+	return vCodec, pixFmt, aCodec
+}
+
+func (s *Service) ExtractAudioMP3(ctx context.Context, inputPath, outMP3Path string, expectedDurationMS float64, onProgress func(ProgressUpdate)) error {
+	bin := ffmpegBinary()
+	if bin == "" {
+		return fmt.Errorf("ffmpeg not found in PATH")
+	}
+	tmpMP3 := strings.TrimSuffix(outMP3Path, ".mp3") + "_tmp.mp3"
+	args := []string{
+		"-y", "-nostdin",
+		"-i", inputPath,
+		"-vn",
+		"-c:a", "libmp3lame",
+		"-q:a", "2",
+	}
+	if onProgress != nil && expectedDurationMS > 0 {
+		args = append(args, "-progress", "pipe:1", "-nostats")
+	}
+	args = append(args, tmpMP3)
+
+	cmd := exec.CommandContext(ctx, bin, args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("stdout pipe: %w", err)
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start ffmpeg: %w", err)
+	}
+
+	var lastSpeed string
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		if onProgress == nil || expectedDurationMS <= 0 {
+			continue
+		}
+		line := scanner.Text()
+		if sm := ffmpegSpeedRe.FindStringSubmatch(line); len(sm) > 1 {
+			lastSpeed = strings.TrimSpace(sm[1])
+		}
+		if m := ffmpegOutTimeRe.FindStringSubmatch(line); len(m) > 1 {
+			if us, perr := strconv.ParseInt(m[1], 10, 64); perr == nil {
+				expectedUS := expectedDurationMS * 1000.0
+				pct := int(float64(us) / expectedUS * 100.0)
+				if pct > 100 {
+					pct = 100
+				}
+				onProgress(ProgressUpdate{
+					Stage:   StageReencode,
+					Percent: pct,
+					Speed:   lastSpeed,
+					Detail:  "mp3",
+				})
+			}
+		}
+	}
+
+	if err := cmd.Wait(); err != nil {
+		_ = os.Remove(tmpMP3)
+		return fmt.Errorf("ffmpeg mp3 extract failed: %w: %s", err, truncate(stderr.String(), 1000))
+	}
+	return os.Rename(tmpMP3, outMP3Path)
+}
+
+func ffmpegBinary() string {
+	if bin := os.Getenv("FFMPEG_BINARY"); bin != "" {
+		return bin
+	}
+	if path, err := exec.LookPath("ffmpeg"); err == nil {
+		return path
+	}
+	return ""
+}
+
+// escapeFilterPath normalizes a subtitle path for ffmpeg filter syntax: backslashes become slashes and Windows drive colons are escaped.
+func escapeFilterPath(p string) string {
+	p = strings.ReplaceAll(p, "\\", "/")
+	p = strings.ReplaceAll(p, ":", "\\:")
+	return p
 }

@@ -12,7 +12,6 @@ import (
 	"gemfactory/internal/model"
 )
 
-// stubCookies satisfies model.CookieRepository without a database.
 type stubCookies struct {
 	domains map[string]string
 }

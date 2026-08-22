@@ -1,4 +1,3 @@
-// Package model defines core domain entities and repository interfaces.
 package model
 
 import (
@@ -8,7 +7,6 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// Artist represents a musical group or solo performer.
 type Artist struct {
 	bun.BaseModel `bun:"table:gemfactory.artists"`
 
@@ -22,17 +20,14 @@ type Artist struct {
 	Releases []Release `bun:"rel:has-many,join:artist_id=artist_id" json:"releases,omitempty"`
 }
 
-// IsFemale returns true if the artist is categorized as female.
 func (a *Artist) IsFemale() bool {
 	return a.Gender == GenderFemale
 }
 
-// IsMale returns true if the artist is categorized as male.
 func (a *Artist) IsMale() bool {
 	return a.Gender == GenderMale
 }
 
-// ArtistRepository defines the data access contract for artists.
 type ArtistRepository interface {
 	GetByID(ctx context.Context, id int) (*Artist, error)
 	GetByName(ctx context.Context, name string) (*Artist, error)

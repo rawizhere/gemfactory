@@ -1,4 +1,3 @@
-// Package model defines the data structures for application state and persistence.
 package model
 
 import (
@@ -8,7 +7,6 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// Config represents a key-value pair for application configuration.
 type Config struct {
 	bun.BaseModel `bun:"table:gemfactory.config"`
 
@@ -20,7 +18,6 @@ type Config struct {
 	UpdatedAt   time.Time `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
 }
 
-// ConfigRepository defines the interface for configuration operations.
 type ConfigRepository interface {
 	Get(ctx context.Context, key string) (*Config, error)
 	GetAll(ctx context.Context) ([]Config, error)

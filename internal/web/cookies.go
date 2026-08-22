@@ -12,7 +12,6 @@ import (
 
 var domainRe = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`)
 
-// listCookies GET /api/cookies — all stored domains with cookie health and count.
 func (s *Server) listCookies(w http.ResponseWriter, r *http.Request) {
 	cookies, err := s.cookies.GetAll(r.Context())
 	if err != nil {
@@ -43,7 +42,7 @@ func (s *Server) listCookies(w http.ResponseWriter, r *http.Request) {
 		}
 
 		count, minExp, maxExp := parseNetscapeMetadata(rec.Content)
-		health := "valid"
+		var health string
 		days := 0
 
 		if maxExp > 0 {
@@ -100,7 +99,6 @@ func parseNetscapeMetadata(content string) (count int, minExp int64, maxExp int6
 	return
 }
 
-// getCookie GET /api/cookies/{domain} — full record including contents.
 func (s *Server) getCookie(w http.ResponseWriter, r *http.Request) {
 	domain := r.PathValue("domain")
 	if !validDomain(domain) {
@@ -119,10 +117,6 @@ func (s *Server) getCookie(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, cookie)
 }
 
-// upsertCookie PUT /api/cookies/{domain} with {"content": "<netscape>"}.
-// The domain is optional: pass "_" (or an empty path segment is not routable,
-// so use "_") to auto-detect domains from the Netscape export and store the
-// content under every domain found.
 func (s *Server) upsertCookie(w http.ResponseWriter, r *http.Request) {
 	domain := r.PathValue("domain")
 	if domain == "_" {
@@ -173,8 +167,6 @@ func (s *Server) upsertCookie(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string][]string{"domains": domains})
 }
 
-// validateNetscape accepts Cookie-Editor exports (with the Netscape header)
-// and raw tab-separated netscape lines; rejects everything else.
 func validateNetscape(content string) error {
 	hasHeader := strings.Contains(content, "Netscape HTTP Cookie File")
 	hasTabs := strings.Contains(content, "\t")
@@ -184,8 +176,6 @@ func validateNetscape(content string) error {
 	return nil
 }
 
-// DetectDomains extracts unique registrable domains from a Netscape cookie
-// file: field 1 of each data line (".youtube.com" -> "youtube.com").
 func DetectDomains(content string) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -202,7 +192,6 @@ func DetectDomains(content string) []string {
 		if d == "" {
 			continue
 		}
-		// Keep only the registrable domain: last two labels.
 		labels := strings.Split(d, ".")
 		if len(labels) > 2 {
 			d = strings.Join(labels[len(labels)-2:], ".")
@@ -216,7 +205,6 @@ func DetectDomains(content string) []string {
 	return out
 }
 
-// deleteCookie DELETE /api/cookies/{domain}.
 func (s *Server) deleteCookie(w http.ResponseWriter, r *http.Request) {
 	domain := r.PathValue("domain")
 	if !validDomain(domain) {

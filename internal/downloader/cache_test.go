@@ -115,23 +115,21 @@ func TestSubmitRejectsOverlongIntervals(t *testing.T) {
 	t.Setenv("CLIP_MAX_DURATION_HQ_SECONDS", "30")
 	s := newTestService(t)
 
-	// Invalid URL on purpose: Submit validates duration first, so a
-	// video-id error proves the duration check passed without spawning
-	// any download work.
+	// Invalid URL on purpose: Submit validates duration first, so a video-id error proves the duration check passed without spawning any download work.
 	badURL := "https://example.com/video"
 
 	_, err := s.Submit(context.Background(), ClipRequest{URL: badURL, Start: "0:00", End: "6:01"})
-	if err == nil || !strings.Contains(err.Error(), "слишком длинный") {
+	if err == nil || !strings.Contains(err.Error(), "is too long") {
 		t.Errorf("6-minute normal clip must be rejected, got: %v", err)
 	}
 
 	_, err = s.Submit(context.Background(), ClipRequest{URL: badURL, Start: "0:00", End: "4:59"})
-	if err == nil || strings.Contains(err.Error(), "слишком длинный") {
+	if err == nil || strings.Contains(err.Error(), "is too long") {
 		t.Errorf("4:59 must pass duration check (next error should be url), got: %v", err)
 	}
 
 	_, err = s.Submit(context.Background(), ClipRequest{URL: badURL, Start: "0:00", End: "0:31", HQ: true})
-	if err == nil || !strings.Contains(err.Error(), "слишком длинный") {
+	if err == nil || !strings.Contains(err.Error(), "is too long") {
 		t.Errorf("31-second HQ clip must be rejected, got: %v", err)
 	}
 }

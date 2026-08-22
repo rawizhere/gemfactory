@@ -172,6 +172,9 @@
       <button class="btn btn-ghost btn-sm" type="button" id="artist-toggle-active" disabled>Toggle status</button>
       <button class="btn btn-danger btn-sm" type="button" id="artist-delete" disabled>Delete selected</button>
       <button class="btn btn-ghost btn-sm" type="button" id="artist-export" title="Export artists as CSV">Export CSV</button>
+      <button class="btn btn-ghost btn-sm" type="button" id="artist-export-json" title="Export artists as JSON (female, male, mixed)">Export JSON</button>
+      <button class="btn btn-ghost btn-sm" type="button" id="artist-import-json" title="Import artists from JSON file">Import JSON</button>
+      <input type="file" id="artist-import-json-file" accept=".json,application/json" style="display:none">
       <span class="count" id="artist-count"></span>
     </div>
     <div id="artists-table"></div>
@@ -204,6 +207,50 @@
         <span id="storage-files" class="hint" style="margin:0">(0 files)</span>
       </div>
       <button class="btn btn-danger btn-sm" type="button" id="clean-storage-btn">Clean Downloads</button>
+    </div>
+
+    <h2>Subtitle Translation (AI & Machine)</h2>
+    <div class="storage-card" style="flex-direction:column; align-items:stretch; gap:1rem;">
+      <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0.75rem;">
+        <label style="font-weight:600; min-width:140px;">Primary Provider:</label>
+        <select id="translation-provider-select" style="min-width:220px;">
+          <option value="google">Google Translate (Default / Free Web)</option>
+          <option value="gemini">Google Gemini 2.5 Flash (AI Studio)</option>
+          <option value="groq">Groq (LPU AI)</option>
+        </select>
+        <span id="fallback-chain-badge" class="badge" style="background:var(--card-bg, #2a2a2a); border:1px solid var(--border-color, #444); padding:0.25rem 0.5rem; border-radius:4px; font-size:0.8rem;">
+          Chain: Google Translate
+        </span>
+      </div>
+
+      <div id="gemini-key-row" style="display:flex; flex-wrap:wrap; align-items:center; gap:0.75rem;">
+        <label style="min-width:140px; font-size:0.85rem;">Gemini API Key:</label>
+        <input type="password" id="gemini-api-key" placeholder="AQ.Ab8... or AIza..." style="flex:1; min-width:200px;">
+        <button type="button" class="btn btn-ghost btn-sm" id="gemini-key-toggle">Show</button>
+      </div>
+
+      <div id="groq-key-row" style="display:flex; flex-wrap:wrap; align-items:center; gap:0.75rem;">
+        <label style="min-width:140px; font-size:0.85rem;">Groq API Key:</label>
+        <input type="password" id="groq-api-key" placeholder="gsk_..." style="flex:1; min-width:200px;">
+        <button type="button" class="btn btn-ghost btn-sm" id="groq-key-toggle">Show</button>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:0.5rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <label style="font-size:0.85rem; font-weight:600;">AI Translation Prompt (Custom Rules):</label>
+          <button type="button" class="btn btn-ghost btn-sm" id="translation-prompt-reset" style="font-size:0.75rem;">Reset to Default</button>
+        </div>
+        <textarea id="translation-prompt" rows="5" placeholder="Custom rules for AI translation..." style="width:100%; font-family:monospace; font-size:0.8rem; line-height:1.4; resize:vertical; padding:0.5rem;"></textarea>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem; border-top:1px solid var(--border-color, #333); padding-top:0.75rem;">
+        <div style="display:flex; gap:0.5rem; align-items:center; flex:1; min-width:260px;">
+          <input type="text" id="translation-test-input" placeholder="대박! 오늘 무대 진짜 레전드였어!" style="flex:1; font-size:0.85rem;">
+          <button class="btn btn-ghost btn-sm" type="button" id="translation-test-btn">Test Translation</button>
+        </div>
+        <button class="btn btn-primary btn-sm" type="button" id="translation-save-btn">Save Translation Settings</button>
+      </div>
+      <div id="translation-test-result" style="font-size:0.85rem; color:var(--muted); margin-top:0.25rem; word-break:break-word;"></div>
     </div>
 
     <h2>Database Configuration</h2>

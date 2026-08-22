@@ -1,4 +1,3 @@
-// Package keyboard provides inline keyboard construction and update routines for Telegram.
 package keyboard
 
 import (
@@ -18,7 +17,6 @@ import (
 	"golang.org/x/text/language"
 )
 
-// Manager handles the generation and lifecycle of month navigation inline keyboards.
 type Manager struct {
 	releaseService    *service.ReleaseService
 	logger            *zap.Logger
@@ -31,7 +29,6 @@ type Manager struct {
 	stopChan          chan struct{}
 }
 
-// NewManager initializes keyboards and starts the periodic update ticker.
 func NewManager(releaseService *service.ReleaseService, config *config.Config, logger *zap.Logger) *Manager {
 	k := &Manager{
 		releaseService: releaseService,
@@ -46,7 +43,6 @@ func NewManager(releaseService *service.ReleaseService, config *config.Config, l
 	return k
 }
 
-// SetTelegramClient assigns the Telegram client instance for sending responses.
 func (k *Manager) SetTelegramClient(tg *telegram.Client) {
 	k.tg = tg
 }
@@ -138,7 +134,6 @@ func (k *Manager) updateMainMonthKeyboardLoop() {
 	}
 }
 
-// GetMainKeyboard returns a pointer to the thread-safe cached 3-month keyboard.
 func (k *Manager) GetMainKeyboard() *telego.InlineKeyboardMarkup {
 	k.mu.RLock()
 	defer k.mu.RUnlock()
@@ -146,12 +141,10 @@ func (k *Manager) GetMainKeyboard() *telego.InlineKeyboardMarkup {
 	return &kb
 }
 
-// GetAllMonthsKeyboard returns the full 12-month selection keyboard.
 func (k *Manager) GetAllMonthsKeyboard() *telego.InlineKeyboardMarkup {
 	return &k.allMonthsKeyboard
 }
 
-// HandleCallbackQuery dispatches button clicks to their respective handler functions.
 func (k *Manager) HandleCallbackQuery(ctx context.Context, callback *telego.CallbackQuery) error {
 	data := callback.Data
 	if callback.Message == nil {
@@ -230,7 +223,6 @@ func (k *Manager) handleBackToMainCallback(ctx context.Context, callback *telego
 	return nil
 }
 
-// Stop terminates the background keyboard update loop.
 func (k *Manager) Stop() {
 	select {
 	case <-k.stopChan:

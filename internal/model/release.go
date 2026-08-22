@@ -1,4 +1,3 @@
-// Package model defines core domain entities and persistence contracts.
 package model
 
 import (
@@ -8,7 +7,6 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// Release represents a curated music release containing metadata and external links.
 type Release struct {
 	bun.BaseModel `bun:"table:gemfactory.releases"`
 
@@ -25,11 +23,9 @@ type Release struct {
 	CreatedAt  time.Time    `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt  time.Time    `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
 
-	// Relationships
 	Artist *Artist `bun:"rel:belongs-to,join:artist_id=artist_id" json:"artist,omitempty"`
 }
 
-// ReleaseRepository defines the contract for release operations.
 type ReleaseRepository interface {
 	GetByID(ctx context.Context, id int) (*Release, error)
 	GetAll(ctx context.Context) ([]Release, error)

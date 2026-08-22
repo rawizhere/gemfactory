@@ -1,7 +1,5 @@
-// Package model provides shared constants and enumerations.
 package model
 
-// Gender classifies artist groups or individuals.
 type Gender string
 
 const (

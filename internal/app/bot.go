@@ -11,7 +11,6 @@ import (
 	"gemfactory/internal/middleware"
 	"gemfactory/internal/service"
 	"gemfactory/internal/storage"
-	"gemfactory/internal/storage/repository"
 	"gemfactory/internal/telegram"
 	"gemfactory/internal/web"
 	"gemfactory/internal/worker"
@@ -43,7 +42,6 @@ type Bot struct {
 	cancel         context.CancelFunc
 }
 
-// NewBot initializes all subsystems and returns a ready-to-run Bot instance.
 func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config cannot be nil")
@@ -74,8 +72,10 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 	botCtx, botCancel := context.WithCancel(ctx)
 
 	// yt-dlp downloader: resolve binary, start nightly update loop.
-	cookieRepo := repository.NewCookieRepository(db.GetDB(), logger)
+	cookieRepo := storage.NewCookieRepository(db.GetDB(), logger)
+	configRepo := storage.NewConfigRepository(db.GetDB(), logger)
 	downloaderSvc := downloader.NewService(cookieRepo, cfg.AppDataDir, 2, logger)
+	downloaderSvc.SetConfigRepo(configRepo)
 	if err := downloader.EnsureYTDLP(botCtx); err != nil {
 		logger.Warn("yt-dlp unavailable at startup; downloads disabled until next restart", zap.Error(err))
 	} else {
@@ -119,8 +119,6 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 	}, nil
 }
 
-// warnIfFFmpegMissingLibass logs a warning when the ffmpeg build lacks the
-// subtitles filter (libass), which is required for burning in subtitles.
 func warnIfFFmpegMissingLibass(logger *zap.Logger) {
 	out, err := exec.Command("ffmpeg", "-hide_banner", "-filters").Output()
 	if err != nil {
@@ -183,7 +181,6 @@ func (b *Bot) Start(ctx context.Context) error {
 	return b.telegram.Start(ctx, b.router)
 }
 
-// Stop gracefully shuts down background workers, servers, and database connections.
 func (b *Bot) Stop() error {
 	b.logger.Info("Stopping bot gracefully")
 

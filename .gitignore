@@ -10,13 +10,15 @@ vendor/
 
 # Environment files with sensitive data
 .env
-.env.local
-.env.development
-.env.production
+.env.*
+!.env.example
+!env.example
 
 # Logs and temporary files
 *.log
 tmp/
+/tmp/
+logs/
 /logs/
 
 # IDE-specific files
@@ -26,9 +28,9 @@ tmp/
 # Build artifacts
 gemfactory
 bot
-tree.md
 bin/
 dist/
+/.venv/
 
 # OS-specific files
 .DS_Store
@@ -37,15 +39,10 @@ Thumbs.db
 # Test artifacts
 coverage.out
 coverage.html
-
-# Project-specific ignores
-#.agent/
-#docs/
-.history/
 *.test
 
-# Ignore JSON files
-*.json
-
-# Data
-/data/docs/
+# Data & runtime files
+/data/
+data/
+scratch/
+/scratch/

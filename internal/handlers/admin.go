@@ -10,24 +10,21 @@ import (
 	"github.com/mymmrac/telego"
 )
 
-// AdminHandlers processes privileged administrative commands.
 type AdminHandlers struct {
 	*BaseHandler
 }
 
-// NewAdminHandlers creates a new AdminHandlers instance.
 func NewAdminHandlers(base *BaseHandler) *AdminHandlers {
 	return &AdminHandlers{BaseHandler: base}
 }
 
-// Admin displays the list of available admin operations.
 func (h *AdminHandlers) Admin(ctx context.Context, message *telego.Message) {
 	if !h.IsAdmin(message.From) {
 		_ = h.SendMessage(ctx, message.Chat.ID, "You don't have admin permissions")
 		return
 	}
 
-	text := "🔧 <b>Admin Commands:</b>\n\n" +
+	text := "<b>Admin Commands:</b>\n\n" +
 		"/add_artist [names] [-f|-m] - Add artists\n" +
 		"/remove_artist [names] - Deactivate artists\n" +
 		"/export - Export artist list\n" +
@@ -37,7 +34,6 @@ func (h *AdminHandlers) Admin(ctx context.Context, message *telego.Message) {
 	_ = h.SendMessage(ctx, message.Chat.ID, text)
 }
 
-// AddArtist parses and registers new artists with their specified gender.
 func (h *AdminHandlers) AddArtist(ctx context.Context, message *telego.Message) {
 	if !h.IsAdmin(message.From) {
 		return
@@ -66,10 +62,9 @@ func (h *AdminHandlers) AddArtist(ctx context.Context, message *telego.Message) 
 		return
 	}
 
-	_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("✅ Added artists: %d", count))
+	_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("Added artists: %d", count))
 }
 
-// RemoveArtist deactivates the specified artists.
 func (h *AdminHandlers) RemoveArtist(ctx context.Context, message *telego.Message) {
 	if !h.IsAdmin(message.From) {
 		return
@@ -90,10 +85,9 @@ func (h *AdminHandlers) RemoveArtist(ctx context.Context, message *telego.Messag
 		return
 	}
 
-	_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("✅ Deactivated artists: %d", count))
+	_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("Deactivated artists: %d", count))
 }
 
-// Config gets or sets application configuration values in the database.
 func (h *AdminHandlers) Config(ctx context.Context, message *telego.Message) {
 	if !h.IsAdmin(message.From) {
 		return
@@ -117,16 +111,13 @@ func (h *AdminHandlers) Config(ctx context.Context, message *telego.Message) {
 			h.HandleError(ctx, message.Chat.ID, err, "Failed to update config")
 			return
 		}
-		_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("✅ Config updated: %s = %s", key, val))
+		_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("Config updated: %s = %s", key, val))
 		return
 	}
 
 	_ = h.SendMessage(ctx, message.Chat.ID, "Usage: /config OR /config <KEY> <VALUE>")
 }
 
-// Parse triggers an asynchronous release crawl for the given month or year.
-// Accepted forms: /parse, /parse <month>, /parse <month> <year>,
-// /parse <year> (whole year), /parse <month>-<year>.
 func (h *AdminHandlers) Parse(ctx context.Context, message *telego.Message) {
 	if !h.IsAdmin(message.From) {
 		return
@@ -137,7 +128,7 @@ func (h *AdminHandlers) Parse(ctx context.Context, message *telego.Message) {
 	if len(args) == 1 {
 		if y, err := strconv.Atoi(args[0]); err == nil && len(args[0]) == 4 && y >= 2000 {
 			yearStr := strconv.Itoa(y)
-			_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("🔄 Running parser for entire year %s...", yearStr))
+			_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("Running parser for entire year %s...", yearStr))
 			go func() {
 				bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 				defer cancel()
@@ -147,7 +138,7 @@ func (h *AdminHandlers) Parse(ctx context.Context, message *telego.Message) {
 					h.HandleError(bgCtx, message.Chat.ID, fmt.Errorf("year %s: %w", yearStr, err), "Parser error")
 					return
 				}
-				_ = h.SendMessage(bgCtx, message.Chat.ID, fmt.Sprintf("✅ Parsing complete for %s. Found %d releases", yearStr, count))
+				_ = h.SendMessage(bgCtx, message.Chat.ID, fmt.Sprintf("Parsing complete for %s. Found %d releases", yearStr, count))
 			}()
 			return
 		}
@@ -167,7 +158,7 @@ func (h *AdminHandlers) Parse(ctx context.Context, message *telego.Message) {
 		monthQueries = []string{strings.ToLower(time.Now().Format("January")) + "-" + strconv.Itoa(time.Now().Year())}
 	}
 
-	_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("🔄 Running parser for %s...", strings.Join(monthQueries, ", ")))
+	_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("Running parser for %s...", strings.Join(monthQueries, ", ")))
 
 	go func() {
 		bgCtx, cancel := context.WithTimeout(context.Background(), time.Duration(len(monthQueries))*5*time.Minute)
@@ -182,7 +173,7 @@ func (h *AdminHandlers) Parse(ctx context.Context, message *telego.Message) {
 			}
 			total += count
 		}
-		_ = h.SendMessage(bgCtx, message.Chat.ID, fmt.Sprintf("✅ Parsing complete. Found %d releases", total))
+		_ = h.SendMessage(bgCtx, message.Chat.ID, fmt.Sprintf("Parsing complete. Found %d releases", total))
 	}()
 }
 
@@ -209,9 +200,4 @@ func (h *AdminHandlers) parseArtistList(input string) []string {
 		}
 	}
 	return result
-}
-
-var monthNames = []string{
-	"january", "february", "march", "april", "may", "june",
-	"july", "august", "september", "october", "november", "december",
 }

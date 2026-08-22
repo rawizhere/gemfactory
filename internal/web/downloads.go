@@ -11,7 +11,6 @@ import (
 	"gemfactory/internal/downloader"
 )
 
-// submitDownload POST /api/downloads {"url","start","end","subs_lang","quality"}.
 func (s *Server) submitDownload(w http.ResponseWriter, r *http.Request) {
 	if s.downloads == nil {
 		http.Error(w, "downloader unavailable", http.StatusServiceUnavailable)
@@ -30,7 +29,6 @@ func (s *Server) submitDownload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, job)
 }
 
-// listDownloads GET /api/downloads.
 func (s *Server) listDownloads(w http.ResponseWriter, r *http.Request) {
 	if s.downloads == nil {
 		http.Error(w, "downloader unavailable", http.StatusServiceUnavailable)
@@ -39,7 +37,6 @@ func (s *Server) listDownloads(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.downloads.ListJobs())
 }
 
-// getDownload GET /api/downloads/{id}.
 func (s *Server) getDownload(w http.ResponseWriter, r *http.Request) {
 	if s.downloads == nil {
 		http.Error(w, "downloader unavailable", http.StatusServiceUnavailable)
@@ -53,7 +50,6 @@ func (s *Server) getDownload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, job)
 }
 
-// downloadFile GET /api/downloads/{id}/file — serves the finished clip.
 func (s *Server) downloadFile(w http.ResponseWriter, r *http.Request) {
 	if s.downloads == nil {
 		http.Error(w, "downloader unavailable", http.StatusServiceUnavailable)
@@ -69,7 +65,7 @@ func (s *Server) downloadFile(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	w.Header().Set("Content-Type", "video/mp4")
 	w.Header().Set("Content-Disposition",
@@ -82,7 +78,6 @@ func (s *Server) downloadFile(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, filepath.Base(job.OutputDir), mod, f)
 }
 
-// getStorageUsage GET /api/downloads/storage
 func (s *Server) getStorageUsage(w http.ResponseWriter, r *http.Request) {
 	if s.downloads == nil {
 		writeJSON(w, map[string]any{"bytes": 0, "formatted": "0 B", "files": 0})
@@ -100,7 +95,6 @@ func (s *Server) getStorageUsage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// cleanStorage POST /api/downloads/storage/clean
 func (s *Server) cleanStorage(w http.ResponseWriter, r *http.Request) {
 	if s.downloads == nil {
 		http.Error(w, "downloader unavailable", http.StatusServiceUnavailable)

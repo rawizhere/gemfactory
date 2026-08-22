@@ -1,4 +1,3 @@
-// Package storage provides the database infrastructure and repository implementations.
 package storage
 
 import (
@@ -14,13 +13,11 @@ import (
 	"go.uber.org/zap"
 )
 
-// Postgres encapsulates a PostgreSQL database connection managed via the Bun ORM.
 type Postgres struct {
 	db     *bun.DB
 	logger *zap.Logger
 }
 
-// NewPostgres initializes a new PostgreSQL connection with retry.
 func NewPostgres(ctx context.Context, databaseURL string, logger *zap.Logger) (*Postgres, error) {
 	const maxRetries = 10
 	const retryDelay = 5 * time.Second
@@ -84,17 +81,14 @@ func NewPostgres(ctx context.Context, databaseURL string, logger *zap.Logger) (*
 	return nil, fmt.Errorf("unexpected error: max retries exceeded")
 }
 
-// Close terminates the underlying database connection.
 func (p *Postgres) Close() error {
 	return p.db.Close()
 }
 
-// GetDB returns the underlying Bun database instance.
 func (p *Postgres) GetDB() *bun.DB {
 	return p.db
 }
 
-// Ping verifies that the database connection is still active.
 func (p *Postgres) Ping() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

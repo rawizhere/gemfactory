@@ -7,12 +7,10 @@ import (
 	"strings"
 )
 
-// escapeHTML is a helper to sanitize strings for Telegram's HTML styling.
 func escapeHTML(s string) string {
 	return html.EscapeString(s)
 }
 
-// FormatReleaseForTelegram generates a concise HTML-formatted line for Telegram messages.
 func FormatReleaseForTelegram(release *model.Release) string {
 	var artistName string
 	if release.Artist != nil {
@@ -24,7 +22,6 @@ func FormatReleaseForTelegram(release *model.Release) string {
 	title := cleanReleaseString(release.Title.String())
 	track := cleanReleaseString(release.TitleTrack.String())
 
-	// Determine what is the main 'event' text
 	var mainEvent string
 	isPre := strings.Contains(strings.ToLower(release.Title.String()), "pre-release") ||
 		strings.Contains(strings.ToLower(release.AlbumName.String()), "pre-release")
@@ -127,36 +124,22 @@ func isTBA(s string) bool {
 	return strings.Contains(low, "to be announced") || strings.Contains(low, "tba")
 }
 
-// FormatReleaseForDisplay generates a detailed multi-line string for descriptive release views.
-func FormatReleaseForDisplay(release *model.Release) string {
-	var parts []string
+func CleanReleaseTitle(title string) string {
+	title = strings.TrimSpace(title)
+	title = strings.Trim(title, "{}")
+	return strings.Join(strings.Fields(title), " ")
+}
 
-	var artistName string
-	if release.Artist != nil {
-		artistName = release.Artist.Name.String()
+func CleanLink(link string) string {
+	if link == "" {
+		return ""
 	}
-	parts = append(parts, fmt.Sprintf("🎤 %s", artistName))
-
-	title := release.Title.String()
-	if release.AlbumName.String() != "" && release.AlbumName.String() != "N/A" {
-		title = release.AlbumName.String()
+	low := strings.ToLower(link)
+	if strings.Contains(low, "youtube.com/@") ||
+		strings.Contains(low, "youtube.com/channel/") ||
+		strings.Contains(low, "youtube.com/user/") ||
+		strings.Contains(low, "youtube.com/c/") {
+		return ""
 	}
-	parts = append(parts, fmt.Sprintf("💿 %s", title))
-
-	if release.TitleTrack.String() != "" && release.TitleTrack.String() != "N/A" {
-		parts = append(parts, fmt.Sprintf("🎵 %s", release.TitleTrack.String()))
-	}
-
-	dateStr := release.Date.Format("02.01.06")
-	parts = append(parts, fmt.Sprintf("📅 %s", dateStr))
-
-	if release.MV.String() != "" && release.MV.String() != "N/A" {
-		parts = append(parts, fmt.Sprintf("🎬 [MV](%s)", release.MV.String()))
-	}
-
-	if release.Spotify.String() != "" && release.Spotify.String() != "N/A" {
-		parts = append(parts, fmt.Sprintf("🎧 [Spotify](%s)", release.Spotify.String()))
-	}
-
-	return strings.Join(parts, "\n")
+	return link
 }

@@ -1,4 +1,3 @@
-// Package health provides HTTP endpoints for health checks, readiness, and metrics.
 package health
 
 import (
@@ -12,14 +11,12 @@ import (
 	"go.uber.org/zap"
 )
 
-// Server runs an HTTP server exposing /health, /ready, /live, and /metrics endpoints.
 type Server struct {
 	server *http.Server
 	db     *storage.Postgres
 	logger *zap.Logger
 }
 
-// NewServer initializes the health check HTTP server.
 func NewServer(port string, logger *zap.Logger, db *storage.Postgres) *Server {
 	mux := http.NewServeMux()
 
@@ -42,13 +39,11 @@ func NewServer(port string, logger *zap.Logger, db *storage.Postgres) *Server {
 	return healthServer
 }
 
-// Start listens and serves incoming HTTP health check requests.
 func (s *Server) Start() error {
 	s.logger.Info("Starting health check server", zap.String("addr", s.server.Addr))
 	return s.server.ListenAndServe()
 }
 
-// Stop gracefully shuts down the health check server.
 func (s *Server) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

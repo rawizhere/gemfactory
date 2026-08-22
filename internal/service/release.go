@@ -1,4 +1,3 @@
-// Package service contains business logic.
 package service
 
 import (
@@ -6,7 +5,7 @@ import (
 	"fmt"
 	"gemfactory/internal/model"
 	"gemfactory/internal/scraper"
-	"gemfactory/internal/storage/repository"
+	"gemfactory/internal/storage"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,7 +17,6 @@ import (
 	"golang.org/x/text/language"
 )
 
-// ReleaseService coordinates the collection, filtering, and presentation of music releases.
 type ReleaseService struct {
 	repo       model.ReleaseRepository
 	artistRepo model.ArtistRepository
@@ -29,14 +27,13 @@ type ReleaseService struct {
 
 func NewReleaseService(db *bun.DB, scraper scraper.Fetcher, logger *zap.Logger) *ReleaseService {
 	return &ReleaseService{
-		repo:       repository.NewReleaseRepository(db, logger),
-		artistRepo: repository.NewArtistRepository(db, logger),
+		repo:       storage.NewReleaseRepository(db, logger),
+		artistRepo: storage.NewArtistRepository(db, logger),
 		scraper:    scraper,
 		logger:     logger,
 	}
 }
 
-// GetReleasesForMonth retrieves and formats all releases within a specified calendar month.
 func (s *ReleaseService) GetReleasesForMonth(ctx context.Context, month string, femaleOnly, maleOnly bool) (string, error) {
 	month = strings.ToLower(month)
 
@@ -87,9 +84,9 @@ func (s *ReleaseService) GetReleasesForMonth(ctx context.Context, month string, 
 	var result strings.Builder
 	caser := cases.Title(language.English)
 	if year > 0 {
-		fmt.Fprintf(&result, "🎵 Releases for %s %d:\n\n", caser.String(month), year)
+		fmt.Fprintf(&result, "Releases for %s %d:\n\n", caser.String(month), year)
 	} else {
-		fmt.Fprintf(&result, "🎵 Releases for %s:\n\n", caser.String(month))
+		fmt.Fprintf(&result, "Releases for %s:\n\n", caser.String(month))
 	}
 
 	if len(releases) == 0 {
@@ -150,7 +147,6 @@ func (s *ReleaseService) GetReleasesForMonth(ctx context.Context, month string, 
 	return result.String(), nil
 }
 
-// Upsert updates an existing release record or creates a new one if it does not exist.
 func (s *ReleaseService) Upsert(ctx context.Context, release *model.Release) error {
 	if err := s.validateRelease(release); err != nil {
 		return err
@@ -160,7 +156,6 @@ func (s *ReleaseService) Upsert(ctx context.Context, release *model.Release) err
 	release.AlbumName = model.NewUniqueString(CleanReleaseTitle(release.AlbumName.String()))
 	release.TitleTrack = model.NewUniqueString(CleanReleaseTitle(release.TitleTrack.String()))
 
-	// Filter common metadata noise from track titles.
 	genericTitles := []string{
 		"youtube", "official audio", "music video", "mv release",
 		"jyp entertainment official youtube", "official youtube",
@@ -191,7 +186,6 @@ func (s *ReleaseService) Upsert(ctx context.Context, release *model.Release) err
 		}
 	}
 
-	// Also check for any existing release for this artist on this date with matching album or title
 	if err == nil && existingRelease == nil {
 		artistReleases, aErr := s.repo.GetByArtistID(ctx, release.ArtistID)
 		if aErr == nil {
@@ -239,7 +233,6 @@ func (s *ReleaseService) Upsert(ctx context.Context, release *model.Release) err
 			return err
 		}
 
-		// Clean up any other duplicate rows from old databases for this artist and date
 		artistReleases, aErr := s.repo.GetByArtistID(ctx, release.ArtistID)
 		if aErr == nil {
 			for i := range artistReleases {
@@ -276,7 +269,6 @@ func (s *ReleaseService) validateRelease(release *model.Release) error {
 	return nil
 }
 
-// ParseReleasesForMonth initiates a scraping job to collect and save releases for a given month.
 func (s *ReleaseService) ParseReleasesForMonth(ctx context.Context, monthName string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -365,7 +357,6 @@ func (s *ReleaseService) ParseReleasesForMonth(ctx context.Context, monthName st
 	return savedCount, nil
 }
 
-// ParseReleasesForYear initiates a scraping job to collect and save releases for an entire calendar year.
 func (s *ReleaseService) ParseReleasesForYear(ctx context.Context, year string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -427,7 +418,6 @@ func (s *ReleaseService) ParseReleasesForYear(ctx context.Context, year string) 
 	return savedCount, nil
 }
 
-// GetByArtist searches for and formats releases by an artist's name.
 func (s *ReleaseService) GetByArtist(ctx context.Context, artistName string) (string, error) {
 	releases, err := s.repo.GetByArtist(ctx, artistName)
 	if err != nil {
@@ -435,7 +425,7 @@ func (s *ReleaseService) GetByArtist(ctx context.Context, artistName string) (st
 	}
 
 	var result strings.Builder
-	fmt.Fprintf(&result, "🎵 Artist releases for %s:\n\n", artistName)
+	fmt.Fprintf(&result, "Artist releases for %s:\n\n", artistName)
 
 	if len(releases) == 0 {
 		result.WriteString("No releases found")
@@ -486,7 +476,6 @@ func (s *ReleaseService) findArtist(scrapedName string, artistMap map[string]*mo
 	return nil
 }
 
-// GetTotalReleaseCount returns the total number of release records in the database.
 func (s *ReleaseService) GetTotalReleaseCount(ctx context.Context) (int, error) {
 	return s.repo.GetTotalCount(ctx)
 }

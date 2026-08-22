@@ -6,7 +6,6 @@ import (
 	"github.com/mymmrac/telego"
 )
 
-// GetUserIdentifier returns a human-readable name for a user.
 func GetUserIdentifier(user *telego.User) string {
 	if user == nil {
 		return "unknown"

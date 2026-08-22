@@ -11,7 +11,6 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// HTTPClient provides a specialized web client for fetching and parsing HTML documents.
 type HTTPClient struct {
 	client    *http.Client
 	logger    *zap.Logger
@@ -19,7 +18,6 @@ type HTTPClient struct {
 	limiter   *rate.Limiter
 }
 
-// NewHTTPClient initializes a new HTTPClient with connection pooling.
 func NewHTTPClient(userAgent string, logger *zap.Logger) *HTTPClient {
 	transport := &http.Transport{
 		MaxIdleConns:        50,
@@ -43,7 +41,6 @@ func NewHTTPClient(userAgent string, logger *zap.Logger) *HTTPClient {
 	}
 }
 
-// GetHTML fetches an HTML page and returns a goquery document.
 func (c *HTTPClient) GetHTML(ctx context.Context, url string) (*goquery.Document, error) {
 	if err := c.limiter.Wait(ctx); err != nil {
 		return nil, fmt.Errorf("rate limit wait failed: %w", err)

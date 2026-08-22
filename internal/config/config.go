@@ -30,7 +30,6 @@ type Config struct {
 	ReleaseCheckInterval time.Duration
 }
 
-// Load reads environment variables from .env and system env, returning a validated Config.
 func Load() (*Config, error) {
 	_ = godotenv.Load()
 
@@ -56,7 +55,6 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// Validate checks that all required configuration fields are set and within acceptable bounds.
 func (c *Config) Validate() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("DB_DSN is required")

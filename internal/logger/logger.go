@@ -1,4 +1,3 @@
-// Package logger provides a configured zap.Logger with stdout logging and dynamic level support.
 package logger
 
 import (
@@ -8,13 +7,11 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// Logger wraps zap.Logger for runtime level updates.
 type Logger struct {
 	*zap.Logger
 	Level zap.AtomicLevel
 }
 
-// New initializes a logger with the level configured via LOG_LEVEL.
 func New() (*Logger, error) {
 	atomicLevel := zap.NewAtomicLevelAt(getLogLevel())
 
@@ -37,7 +34,6 @@ func New() (*Logger, error) {
 	}, nil
 }
 
-// SetLevel updates the logger's level at runtime.
 func (l *Logger) SetLevel(levelStr string) {
 	var level zapcore.Level
 	switch levelStr {

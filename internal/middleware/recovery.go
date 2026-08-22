@@ -8,7 +8,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// Recovery catches panics during update handling and logs the stack trace.
 func Recovery(logger *zap.Logger) func(update telego.Update, next func(telego.Update)) {
 	return func(update telego.Update, next func(telego.Update)) {
 		defer func() {

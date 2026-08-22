@@ -354,6 +354,71 @@ export function initArtists() {
     });
   });
 
+  // Export JSON (grouped into female, male, mixed blocks)
+  $('#artist-export-json')?.addEventListener('click', () => {
+    const grouped = {
+      female: [],
+      male: [],
+      mixed: [],
+    };
+    for (const a of artists) {
+      if (grouped[a.gender]) {
+        grouped[a.gender].push(a.name);
+      } else {
+        grouped.mixed.push(a.name);
+      }
+    }
+    grouped.female.sort((a, b) => a.localeCompare(b));
+    grouped.male.sort((a, b) => a.localeCompare(b));
+    grouped.mixed.sort((a, b) => a.localeCompare(b));
+
+    const jsonStr = JSON.stringify(grouped, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'artists.json';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  });
+
+  // Import JSON
+  const importBtn = $('#artist-import-json');
+  const importFile = $('#artist-import-json-file');
+  if (importBtn && importFile) {
+    importBtn.addEventListener('click', () => {
+      importFile.value = '';
+      importFile.click();
+    });
+
+    importFile.addEventListener('change', async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      try {
+        importBtn.disabled = true;
+        importBtn.textContent = 'Importing...';
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+
+        if (typeof parsed !== 'object' || parsed === null) {
+          throw new Error('Invalid JSON format: root must be an object with female, male, or mixed blocks');
+        }
+
+        const res = await api('POST', '/api/artists/import-json', parsed);
+        alert(`Imported ${res.added} new artists (${res.skipped?.length || 0} already existed).`);
+        await loadArtists();
+      } catch (err) {
+        alert(`Import failed: ${err.message}`);
+      } finally {
+        importBtn.disabled = false;
+        importBtn.textContent = 'Import JSON';
+      }
+    });
+  }
+
   $('#artist-delete').addEventListener('click', async () => {
     const checkedBoxes = Array.from($$('#artists-table input[type=checkbox]:checked'));
     if (!checkedBoxes.length) return;

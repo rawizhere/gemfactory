@@ -10,7 +10,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// Debouncer tracks per-user action timestamps to suppress duplicate rapid-fire inputs.
 type Debouncer struct {
 	lastProcess map[string]time.Time
 	mu          sync.RWMutex
@@ -18,7 +17,6 @@ type Debouncer struct {
 	logger      *zap.Logger
 }
 
-// NewDebouncer creates a new Debouncer with the given cooldown interval.
 func NewDebouncer(interval time.Duration, logger *zap.Logger) *Debouncer {
 	return &Debouncer{
 		lastProcess: make(map[string]time.Time),
@@ -27,7 +25,6 @@ func NewDebouncer(interval time.Duration, logger *zap.Logger) *Debouncer {
 	}
 }
 
-// ShouldProcess checks if an action for a user should proceed based on cooldown.
 func (d *Debouncer) ShouldProcess(userID int64, action string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -43,7 +40,6 @@ func (d *Debouncer) ShouldProcess(userID int64, action string) bool {
 	return true
 }
 
-// Cleanup purges stale cooldown entries.
 func (d *Debouncer) Cleanup() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -56,7 +52,6 @@ func (d *Debouncer) Cleanup() {
 	}
 }
 
-// Debounce drops repeated rapid command messages from the same user.
 func Debounce(debouncer *Debouncer, logger *zap.Logger) func(update telego.Update, next func(telego.Update)) {
 	return func(update telego.Update, next func(telego.Update)) {
 		if update.Message == nil {
@@ -86,7 +81,6 @@ func Debounce(debouncer *Debouncer, logger *zap.Logger) func(update telego.Updat
 	}
 }
 
-// DebounceCallback drops duplicate button clicks in rapid succession.
 func DebounceCallback(debouncer *Debouncer, logger *zap.Logger) func(update telego.Update, next func(telego.Update)) {
 	return func(update telego.Update, next func(telego.Update)) {
 		if update.CallbackQuery == nil {
