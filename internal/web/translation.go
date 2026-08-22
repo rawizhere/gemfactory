@@ -208,6 +208,7 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 		Provider     string `json:"provider"`
 		Text         string `json:"text"`
 		TargetLang   string `json:"target_lang"`
+		VideoTitle   string `json:"video_title"`
 		GeminiKey    string `json:"gemini_api_key"`
 		GroqKey      string `json:"groq_api_key"`
 		GeminiModels string `json:"gemini_models"`
@@ -230,6 +231,7 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 	if sampleText == "" {
 		sampleText = "대박! 오늘 무대 진짜 레전드였어!"
 	}
+	videoTitle := strings.TrimSpace(req.VideoTitle)
 
 	provider := strings.ToLower(strings.TrimSpace(req.Provider))
 	if provider == "" {
@@ -292,7 +294,7 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 		} else if c, cErr := s.configs.Get(ctx, "GEMINI_MODELS"); cErr == nil && c != nil && c.Value != "" {
 			gModels = parseModels(c.Value)
 		}
-		results, err = downloader.TranslateWithGemini(ctx, []string{sampleText}, targetLang, geminiKey, prompt, gModels)
+		results, err = downloader.TranslateWithGemini(ctx, []string{sampleText}, targetLang, geminiKey, prompt, videoTitle, gModels)
 	case downloader.ProviderGroq:
 		if groqKey == "" {
 			writeJSON(w, map[string]any{"success": false, "error": "Groq API key is required"})
@@ -304,7 +306,7 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 		} else if c, cErr := s.configs.Get(ctx, "GROQ_MODELS"); cErr == nil && c != nil && c.Value != "" {
 			qModels = parseModels(c.Value)
 		}
-		results, err = downloader.TranslateWithGroq(ctx, []string{sampleText}, targetLang, groqKey, prompt, qModels)
+		results, err = downloader.TranslateWithGroq(ctx, []string{sampleText}, targetLang, groqKey, prompt, videoTitle, qModels)
 	case downloader.ProviderGoogle:
 		results, err = downloader.TranslateWithGoogle(ctx, []string{sampleText}, targetLang)
 	default:

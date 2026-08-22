@@ -70,7 +70,11 @@ func (s *Service) subtitlesForClip(
 	}
 
 	if res.TargetLang != "" && res.TargetLang != res.SourceLang {
-		if terr := s.translateVTTFile(ctx, trimmedPath, res.TargetLang); terr != nil {
+		var videoTitle string
+		if meta != nil {
+			videoTitle = meta.Title
+		}
+		if terr := s.translateVTTFile(ctx, trimmedPath, res.TargetLang, videoTitle); terr != nil {
 			slog.Warn("vtt translation failed, using original source subtitles",
 				"target_lang", res.TargetLang, "error", terr)
 		}
@@ -129,7 +133,7 @@ func downloadSubtitlesDirect(ctx context.Context, rawURL, cookieFile, outPath st
 	return nil
 }
 
-func (s *Service) translateVTTFile(ctx context.Context, vttPath, targetLang string) error {
+func (s *Service) translateVTTFile(ctx context.Context, vttPath, targetLang, videoTitle string) error {
 	data, err := os.ReadFile(vttPath)
 	if err != nil {
 		return err
@@ -176,7 +180,7 @@ func (s *Service) translateVTTFile(ctx context.Context, vttPath, targetLang stri
 		texts = append(texts, c.text)
 	}
 
-	translated, _, err := s.TranslateTextsWithFallback(ctx, texts, targetLang)
+	translated, _, err := s.TranslateTextsWithFallback(ctx, texts, targetLang, videoTitle)
 	if err != nil {
 		return err
 	}
@@ -782,9 +786,14 @@ func buildFallbackChain(cfg TranslationConfig) []string {
 	return chain
 }
 
-func (s *Service) TranslateTextsWithFallback(ctx context.Context, texts []string, targetLang string) ([]string, string, error) {
+func (s *Service) TranslateTextsWithFallback(ctx context.Context, texts []string, targetLang string, videoTitle ...string) ([]string, string, error) {
 	if len(texts) == 0 {
 		return nil, "", nil
+	}
+
+	vTitle := ""
+	if len(videoTitle) > 0 {
+		vTitle = videoTitle[0]
 	}
 
 	cfg := s.ResolveTranslationConfig(ctx)
@@ -805,7 +814,7 @@ func (s *Service) TranslateTextsWithFallback(ctx context.Context, texts []string
 			if cfg.GeminiKey == "" {
 				continue
 			}
-			translated, err := TranslateWithGemini(ctx, texts, targetLang, cfg.GeminiKey, cfg.Prompt, cfg.GeminiModels)
+			translated, err := TranslateWithGemini(ctx, texts, targetLang, cfg.GeminiKey, cfg.Prompt, vTitle, cfg.GeminiModels)
 			if err == nil {
 				return preserveSpeakerTags(texts, translated), ProviderGemini, nil
 			}
@@ -816,7 +825,7 @@ func (s *Service) TranslateTextsWithFallback(ctx context.Context, texts []string
 			if cfg.GroqKey == "" {
 				continue
 			}
-			translated, err := TranslateWithGroq(ctx, texts, targetLang, cfg.GroqKey, cfg.Prompt, cfg.GroqModels)
+			translated, err := TranslateWithGroq(ctx, texts, targetLang, cfg.GroqKey, cfg.Prompt, vTitle, cfg.GroqModels)
 			if err == nil {
 				return preserveSpeakerTags(texts, translated), ProviderGroq, nil
 			}
@@ -930,16 +939,22 @@ func alignTranslatedLines(lines []string, expectedLen int) []string {
 	return out
 }
 
-func TranslateWithGemini(ctx context.Context, texts []string, targetLang, apiKey, systemInstruction string, models ...[]string) ([]string, error) {
+func TranslateWithGemini(ctx context.Context, texts []string, targetLang, apiKey, systemInstruction string, videoTitle string, models ...[]string) ([]string, error) {
 	geminiModels := DefaultGeminiModels
 	if len(models) > 0 && len(models[0]) > 0 {
 		geminiModels = models[0]
 	}
 
+	var contextPrefix string
+	if strings.TrimSpace(videoTitle) != "" {
+		contextPrefix = fmt.Sprintf("Video context / Title: %q\n\n", strings.TrimSpace(videoTitle))
+	}
+
 	numbered := buildNumberedLines(texts)
 	promptText := fmt.Sprintf(
-		"Translate the following subtitle lines into language %q (BCP-47 code).\n\n%s\n\nReturn EXACTLY the same number of numbered lines as provided, keeping line numbers (\"1. Translated text\"). Do not add explanations or notes.\n\nInput lines:\n%s",
+		"Translate the following subtitle lines into language %q (BCP-47 code).\n\n%s%s\n\nReturn EXACTLY the same number of numbered lines as provided, keeping line numbers (\"1. Translated text\"). Do not add explanations or notes.\n\nInput lines:\n%s",
 		targetLang,
+		contextPrefix,
 		systemInstruction,
 		numbered,
 	)
@@ -1017,17 +1032,23 @@ func TranslateWithGemini(ctx context.Context, texts []string, targetLang, apiKey
 	return nil, lastErr
 }
 
-func TranslateWithGroq(ctx context.Context, texts []string, targetLang, apiKey, systemInstruction string, models ...[]string) ([]string, error) {
+func TranslateWithGroq(ctx context.Context, texts []string, targetLang, apiKey, systemInstruction string, videoTitle string, models ...[]string) ([]string, error) {
 	apiURL := "https://api.groq.com/openai/v1/chat/completions"
 	groqModels := DefaultGroqModels
 	if len(models) > 0 && len(models[0]) > 0 {
 		groqModels = models[0]
 	}
 
+	var contextPrefix string
+	if strings.TrimSpace(videoTitle) != "" {
+		contextPrefix = fmt.Sprintf("\nVideo context / Title: %q", strings.TrimSpace(videoTitle))
+	}
+
 	numbered := buildNumberedLines(texts)
 	userMsg := fmt.Sprintf(
-		"Translate the following subtitle lines into language %q (BCP-47 code).\nReturn EXACTLY the same number of numbered lines as provided, keeping line numbers (\"1. Translated text\"). Do not add preamble or explanations.\n\nInput lines:\n%s",
+		"Translate the following subtitle lines into language %q (BCP-47 code).%s\nReturn EXACTLY the same number of numbered lines as provided, keeping line numbers (\"1. Translated text\"). Do not add preamble or explanations.\n\nInput lines:\n%s",
 		targetLang,
+		contextPrefix,
 		numbered,
 	)
 
