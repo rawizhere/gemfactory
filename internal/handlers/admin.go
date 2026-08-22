@@ -192,7 +192,8 @@ func (h *AdminHandlers) Export(ctx context.Context, message *telego.Message) {
 }
 
 func (h *AdminHandlers) parseArtistList(input string) []string {
-	parts := strings.Split(input, ",")
+	r := strings.NewReplacer("/", ",", ";", ",", "\n", ",")
+	parts := strings.Split(r.Replace(input), ",")
 	var result []string
 	for _, p := range parts {
 		if s := strings.TrimSpace(p); s != "" {

@@ -231,6 +231,7 @@ func (r *ReleaseRepository) Upsert(ctx context.Context, release *model.Release) 
 	_, err := r.db.NewInsert().
 		Model(release).
 		On("CONFLICT (artist_id, date, source_url) DO UPDATE").
+		Set("display_artist = EXCLUDED.display_artist").
 		Set("title = EXCLUDED.title").
 		Set("title_track = EXCLUDED.title_track").
 		Set("album_name = EXCLUDED.album_name").

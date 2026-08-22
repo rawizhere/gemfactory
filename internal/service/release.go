@@ -6,6 +6,7 @@ import (
 	"gemfactory/internal/model"
 	"gemfactory/internal/scraper"
 	"gemfactory/internal/storage"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -327,15 +328,16 @@ func (s *ReleaseService) ParseReleasesForMonth(ctx context.Context, monthName st
 		}
 
 		release := &model.Release{
-			ArtistID:   artist.ArtistID,
-			Title:      model.NewUniqueString(scrapedRelease.Title),
-			TitleTrack: model.NewUniqueString(scrapedRelease.TitleTrack),
-			AlbumName:  model.NewUniqueString(scrapedRelease.AlbumName),
-			MV:         model.NewUniqueString(scrapedRelease.MV),
-			Spotify:    model.NewUniqueString(scrapedRelease.Spotify),
-			SourceURL:  model.NewUniqueString(scrapedRelease.SourceURL),
-			Date:       scrapedRelease.Date,
-			IsActive:   true,
+			ArtistID:      artist.ArtistID,
+			DisplayArtist: model.NewUniqueString(scrapedRelease.Artist),
+			Title:         model.NewUniqueString(scrapedRelease.Title),
+			TitleTrack:    model.NewUniqueString(scrapedRelease.TitleTrack),
+			AlbumName:     model.NewUniqueString(scrapedRelease.AlbumName),
+			MV:            model.NewUniqueString(scrapedRelease.MV),
+			Spotify:       model.NewUniqueString(scrapedRelease.Spotify),
+			SourceURL:     model.NewUniqueString(scrapedRelease.SourceURL),
+			Date:          scrapedRelease.Date,
+			IsActive:      true,
 		}
 
 		err = s.Upsert(ctx, release)
@@ -389,15 +391,16 @@ func (s *ReleaseService) ParseReleasesForYear(ctx context.Context, year string) 
 		}
 
 		release := &model.Release{
-			ArtistID:   artist.ArtistID,
-			Title:      model.NewUniqueString(scrapedRelease.Title),
-			TitleTrack: model.NewUniqueString(scrapedRelease.TitleTrack),
-			AlbumName:  model.NewUniqueString(scrapedRelease.AlbumName),
-			MV:         model.NewUniqueString(scrapedRelease.MV),
-			Spotify:    model.NewUniqueString(scrapedRelease.Spotify),
-			SourceURL:  model.NewUniqueString(scrapedRelease.SourceURL),
-			Date:       scrapedRelease.Date,
-			IsActive:   true,
+			ArtistID:      artist.ArtistID,
+			DisplayArtist: model.NewUniqueString(scrapedRelease.Artist),
+			Title:         model.NewUniqueString(scrapedRelease.Title),
+			TitleTrack:    model.NewUniqueString(scrapedRelease.TitleTrack),
+			AlbumName:     model.NewUniqueString(scrapedRelease.AlbumName),
+			MV:            model.NewUniqueString(scrapedRelease.MV),
+			Spotify:       model.NewUniqueString(scrapedRelease.Spotify),
+			SourceURL:     model.NewUniqueString(scrapedRelease.SourceURL),
+			Date:          scrapedRelease.Date,
+			IsActive:      true,
 		}
 
 		err = s.Upsert(ctx, release)
@@ -450,26 +453,79 @@ func monthToInt(month string) int {
 	return monthMap[strings.ToLower(month)]
 }
 
-func (s *ReleaseService) findArtist(scrapedName string, artistMap map[string]*model.Artist) *model.Artist {
-	scrapedLower := strings.ToLower(strings.TrimSpace(scrapedName))
+var staticAliases = map[string]string{
+	"tomorrow x together": "txt",
+}
 
-	if artist, ok := artistMap[scrapedLower]; ok {
-		return artist
+var collabSplitter = regexp.MustCompile(`(?i)\s+(?:x|feat\.?|ft\.?|with|&)\s+|[,/]`)
+
+func normalizeName(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r >= 0x0400 {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func (s *ReleaseService) findArtist(scrapedName string, artistMap map[string]*model.Artist) *model.Artist {
+	raw := strings.ToLower(strings.TrimSpace(scrapedName))
+	if raw == "" {
+		return nil
 	}
 
+	normMap := make(map[string]*model.Artist, len(artistMap))
 	for name, artist := range artistMap {
-		if strings.HasPrefix(scrapedLower, name+" (") ||
-			strings.HasPrefix(scrapedLower, name+"-") ||
-			strings.HasPrefix(scrapedLower, name+" -") ||
-			strings.HasPrefix(scrapedLower, name+" &") ||
-			strings.HasPrefix(scrapedLower, name+",") {
-			return artist
-		}
+		normMap[normalizeName(name)] = artist
+	}
 
-		cleaned := strings.Split(scrapedLower, " (")[0]
-		cleaned = strings.Split(cleaned, " -")[0]
-		if cleaned == name {
-			return artist
+	lookup := func(val string) *model.Artist {
+		val = strings.TrimSpace(val)
+		if val == "" {
+			return nil
+		}
+		if alias, ok := staticAliases[val]; ok {
+			val = alias
+		}
+		return normMap[normalizeName(val)]
+	}
+
+	if a := lookup(raw); a != nil {
+		return a
+	}
+
+	base := strings.TrimSpace(strings.Split(raw, "(")[0])
+	base = strings.TrimSpace(strings.Split(base, " -")[0])
+	if a := lookup(base); a != nil {
+		return a
+	}
+
+	if idx := strings.Index(raw, "("); idx != -1 {
+		inside := strings.Trim(raw[idx+1:], ") ")
+		if a := lookup(inside); a != nil {
+			return a
+		}
+	}
+
+	candidates := collabSplitter.Split(raw, -1)
+	if len(candidates) > 1 {
+		for _, cand := range candidates {
+			cand = strings.TrimSpace(cand)
+			if a := lookup(cand); a != nil {
+				return a
+			}
+			candBase := strings.TrimSpace(strings.Split(cand, "(")[0])
+			candBase = strings.TrimSpace(strings.Split(candBase, " -")[0])
+			if a := lookup(candBase); a != nil {
+				return a
+			}
+			if idx := strings.Index(cand, "("); idx != -1 {
+				inside := strings.Trim(cand[idx+1:], ") ")
+				if a := lookup(inside); a != nil {
+					return a
+				}
+			}
 		}
 	}
 

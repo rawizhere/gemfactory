@@ -665,7 +665,7 @@ var speakerTagRe = regexp.MustCompile(`^(\[[^\]]+\]|\([^\)]+\)|[A-Za-z0-9_ê°€-íž
 
 // TranslationConfig holds the active provider selection, API keys, models, and custom prompt.
 type TranslationConfig struct {
-	PrimaryProvider string   // "google", "gemini", "groq"
+	PrimaryProvider string // "google", "gemini", "groq"
 	GeminiKey       string
 	GroqKey         string
 	GeminiModels    []string

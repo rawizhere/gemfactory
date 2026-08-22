@@ -62,9 +62,32 @@ func TestCleanReleaseTitleAndLink(t *testing.T) {
 func TestFindArtist(t *testing.T) {
 	aespa := &model.Artist{ArtistID: 1, Name: model.NewUniqueString("aespa")}
 	blackpink := &model.Artist{ArtistID: 2, Name: model.NewUniqueString("BLACKPINK")}
+	txt := &model.Artist{ArtistID: 3, Name: model.NewUniqueString("TXT")}
+	classy := &model.Artist{ArtistID: 4, Name: model.NewUniqueString("CLASS:y")}
+	lightsum := &model.Artist{ArtistID: 5, Name: model.NewUniqueString("LIGHTSUM")}
+	somi := &model.Artist{ArtistID: 6, Name: model.NewUniqueString("JEON SOMI")}
+	solar := &model.Artist{ArtistID: 7, Name: model.NewUniqueString("Solar")}
+	zico := &model.Artist{ArtistID: 8, Name: model.NewUniqueString("ZICO")}
+	apink := &model.Artist{ArtistID: 9, Name: model.NewUniqueString("Apink")}
+	gfriend := &model.Artist{ArtistID: 10, Name: model.NewUniqueString("GFRIEND")}
+	omg := &model.Artist{ArtistID: 11, Name: model.NewUniqueString("OH MY GIRL")}
+	irene := &model.Artist{ArtistID: 12, Name: model.NewUniqueString("IRENE")}
+	redvelvet := &model.Artist{ArtistID: 13, Name: model.NewUniqueString("Red Velvet")}
+
 	artists := map[string]*model.Artist{
-		"aespa":     aespa,
-		"blackpink": blackpink,
+		"aespa":      aespa,
+		"blackpink":  blackpink,
+		"txt":        txt,
+		"class:y":    classy,
+		"lightsum":   lightsum,
+		"jeon somi":  somi,
+		"solar":      solar,
+		"zico":       zico,
+		"apink":      apink,
+		"gfriend":    gfriend,
+		"oh my girl": omg,
+		"irene":      irene,
+		"red velvet": redvelvet,
 	}
 
 	tests := []struct {
@@ -74,8 +97,20 @@ func TestFindArtist(t *testing.T) {
 		{"Aespa", aespa},
 		{"  AESPA  ", aespa},
 		{"aespa (Karina)", aespa},
+		{"aespa (JP)", aespa},
 		{"aespa - Drama", aespa},
 		{"BLACKPINK & Rosé", blackpink},
+		{"TOMORROW X TOGETHER", txt},
+		{"TOMORROW X TOGETHER (JP)", txt},
+		{"CLASSy", classy},
+		{"LIGHTSUM(SANGAH, CHOWON, JUHYEON)", lightsum},
+		{"JVKE x JEON SOMI", somi},
+		{"Solar x Accusefive", solar},
+		{"ZICO, Crush", zico},
+		{"JEONG EUNJI (Apink)", apink},
+		{"YERIN (GFRIEND)", gfriend},
+		{"Hyojung/MIMI (OH MY GIRL)", omg},
+		{"IRENE (Red Velvet)", irene},
 		{"Unknown Artist", nil},
 	}
 	for _, tc := range tests {

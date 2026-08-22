@@ -36,6 +36,19 @@ func TestFormatReleaseForTelegram(t *testing.T) {
 	if !strings.Contains(result, "<a href=\"https://open.spotify.com/track/456\">SP</a>") {
 		t.Errorf("Expected result to contain SP link, got %s", result)
 	}
+
+	collabRelease := &model.Release{
+		Artist: &model.Artist{
+			Name: model.NewUniqueString("JEON SOMI"),
+		},
+		DisplayArtist: model.NewUniqueString("JVKE x JEON SOMI"),
+		AlbumName:     model.NewUniqueString("Collab Single"),
+		Date:          time.Date(2026, 2, 23, 0, 0, 0, 0, time.UTC),
+	}
+	collabResult := FormatReleaseForTelegram(collabRelease)
+	if !strings.Contains(collabResult, "<b>JVKE x JEON SOMI</b>") {
+		t.Errorf("Expected collab display artist name, got %s", collabResult)
+	}
 }
 
 func TestCleanReleaseString(t *testing.T) {

@@ -10,18 +10,19 @@ import (
 type Release struct {
 	bun.BaseModel `bun:"table:gemfactory.releases"`
 
-	ReleaseID  int          `bun:"release_id,pk,autoincrement" json:"release_id"`
-	ArtistID   int          `bun:"artist_id,notnull" json:"artist_id"`
-	Title      UniqueString `bun:"title,notnull" json:"title"`
-	TitleTrack UniqueString `bun:"title_track" json:"title_track"`
-	AlbumName  UniqueString `bun:"album_name" json:"album_name"`
-	MV         UniqueString `bun:"mv" json:"mv"`
-	Spotify    UniqueString `bun:"spotify" json:"spotify"`
-	SourceURL  UniqueString `bun:"source_url" json:"source_url"`
-	Date       time.Time    `bun:"date,type:date,notnull" json:"date"`
-	IsActive   bool         `bun:"is_active,notnull,default:true" json:"is_active"`
-	CreatedAt  time.Time    `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt  time.Time    `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
+	ReleaseID     int          `bun:"release_id,pk,autoincrement" json:"release_id"`
+	ArtistID      int          `bun:"artist_id,notnull" json:"artist_id"`
+	DisplayArtist UniqueString `bun:"display_artist" json:"display_artist,omitempty"`
+	Title         UniqueString `bun:"title,notnull" json:"title"`
+	TitleTrack    UniqueString `bun:"title_track" json:"title_track"`
+	AlbumName     UniqueString `bun:"album_name" json:"album_name"`
+	MV            UniqueString `bun:"mv" json:"mv"`
+	Spotify       UniqueString `bun:"spotify" json:"spotify"`
+	SourceURL     UniqueString `bun:"source_url" json:"source_url"`
+	Date          time.Time    `bun:"date,type:date,notnull" json:"date"`
+	IsActive      bool         `bun:"is_active,notnull,default:true" json:"is_active"`
+	CreatedAt     time.Time    `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt     time.Time    `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
 
 	Artist *Artist `bun:"rel:belongs-to,join:artist_id=artist_id" json:"artist,omitempty"`
 }

@@ -13,7 +13,9 @@ func escapeHTML(s string) string {
 
 func FormatReleaseForTelegram(release *model.Release) string {
 	var artistName string
-	if release.Artist != nil {
+	if release.DisplayArtist.String() != "" {
+		artistName = release.DisplayArtist.String()
+	} else if release.Artist != nil {
 		artistName = release.Artist.Name.String()
 	}
 	artist := "<b>" + escapeHTML(artistName) + "</b>"
