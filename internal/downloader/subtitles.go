@@ -665,12 +665,43 @@ const DefaultTranslationPrompt = `Translate for video subtitles (music videos, v
 
 var speakerTagRe = regexp.MustCompile(`^(\[[^\]]+\]|\([^\)]+\)|[A-Za-z0-9_가-힣]+:)\s*`)
 
-// TranslationConfig holds the active provider selection, API keys, and custom prompt.
+// TranslationConfig holds the active provider selection, API keys, models, and custom prompt.
 type TranslationConfig struct {
-	PrimaryProvider string // "google", "gemini", "groq"
+	PrimaryProvider string   // "google", "gemini", "groq"
 	GeminiKey       string
 	GroqKey         string
+	GeminiModels    []string
+	GroqModels      []string
+	FallbackOrder   []string
 	Prompt          string
+}
+
+var DefaultGeminiModels = []string{
+	"gemini-3.7-flash",
+	"gemini-3.5-flash-lite",
+	"gemini-3.1-flash-lite",
+	"gemini-2.5-flash-lite",
+	"gemini-2.5-flash",
+	"gemini-flash-latest",
+}
+
+var DefaultGroqModels = []string{
+	"openai/gpt-oss-120b",
+	"qwen/qwen3.6-27b",
+	"groq/compound",
+	"openai/gpt-oss-20b",
+}
+
+func parseCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	var res []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			res = append(res, p)
+		}
+	}
+	return res
 }
 
 func (s *Service) ResolveTranslationConfig(ctx context.Context) TranslationConfig {
@@ -678,6 +709,9 @@ func (s *Service) ResolveTranslationConfig(ctx context.Context) TranslationConfi
 		PrimaryProvider: strings.ToLower(strings.TrimSpace(os.Getenv("TRANSLATION_PROVIDER"))),
 		GeminiKey:       strings.TrimSpace(os.Getenv("GEMINI_API_KEY")),
 		GroqKey:         strings.TrimSpace(os.Getenv("GROQ_API_KEY")),
+		GeminiModels:    parseCSV(os.Getenv("GEMINI_MODELS")),
+		GroqModels:      parseCSV(os.Getenv("GROQ_MODELS")),
+		FallbackOrder:   parseCSV(os.Getenv("TRANSLATION_FALLBACK_ORDER")),
 		Prompt:          strings.TrimSpace(os.Getenv("TRANSLATION_PROMPT")),
 	}
 
@@ -691,6 +725,15 @@ func (s *Service) ResolveTranslationConfig(ctx context.Context) TranslationConfi
 		if val, err := s.configs.Get(ctx, "GROQ_API_KEY"); err == nil && val != nil && val.Value != "" {
 			cfg.GroqKey = strings.TrimSpace(val.Value)
 		}
+		if val, err := s.configs.Get(ctx, "GEMINI_MODELS"); err == nil && val != nil && val.Value != "" {
+			cfg.GeminiModels = parseCSV(val.Value)
+		}
+		if val, err := s.configs.Get(ctx, "GROQ_MODELS"); err == nil && val != nil && val.Value != "" {
+			cfg.GroqModels = parseCSV(val.Value)
+		}
+		if val, err := s.configs.Get(ctx, "TRANSLATION_FALLBACK_ORDER"); err == nil && val != nil && val.Value != "" {
+			cfg.FallbackOrder = parseCSV(val.Value)
+		}
 		if val, err := s.configs.Get(ctx, "TRANSLATION_PROMPT"); err == nil && val != nil && val.Value != "" {
 			cfg.Prompt = strings.TrimSpace(val.Value)
 		}
@@ -699,6 +742,12 @@ func (s *Service) ResolveTranslationConfig(ctx context.Context) TranslationConfi
 	if cfg.PrimaryProvider == "" {
 		cfg.PrimaryProvider = ProviderGoogle
 	}
+	if len(cfg.GeminiModels) == 0 {
+		cfg.GeminiModels = DefaultGeminiModels
+	}
+	if len(cfg.GroqModels) == 0 {
+		cfg.GroqModels = DefaultGroqModels
+	}
 	if cfg.Prompt == "" {
 		cfg.Prompt = DefaultTranslationPrompt
 	}
@@ -706,7 +755,20 @@ func (s *Service) ResolveTranslationConfig(ctx context.Context) TranslationConfi
 	return cfg
 }
 
-func buildFallbackChain(primary string) []string {
+func buildFallbackChain(cfg TranslationConfig) []string {
+	if len(cfg.FallbackOrder) > 0 {
+		var chain []string
+		for _, p := range cfg.FallbackOrder {
+			p = strings.ToLower(strings.TrimSpace(p))
+			if p == ProviderGoogle || p == ProviderGemini || p == ProviderGroq {
+				chain = append(chain, p)
+			}
+		}
+		if len(chain) > 0 {
+			return chain
+		}
+	}
+	primary := cfg.PrimaryProvider
 	if primary != ProviderGoogle && primary != ProviderGemini && primary != ProviderGroq {
 		primary = ProviderGoogle
 	}
@@ -726,7 +788,7 @@ func (s *Service) TranslateTextsWithFallback(ctx context.Context, texts []string
 	}
 
 	cfg := s.ResolveTranslationConfig(ctx)
-	chain := buildFallbackChain(cfg.PrimaryProvider)
+	chain := buildFallbackChain(cfg)
 
 	var lastErr error
 	for _, provider := range chain {
@@ -743,7 +805,7 @@ func (s *Service) TranslateTextsWithFallback(ctx context.Context, texts []string
 			if cfg.GeminiKey == "" {
 				continue
 			}
-			translated, err := TranslateWithGemini(ctx, texts, targetLang, cfg.GeminiKey, cfg.Prompt)
+			translated, err := TranslateWithGemini(ctx, texts, targetLang, cfg.GeminiKey, cfg.Prompt, cfg.GeminiModels)
 			if err == nil {
 				return preserveSpeakerTags(texts, translated), ProviderGemini, nil
 			}
@@ -754,7 +816,7 @@ func (s *Service) TranslateTextsWithFallback(ctx context.Context, texts []string
 			if cfg.GroqKey == "" {
 				continue
 			}
-			translated, err := TranslateWithGroq(ctx, texts, targetLang, cfg.GroqKey, cfg.Prompt)
+			translated, err := TranslateWithGroq(ctx, texts, targetLang, cfg.GroqKey, cfg.Prompt, cfg.GroqModels)
 			if err == nil {
 				return preserveSpeakerTags(texts, translated), ProviderGroq, nil
 			}
@@ -868,8 +930,11 @@ func alignTranslatedLines(lines []string, expectedLen int) []string {
 	return out
 }
 
-func TranslateWithGemini(ctx context.Context, texts []string, targetLang, apiKey, systemInstruction string) ([]string, error) {
-	geminiModels := []string{"gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest"}
+func TranslateWithGemini(ctx context.Context, texts []string, targetLang, apiKey, systemInstruction string, models ...[]string) ([]string, error) {
+	geminiModels := DefaultGeminiModels
+	if len(models) > 0 && len(models[0]) > 0 {
+		geminiModels = models[0]
+	}
 
 	numbered := buildNumberedLines(texts)
 	promptText := fmt.Sprintf(
@@ -952,9 +1017,12 @@ func TranslateWithGemini(ctx context.Context, texts []string, targetLang, apiKey
 	return nil, lastErr
 }
 
-func TranslateWithGroq(ctx context.Context, texts []string, targetLang, apiKey, systemInstruction string) ([]string, error) {
+func TranslateWithGroq(ctx context.Context, texts []string, targetLang, apiKey, systemInstruction string, models ...[]string) ([]string, error) {
 	apiURL := "https://api.groq.com/openai/v1/chat/completions"
-	groqModels := []string{"qwen/qwen3.6-27b", "openai/gpt-oss-120b", "groq/compound"}
+	groqModels := DefaultGroqModels
+	if len(models) > 0 && len(models[0]) > 0 {
+		groqModels = models[0]
+	}
 
 	numbered := buildNumberedLines(texts)
 	userMsg := fmt.Sprintf(

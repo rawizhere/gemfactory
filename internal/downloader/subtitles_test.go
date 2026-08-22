@@ -281,19 +281,20 @@ func TestFormatCaption(t *testing.T) {
 
 func TestBuildFallbackChain(t *testing.T) {
 	tests := []struct {
-		primary string
-		want    []string
+		cfg  TranslationConfig
+		want []string
 	}{
-		{ProviderGoogle, []string{ProviderGoogle, ProviderGemini, ProviderGroq}},
-		{ProviderGemini, []string{ProviderGemini, ProviderGroq, ProviderGoogle}},
-		{ProviderGroq, []string{ProviderGroq, ProviderGemini, ProviderGoogle}},
-		{"unknown", []string{ProviderGoogle, ProviderGemini, ProviderGroq}},
+		{TranslationConfig{PrimaryProvider: ProviderGoogle}, []string{ProviderGoogle, ProviderGemini, ProviderGroq}},
+		{TranslationConfig{PrimaryProvider: ProviderGemini}, []string{ProviderGemini, ProviderGroq, ProviderGoogle}},
+		{TranslationConfig{PrimaryProvider: ProviderGroq}, []string{ProviderGroq, ProviderGemini, ProviderGoogle}},
+		{TranslationConfig{PrimaryProvider: "unknown"}, []string{ProviderGoogle, ProviderGemini, ProviderGroq}},
+		{TranslationConfig{FallbackOrder: []string{"groq", "gemini"}}, []string{"groq", "gemini"}},
 	}
 
 	for _, tt := range tests {
-		got := buildFallbackChain(tt.primary)
+		got := buildFallbackChain(tt.cfg)
 		if !reflect.DeepEqual(got, tt.want) {
-			t.Errorf("buildFallbackChain(%q) = %v, want %v", tt.primary, got, tt.want)
+			t.Errorf("buildFallbackChain(%+v) = %v, want %v", tt.cfg, got, tt.want)
 		}
 	}
 }

@@ -15,14 +15,19 @@ import (
 )
 
 type translationConfigResponse struct {
-	Provider      string `json:"provider"`
-	HasGeminiKey  bool   `json:"has_gemini_key"`
-	HasGroqKey    bool   `json:"has_groq_key"`
-	GeminiMasked  string `json:"gemini_masked"`
-	GroqMasked    string `json:"groq_masked"`
-	Prompt        string `json:"prompt"`
-	DefaultPrompt string `json:"default_prompt"`
-	Concurrency   int    `json:"concurrency"`
+	Provider            string `json:"provider"`
+	HasGeminiKey        bool   `json:"has_gemini_key"`
+	HasGroqKey          bool   `json:"has_groq_key"`
+	GeminiMasked        string `json:"gemini_masked"`
+	GroqMasked          string `json:"groq_masked"`
+	GeminiModels        string `json:"gemini_models"`
+	GroqModels          string `json:"groq_models"`
+	FallbackOrder       string `json:"fallback_order"`
+	DefaultGeminiModels string `json:"default_gemini_models"`
+	DefaultGroqModels   string `json:"default_groq_models"`
+	Prompt              string `json:"prompt"`
+	DefaultPrompt       string `json:"default_prompt"`
+	Concurrency         int    `json:"concurrency"`
 }
 
 func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
@@ -33,6 +38,9 @@ func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	geminiKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
 	groqKey := strings.TrimSpace(os.Getenv("GROQ_API_KEY"))
+	geminiModels := strings.TrimSpace(os.Getenv("GEMINI_MODELS"))
+	groqModels := strings.TrimSpace(os.Getenv("GROQ_MODELS"))
+	fallbackOrder := strings.TrimSpace(os.Getenv("TRANSLATION_FALLBACK_ORDER"))
 	prompt := strings.TrimSpace(os.Getenv("TRANSLATION_PROMPT"))
 	concurrency := 4
 	if s.downloads != nil {
@@ -49,6 +57,15 @@ func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
 		if c, err := s.configs.Get(ctx, "GROQ_API_KEY"); err == nil && c != nil && c.Value != "" {
 			groqKey = strings.TrimSpace(c.Value)
 		}
+		if c, err := s.configs.Get(ctx, "GEMINI_MODELS"); err == nil && c != nil && strings.TrimSpace(c.Value) != "" {
+			geminiModels = strings.TrimSpace(c.Value)
+		}
+		if c, err := s.configs.Get(ctx, "GROQ_MODELS"); err == nil && c != nil && strings.TrimSpace(c.Value) != "" {
+			groqModels = strings.TrimSpace(c.Value)
+		}
+		if c, err := s.configs.Get(ctx, "TRANSLATION_FALLBACK_ORDER"); err == nil && c != nil && strings.TrimSpace(c.Value) != "" {
+			fallbackOrder = strings.TrimSpace(c.Value)
+		}
 		if c, err := s.configs.Get(ctx, "TRANSLATION_PROMPT"); err == nil && c != nil && strings.TrimSpace(c.Value) != "" {
 			prompt = strings.TrimSpace(c.Value)
 		}
@@ -59,30 +76,44 @@ func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if geminiModels == "" {
+		geminiModels = strings.Join(downloader.DefaultGeminiModels, ", ")
+	}
+	if groqModels == "" {
+		groqModels = strings.Join(downloader.DefaultGroqModels, ", ")
+	}
 	if prompt == "" {
 		prompt = downloader.DefaultTranslationPrompt
 	}
 
 	resp := translationConfigResponse{
-		Provider:      provider,
-		HasGeminiKey:  geminiKey != "",
-		HasGroqKey:    groqKey != "",
-		GeminiMasked:  maskKey(geminiKey),
-		GroqMasked:    maskKey(groqKey),
-		Prompt:        prompt,
-		DefaultPrompt: downloader.DefaultTranslationPrompt,
-		Concurrency:   concurrency,
+		Provider:            provider,
+		HasGeminiKey:        geminiKey != "",
+		HasGroqKey:          groqKey != "",
+		GeminiMasked:        maskKey(geminiKey),
+		GroqMasked:          maskKey(groqKey),
+		GeminiModels:        geminiModels,
+		GroqModels:          groqModels,
+		FallbackOrder:       fallbackOrder,
+		DefaultGeminiModels: strings.Join(downloader.DefaultGeminiModels, ", "),
+		DefaultGroqModels:   strings.Join(downloader.DefaultGroqModels, ", "),
+		Prompt:              prompt,
+		DefaultPrompt:       downloader.DefaultTranslationPrompt,
+		Concurrency:         concurrency,
 	}
 	writeJSON(w, resp)
 }
 
 func (s *Server) updateTranslationConfig(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider    *string `json:"provider"`
-		GeminiKey   *string `json:"gemini_api_key"`
-		GroqKey     *string `json:"groq_api_key"`
-		Prompt      *string `json:"prompt"`
-		Concurrency *int    `json:"concurrency"`
+		Provider      *string `json:"provider"`
+		GeminiKey     *string `json:"gemini_api_key"`
+		GroqKey       *string `json:"groq_api_key"`
+		GeminiModels  *string `json:"gemini_models"`
+		GroqModels    *string `json:"groq_models"`
+		FallbackOrder *string `json:"fallback_order"`
+		Prompt        *string `json:"prompt"`
+		Concurrency   *int    `json:"concurrency"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -122,6 +153,30 @@ func (s *Server) updateTranslationConfig(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	if req.GeminiModels != nil {
+		gm := strings.TrimSpace(*req.GeminiModels)
+		if err := s.configs.Set(ctx, "GEMINI_MODELS", gm); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+
+	if req.GroqModels != nil {
+		qm := strings.TrimSpace(*req.GroqModels)
+		if err := s.configs.Set(ctx, "GROQ_MODELS", qm); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+
+	if req.FallbackOrder != nil {
+		fo := strings.TrimSpace(*req.FallbackOrder)
+		if err := s.configs.Set(ctx, "TRANSLATION_FALLBACK_ORDER", fo); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+
 	if req.Prompt != nil {
 		promptVal := strings.TrimSpace(*req.Prompt)
 		if err := s.configs.Set(ctx, "TRANSLATION_PROMPT", promptVal); err != nil {
@@ -150,12 +205,14 @@ func (s *Server) updateTranslationConfig(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider   string `json:"provider"`
-		Text       string `json:"text"`
-		TargetLang string `json:"target_lang"`
-		GeminiKey  string `json:"gemini_api_key"`
-		GroqKey    string `json:"groq_api_key"`
-		Prompt     string `json:"prompt"`
+		Provider     string `json:"provider"`
+		Text         string `json:"text"`
+		TargetLang   string `json:"target_lang"`
+		GeminiKey    string `json:"gemini_api_key"`
+		GroqKey      string `json:"groq_api_key"`
+		GeminiModels string `json:"gemini_models"`
+		GroqModels   string `json:"groq_models"`
+		Prompt       string `json:"prompt"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -212,19 +269,42 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 	var results []string
 	var err error
 
+	parseModels := func(s string) []string {
+		var list []string
+		for _, part := range strings.Split(s, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				list = append(list, part)
+			}
+		}
+		return list
+	}
+
 	switch provider {
 	case downloader.ProviderGemini:
 		if geminiKey == "" {
 			writeJSON(w, map[string]any{"success": false, "error": "Gemini API key is required"})
 			return
 		}
-		results, err = downloader.TranslateWithGemini(ctx, []string{sampleText}, targetLang, geminiKey, prompt)
+		var gModels []string
+		if req.GeminiModels != "" {
+			gModels = parseModels(req.GeminiModels)
+		} else if c, cErr := s.configs.Get(ctx, "GEMINI_MODELS"); cErr == nil && c != nil && c.Value != "" {
+			gModels = parseModels(c.Value)
+		}
+		results, err = downloader.TranslateWithGemini(ctx, []string{sampleText}, targetLang, geminiKey, prompt, gModels)
 	case downloader.ProviderGroq:
 		if groqKey == "" {
 			writeJSON(w, map[string]any{"success": false, "error": "Groq API key is required"})
 			return
 		}
-		results, err = downloader.TranslateWithGroq(ctx, []string{sampleText}, targetLang, groqKey, prompt)
+		var qModels []string
+		if req.GroqModels != "" {
+			qModels = parseModels(req.GroqModels)
+		} else if c, cErr := s.configs.Get(ctx, "GROQ_MODELS"); cErr == nil && c != nil && c.Value != "" {
+			qModels = parseModels(c.Value)
+		}
+		results, err = downloader.TranslateWithGroq(ctx, []string{sampleText}, targetLang, groqKey, prompt, qModels)
 	case downloader.ProviderGoogle:
 		results, err = downloader.TranslateWithGoogle(ctx, []string{sampleText}, targetLang)
 	default:

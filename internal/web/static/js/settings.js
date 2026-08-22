@@ -119,11 +119,15 @@ export async function cleanStorage() {
 }
 
 let defaultPromptCached = '';
+let defaultGeminiModelsCached = '';
+let defaultGroqModelsCached = '';
 
 export async function loadTranslationConfig() {
   const providerSelect = $('#translation-provider-select');
   const geminiInput = $('#gemini-api-key');
   const groqInput = $('#groq-api-key');
+  const geminiModelsInput = $('#gemini-models-input');
+  const groqModelsInput = $('#groq-models-input');
   const promptArea = $('#translation-prompt');
   const concurrencyInput = $('#downloader-concurrency-input');
   if (!providerSelect) return;
@@ -137,6 +141,18 @@ export async function loadTranslationConfig() {
       }
       if (groqInput && data.groq_masked) {
         groqInput.value = data.groq_masked;
+      }
+      if (data.default_gemini_models) {
+        defaultGeminiModelsCached = data.default_gemini_models;
+      }
+      if (data.default_groq_models) {
+        defaultGroqModelsCached = data.default_groq_models;
+      }
+      if (geminiModelsInput && data.gemini_models) {
+        geminiModelsInput.value = data.gemini_models;
+      }
+      if (groqModelsInput && data.groq_models) {
+        groqModelsInput.value = data.groq_models;
       }
       if (data.default_prompt) {
         defaultPromptCached = data.default_prompt;
@@ -175,12 +191,16 @@ export async function saveTranslationConfig() {
   const providerSelect = $('#translation-provider-select');
   const geminiInput = $('#gemini-api-key');
   const groqInput = $('#groq-api-key');
+  const geminiModelsInput = $('#gemini-models-input');
+  const groqModelsInput = $('#groq-models-input');
   const promptArea = $('#translation-prompt');
 
   const payload = {
     provider: providerSelect.value,
-    gemini_api_key: geminiInput.value,
-    groq_api_key: groqInput.value,
+    gemini_api_key: geminiInput ? geminiInput.value : undefined,
+    groq_api_key: groqInput ? groqInput.value : undefined,
+    gemini_models: geminiModelsInput ? geminiModelsInput.value : undefined,
+    groq_models: groqModelsInput ? groqModelsInput.value : undefined,
     prompt: promptArea ? promptArea.value : undefined,
   };
 
@@ -214,6 +234,8 @@ export async function testTranslation() {
   const resultEl = $('#translation-test-result');
   const geminiInput = $('#gemini-api-key');
   const groqInput = $('#groq-api-key');
+  const geminiModelsInput = $('#gemini-models-input');
+  const groqModelsInput = $('#groq-models-input');
   const promptArea = $('#translation-prompt');
 
   const text = inputEl.value.trim() || '대박! 오늘 무대 진짜 레전드였어!';
@@ -232,8 +254,10 @@ export async function testTranslation() {
       provider: providerSelect.value,
       text: text,
       target_lang: 'ru',
-      gemini_api_key: geminiInput.value,
-      groq_api_key: groqInput.value,
+      gemini_api_key: geminiInput ? geminiInput.value : undefined,
+      groq_api_key: groqInput ? groqInput.value : undefined,
+      gemini_models: geminiModelsInput ? geminiModelsInput.value : undefined,
+      groq_models: groqModelsInput ? groqModelsInput.value : undefined,
       prompt: promptArea ? promptArea.value : undefined,
     });
 
@@ -314,6 +338,20 @@ export function initSettings() {
     const promptArea = $('#translation-prompt');
     if (promptArea && defaultPromptCached) {
       promptArea.value = defaultPromptCached;
+    }
+  });
+
+  $('#gemini-models-reset')?.addEventListener('click', () => {
+    const input = $('#gemini-models-input');
+    if (input && defaultGeminiModelsCached) {
+      input.value = defaultGeminiModelsCached;
+    }
+  });
+
+  $('#groq-models-reset')?.addEventListener('click', () => {
+    const input = $('#groq-models-input');
+    if (input && defaultGroqModelsCached) {
+      input.value = defaultGroqModelsCached;
     }
   });
 

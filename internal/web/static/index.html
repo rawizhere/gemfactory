@@ -226,8 +226,8 @@
       <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0.75rem;">
         <label style="font-weight:600; min-width:140px;">Primary Provider:</label>
         <select id="translation-provider-select" style="min-width:220px;">
-          <option value="google">Google Translate (Default / Free Web)</option>
-          <option value="gemini">Google Gemini 2.5 Flash (AI Studio)</option>
+          <option value="google">Google Translate (Free Web)</option>
+          <option value="gemini">Google Gemini (AI Studio)</option>
           <option value="groq">Groq (LPU AI)</option>
         </select>
         <span id="fallback-chain-badge" class="badge" style="background:var(--card-bg, #2a2a2a); border:1px solid var(--border-color, #444); padding:0.25rem 0.5rem; border-radius:4px; font-size:0.8rem;">
@@ -241,13 +241,29 @@
         <button type="button" class="btn btn-ghost btn-sm" id="gemini-key-toggle">Show</button>
       </div>
 
-      <div id="groq-key-row" style="display:flex; flex-wrap:wrap; align-items:center; gap:0.75rem;">
+      <div id="gemini-models-row" style="display:flex; flex-direction:column; gap:0.35rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <label style="font-size:0.85rem; font-weight:600;">Gemini Models Fallback Chain:</label>
+          <button type="button" class="btn btn-ghost btn-sm" id="gemini-models-reset" style="font-size:0.75rem;">Reset Default</button>
+        </div>
+        <input type="text" id="gemini-models-input" placeholder="gemini-3.7-flash, gemini-3.5-flash-lite, gemini-3.1-flash-lite, gemini-2.5-flash-lite, gemini-2.5-flash, gemini-flash-latest" style="width:100%; font-family:monospace; font-size:0.8rem;">
+      </div>
+
+      <div id="groq-key-row" style="display:flex; flex-wrap:wrap; align-items:center; gap:0.75rem; border-top:1px solid var(--border-color, #333); padding-top:0.75rem;">
         <label style="min-width:140px; font-size:0.85rem;">Groq API Key:</label>
         <input type="password" id="groq-api-key" placeholder="gsk_..." style="flex:1; min-width:200px;">
         <button type="button" class="btn btn-ghost btn-sm" id="groq-key-toggle">Show</button>
       </div>
 
-      <div style="display:flex; flex-direction:column; gap:0.5rem;">
+      <div id="groq-models-row" style="display:flex; flex-direction:column; gap:0.35rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <label style="font-size:0.85rem; font-weight:600;">Groq Models Fallback Chain:</label>
+          <button type="button" class="btn btn-ghost btn-sm" id="groq-models-reset" style="font-size:0.75rem;">Reset Default</button>
+        </div>
+        <input type="text" id="groq-models-input" placeholder="openai/gpt-oss-120b, qwen/qwen3.6-27b, groq/compound, openai/gpt-oss-20b" style="width:100%; font-family:monospace; font-size:0.8rem;">
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:0.5rem; border-top:1px solid var(--border-color, #333); padding-top:0.75rem;">
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <label style="font-size:0.85rem; font-weight:600;">AI Translation Prompt (Custom Rules):</label>
           <button type="button" class="btn btn-ghost btn-sm" id="translation-prompt-reset" style="font-size:0.75rem;">Reset to Default</button>
