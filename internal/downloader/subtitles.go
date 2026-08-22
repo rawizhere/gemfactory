@@ -27,6 +27,9 @@ var vttTagReplacer = strings.NewReplacer("<c>", "", "</c>", "")
 // inlineWordTimestampRe matches inline word-timing tags such as <00:00:00.546> found in YouTube auto-generated subtitle payloads.
 var inlineWordTimestampRe = regexp.MustCompile(`<\d{2}:\d{2}:\d{2}\.\d{3}>`)
 
+// thinkTagRe strips reasoning/thinking tags emitted by models like Qwen.
+var thinkTagRe = regexp.MustCompile(`(?s)<think>.*?</think>`)
+
 func (s *Service) subtitlesForClip(
 	ctx context.Context,
 	meta *SourceMeta,
@@ -865,7 +868,7 @@ func alignTranslatedLines(lines []string, expectedLen int) []string {
 }
 
 func TranslateWithGemini(ctx context.Context, texts []string, targetLang, apiKey, systemInstruction string) ([]string, error) {
-	apiURL := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + apiKey
+	geminiModels := []string{"gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest"}
 
 	numbered := buildNumberedLines(texts)
 	promptText := fmt.Sprintf(
@@ -888,50 +891,69 @@ func TranslateWithGemini(ctx context.Context, texts []string, targetLang, apiKey
 			"maxOutputTokens": 4096,
 		},
 	}
-
 	payloadBytes, _ := json.Marshal(reqPayload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 45 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("gemini request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
+	var lastErr error
 
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("gemini api error %d: %s", resp.StatusCode, truncate(string(b), 300))
+	for _, model := range geminiModels {
+		apiURL := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, apiKey)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("gemini request failed (%s): %w", model, err)
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("gemini api error %d (%s): %s", resp.StatusCode, model, truncate(string(b), 300))
+			continue
+		}
+
+		var respBody struct {
+			Candidates []struct {
+				Content struct {
+					Parts []struct {
+						Text string `json:"text"`
+					} `json:"parts"`
+				} `json:"content"`
+			} `json:"candidates"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("failed to decode gemini response (%s): %w", model, err)
+			continue
+		}
+		_ = resp.Body.Close()
+
+		if len(respBody.Candidates) == 0 || len(respBody.Candidates[0].Content.Parts) == 0 {
+			lastErr = fmt.Errorf("empty response from gemini (%s)", model)
+			continue
+		}
+
+		outText := respBody.Candidates[0].Content.Parts[0].Text
+		outText = thinkTagRe.ReplaceAllString(outText, "")
+		res, perr := parseNumberedLines(outText, len(texts))
+		if perr == nil {
+			return res, nil
+		}
+		lastErr = perr
 	}
 
-	var respBody struct {
-		Candidates []struct {
-			Content struct {
-				Parts []struct {
-					Text string `json:"text"`
-				} `json:"parts"`
-			} `json:"content"`
-		} `json:"candidates"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
-		return nil, fmt.Errorf("failed to decode gemini response: %w", err)
-	}
-
-	if len(respBody.Candidates) == 0 || len(respBody.Candidates[0].Content.Parts) == 0 {
-		return nil, fmt.Errorf("empty response from gemini")
-	}
-
-	outText := respBody.Candidates[0].Content.Parts[0].Text
-	return parseNumberedLines(outText, len(texts))
+	return nil, lastErr
 }
 
 func TranslateWithGroq(ctx context.Context, texts []string, targetLang, apiKey, systemInstruction string) ([]string, error) {
 	apiURL := "https://api.groq.com/openai/v1/chat/completions"
+	groqModels := []string{"qwen/qwen3.6-27b", "openai/gpt-oss-120b", "groq/compound"}
 
 	numbered := buildNumberedLines(texts)
 	userMsg := fmt.Sprintf(
@@ -940,54 +962,71 @@ func TranslateWithGroq(ctx context.Context, texts []string, targetLang, apiKey, 
 		numbered,
 	)
 
-	reqPayload := map[string]interface{}{
-		"model": "llama-3.3-70b-versatile",
-		"messages": []map[string]string{
-			{"role": "system", "content": "You are a professional subtitle translator.\n" + systemInstruction},
-			{"role": "user", "content": userMsg},
-		},
-		"temperature": 0.2,
-		"max_tokens":  4096,
-	}
-
-	payloadBytes, _ := json.Marshal(reqPayload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
 	client := &http.Client{Timeout: 45 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("groq request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
+	var lastErr error
 
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("groq api error %d: %s", resp.StatusCode, truncate(string(b), 300))
+	for _, model := range groqModels {
+		reqPayload := map[string]interface{}{
+			"model": model,
+			"messages": []map[string]string{
+				{"role": "system", "content": "You are a professional subtitle translator.\n" + systemInstruction},
+				{"role": "user", "content": userMsg},
+			},
+			"temperature": 0.2,
+			"max_tokens":  4096,
+		}
+
+		payloadBytes, _ := json.Marshal(reqPayload)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("groq request failed (%s): %w", model, err)
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("groq api error %d (%s): %s", resp.StatusCode, model, truncate(string(b), 300))
+			continue
+		}
+
+		var respBody struct {
+			Choices []struct {
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			} `json:"choices"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
+			_ = resp.Body.Close()
+			lastErr = fmt.Errorf("failed to decode groq response (%s): %w", model, err)
+			continue
+		}
+		_ = resp.Body.Close()
+
+		if len(respBody.Choices) == 0 {
+			lastErr = fmt.Errorf("empty choices from groq (%s)", model)
+			continue
+		}
+
+		outText := respBody.Choices[0].Message.Content
+		outText = thinkTagRe.ReplaceAllString(outText, "")
+		res, perr := parseNumberedLines(outText, len(texts))
+		if perr == nil {
+			return res, nil
+		}
+		lastErr = perr
 	}
 
-	var respBody struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
-		return nil, fmt.Errorf("failed to decode groq response: %w", err)
-	}
-
-	if len(respBody.Choices) == 0 {
-		return nil, fmt.Errorf("empty choices from groq")
-	}
-
-	outText := respBody.Choices[0].Message.Content
-	return parseNumberedLines(outText, len(texts))
+	return nil, lastErr
 }
 
 func buildNumberedLines(texts []string) string {
