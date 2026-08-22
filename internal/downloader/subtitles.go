@@ -549,26 +549,23 @@ func ResolveSubtitleTrack(meta *SourceMeta, requested string) (*SubtitleTrackRes
 		}
 	}
 
-	preferred := []string{"en", "ko", "ja", "zh", "es", "fr", "de", "vi"}
+	preferred := []string{"ko", "en", "ja"}
 	if target == "en" {
-		preferred = []string{"ko", "ja", "zh", "es", "fr", "de", "vi", "en"}
+		preferred = []string{"en", "ko", "ja"}
 	}
 
 	if len(meta.Subtitles) > 0 {
-		baseKey := pickBestBaseTrack(meta.Subtitles, preferred)
-		if baseKey == "" {
-			for k := range meta.Subtitles {
-				baseKey = k
-				break
-			}
-		}
-		if baseKey != "" {
+		if baseKey := pickBestBaseTrack(meta.Subtitles, preferred); baseKey != "" {
 			tracks := meta.Subtitles[baseKey]
 			if len(tracks) > 0 && tracks[0].URL != "" {
+				targetLang := target
+				if baseKey == target {
+					targetLang = ""
+				}
 				return &SubtitleTrackResolution{
 					TrackURL:   tracks[0].URL,
 					SourceLang: baseKey,
-					TargetLang: target,
+					TargetLang: targetLang,
 					FinalLang:  target,
 				}, nil
 			}
@@ -588,20 +585,17 @@ func ResolveSubtitleTrack(meta *SourceMeta, requested string) (*SubtitleTrackRes
 	}
 
 	if len(meta.AutomaticCaptions) > 0 {
-		baseKey := pickBestBaseTrack(meta.AutomaticCaptions, preferred)
-		if baseKey == "" {
-			for k := range meta.AutomaticCaptions {
-				baseKey = k
-				break
-			}
-		}
-		if baseKey != "" {
+		if baseKey := pickBestBaseTrack(meta.AutomaticCaptions, preferred); baseKey != "" {
 			tracks := meta.AutomaticCaptions[baseKey]
 			if len(tracks) > 0 && tracks[0].URL != "" {
+				targetLang := target
+				if baseKey == target {
+					targetLang = ""
+				}
 				return &SubtitleTrackResolution{
 					TrackURL:   tracks[0].URL,
 					SourceLang: baseKey,
-					TargetLang: target,
+					TargetLang: targetLang,
 					FinalLang:  target,
 				}, nil
 			}

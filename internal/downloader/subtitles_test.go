@@ -203,25 +203,21 @@ func TestResolveSubtitleTrack(t *testing.T) {
 		},
 	}
 
-	// 1. Direct manual match
 	koRes, err := ResolveSubtitleTrack(meta, "ko")
 	if err != nil || koRes.FinalLang != "ko" || koRes.TargetLang != "" {
 		t.Errorf("ResolveSubtitleTrack(ko) = (%+v, %v), want ko direct", koRes, err)
 	}
 
-	// 2. Exact regional manual match wins over en
 	enUSRes, err := ResolveSubtitleTrack(meta, "en-US")
 	if err != nil || enUSRes.FinalLang != "en-US" || enUSRes.TargetLang != "" {
 		t.Errorf("ResolveSubtitleTrack(en-US) = (%+v, %v), want en-US direct", enUSRes, err)
 	}
 
-	// 3. RU requested: manual 'en' is translated to 'ru'
 	ruRes, err := ResolveSubtitleTrack(meta, "ru")
-	if err != nil || ruRes.FinalLang != "ru" || ruRes.TargetLang != "ru" || ruRes.SourceLang != "en" {
-		t.Errorf("ResolveSubtitleTrack(ru) = (%+v, %v), want translated from en to ru", ruRes, err)
+	if err != nil || ruRes.FinalLang != "ru" || ruRes.TargetLang != "ru" || ruRes.SourceLang != "ko" {
+		t.Errorf("ResolveSubtitleTrack(ru) = (%+v, %v), want translated from ko to ru", ruRes, err)
 	}
 
-	// 4. Automatic captions only: direct match in auto-captions
 	autoFr := &SourceMeta{
 		AutomaticCaptions: map[string][]SubtitleTrack{"fr": {{Ext: "vtt", URL: "https://example.com/auto-fr"}}},
 	}
@@ -230,7 +226,6 @@ func TestResolveSubtitleTrack(t *testing.T) {
 		t.Errorf("ResolveSubtitleTrack(autoFr, fr) = (%+v, %v), want fr from auto captions", frRes, err)
 	}
 
-	// 5. Automatic captions only: translates auto 'ko' to 'en'
 	autoOnly := &SourceMeta{
 		AutomaticCaptions: map[string][]SubtitleTrack{"ko": {{Ext: "vtt", URL: "https://example.com/auto-ko"}}},
 	}
@@ -239,7 +234,6 @@ func TestResolveSubtitleTrack(t *testing.T) {
 		t.Errorf("ResolveSubtitleTrack(autoOnly, en) = (%+v, %v), want translated from auto-ko to en", enAutoRes, err)
 	}
 
-	// 6. No subtitles at all -> error
 	emptyMeta := &SourceMeta{}
 	if _, err := ResolveSubtitleTrack(emptyMeta, "en"); err == nil {
 		t.Error("expected error when no subtitles exist")
