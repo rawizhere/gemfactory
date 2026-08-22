@@ -59,28 +59,65 @@ type Job struct {
 }
 
 type Service struct {
-	cookies model.CookieRepository
-	configs model.ConfigRepository
-	dataDir string
-	logger  *zap.Logger
+	cookies     model.CookieRepository
+	configs     model.ConfigRepository
+	dataDir     string
+	logger      *zap.Logger
 
-	mu    sync.Mutex
-	jobs  map[string]*Job
-	order []string
-	sem   chan struct{}
+	mu          sync.Mutex
+	cond        *sync.Cond
+	concurrency int
+	activeJobs  int
+	jobs        map[string]*Job
+	order       []string
 }
 
 func NewService(cookies model.CookieRepository, dataDir string, concurrency int, logger *zap.Logger) *Service {
 	if concurrency < 1 {
 		concurrency = 1
 	}
-	return &Service{
-		cookies: cookies,
-		dataDir: filepath.Join(dataDir, "downloads", "youtube"),
-		logger:  logger,
-		jobs:    make(map[string]*Job),
-		sem:     make(chan struct{}, concurrency),
+	s := &Service{
+		cookies:     cookies,
+		dataDir:     filepath.Join(dataDir, "downloads", "youtube"),
+		logger:      logger,
+		jobs:        make(map[string]*Job),
+		concurrency: concurrency,
 	}
+	s.cond = sync.NewCond(&s.mu)
+	return s
+}
+
+func (s *Service) SetConcurrency(n int) {
+	if n < 1 {
+		n = 1
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.concurrency = n
+	s.cond.Broadcast()
+	s.logger.Info("downloader concurrency updated", zap.Int("concurrency", n))
+}
+
+func (s *Service) Concurrency() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.concurrency
+}
+
+func (s *Service) acquireSlot() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for s.activeJobs >= s.concurrency {
+		s.cond.Wait()
+	}
+	s.activeJobs++
+}
+
+func (s *Service) releaseSlot() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.activeJobs--
+	s.cond.Broadcast()
 }
 
 func (s *Service) SetConfigRepo(configs model.ConfigRepository) {
@@ -222,8 +259,8 @@ const (
 )
 
 func (s *Service) run(ctx context.Context, job *Job) {
-	s.sem <- struct{}{}
-	defer func() { <-s.sem }()
+	s.acquireSlot()
+	defer s.releaseSlot()
 
 	// Serve instantly when this exact request was produced before.
 	clipPath := s.outputPathFor(job)

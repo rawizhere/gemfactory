@@ -199,14 +199,26 @@
 
   <!-- SETTINGS TAB -->
   <section id="tab-settings" role="tabpanel">
-    <h2>Storage & Cache</h2>
-    <div class="storage-card">
-      <div class="storage-info">
-        <span class="storage-label">Downloads Folder:</span>
-        <strong id="storage-size">0 B</strong>
-        <span id="storage-files" class="hint" style="margin:0">(0 files)</span>
+    <h2>Downloader & Storage</h2>
+    <div class="storage-card" style="flex-direction:column; align-items:stretch; gap:1rem;">
+      <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:1rem;">
+        <div class="storage-info">
+          <span class="storage-label">Downloads Folder:</span>
+          <strong id="storage-size">0 B</strong>
+          <span id="storage-files" class="hint" style="margin:0">(0 files)</span>
+        </div>
+        <button class="btn btn-danger btn-sm" type="button" id="clean-storage-btn">Clean Downloads</button>
       </div>
-      <button class="btn btn-danger btn-sm" type="button" id="clean-storage-btn">Clean Downloads</button>
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; border-top:1px solid var(--border-color, #333); padding-top:0.75rem; flex-wrap:wrap;">
+        <div>
+          <label style="font-weight:600; display:block; font-size:0.9rem;">Max Concurrent Downloads:</label>
+          <span class="hint" style="margin:0; font-size:0.75rem;">Number of parallel video download &amp; re-encode jobs (1–20)</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:0.5rem;">
+          <input type="number" id="downloader-concurrency-input" min="1" max="20" value="4" style="width:70px; text-align:center;">
+          <button class="btn btn-primary btn-sm" type="button" id="save-concurrency-btn">Save</button>
+        </div>
+      </div>
     </div>
 
     <h2>Subtitle Translation (AI & Machine)</h2>

@@ -26,6 +26,7 @@ type Config struct {
 	LogLevel             string
 	Timezone             string
 	AppDataDir           string
+	DownloadConcurrency  int
 	ScraperDelay         time.Duration
 	ReleaseCheckInterval time.Duration
 }
@@ -44,6 +45,7 @@ func Load() (*Config, error) {
 		LogLevel:             getEnv("LOG_LEVEL", "info"),
 		Timezone:             getEnv("TIMEZONE", "Europe/Moscow"),
 		AppDataDir:           getEnv("APP_DATA_DIR", "./data"),
+		DownloadConcurrency:  getEnvInt("DOWNLOAD_CONCURRENCY", 4),
 		ScraperDelay:         getEnvDuration("SCRAPER_REQUEST_DELAY", 2*time.Second),
 		ReleaseCheckInterval: getEnvDuration("RELEASE_CHECK_INTERVAL", 24*time.Hour),
 	}
@@ -91,6 +93,15 @@ func getEnvBool(key string, defaultValue bool) bool {
 	if value := os.Getenv(key); value != "" {
 		if boolValue, err := strconv.ParseBool(value); err == nil {
 			return boolValue
+		}
+	}
+	return defaultValue
+}
+
+func getEnvInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if intValue, err := strconv.Atoi(value); err == nil && intValue > 0 {
+			return intValue
 		}
 	}
 	return defaultValue

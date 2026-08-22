@@ -50,6 +50,7 @@ func (s *Service) baseYTDLPArgs(cookieFile string) []string {
 		"--no-playlist-reverse",
 		"--js-runtimes", "node",
 		"--remote-components", "ejs:github",
+		"-N", "4",
 		"--progress-template", "download:[download] %(progress._percent_str)s of %(progress._total_bytes_estimate_str|progress._total_bytes_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s",
 	}
 	args = append(args, s.authArgs(cookieFile)...)

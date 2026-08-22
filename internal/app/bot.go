@@ -16,6 +16,7 @@ import (
 	"gemfactory/internal/worker"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -74,8 +75,13 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 	// yt-dlp downloader: resolve binary, start nightly update loop.
 	cookieRepo := storage.NewCookieRepository(db.GetDB(), logger)
 	configRepo := storage.NewConfigRepository(db.GetDB(), logger)
-	downloaderSvc := downloader.NewService(cookieRepo, cfg.AppDataDir, 2, logger)
+	downloaderSvc := downloader.NewService(cookieRepo, cfg.AppDataDir, cfg.DownloadConcurrency, logger)
 	downloaderSvc.SetConfigRepo(configRepo)
+	if c, err := configRepo.Get(botCtx, "DOWNLOAD_CONCURRENCY"); err == nil && c != nil {
+		if n, perr := strconv.Atoi(c.Value); perr == nil && n > 0 {
+			downloaderSvc.SetConcurrency(n)
+		}
+	}
 	if err := downloader.EnsureYTDLP(botCtx); err != nil {
 		logger.Warn("yt-dlp unavailable at startup; downloads disabled until next restart", zap.Error(err))
 	} else {

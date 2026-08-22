@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ type translationConfigResponse struct {
 	GroqMasked    string `json:"groq_masked"`
 	Prompt        string `json:"prompt"`
 	DefaultPrompt string `json:"default_prompt"`
+	Concurrency   int    `json:"concurrency"`
 }
 
 func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
@@ -32,6 +34,10 @@ func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
 	geminiKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
 	groqKey := strings.TrimSpace(os.Getenv("GROQ_API_KEY"))
 	prompt := strings.TrimSpace(os.Getenv("TRANSLATION_PROMPT"))
+	concurrency := 4
+	if s.downloads != nil {
+		concurrency = s.downloads.Concurrency()
+	}
 
 	if s.configs != nil {
 		if c, err := s.configs.Get(ctx, "TRANSLATION_PROVIDER"); err == nil && c != nil && c.Value != "" {
@@ -45,6 +51,11 @@ func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if c, err := s.configs.Get(ctx, "TRANSLATION_PROMPT"); err == nil && c != nil && strings.TrimSpace(c.Value) != "" {
 			prompt = strings.TrimSpace(c.Value)
+		}
+		if c, err := s.configs.Get(ctx, "DOWNLOAD_CONCURRENCY"); err == nil && c != nil {
+			if n, perr := strconv.Atoi(c.Value); perr == nil && n > 0 {
+				concurrency = n
+			}
 		}
 	}
 
@@ -60,16 +71,18 @@ func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
 		GroqMasked:    maskKey(groqKey),
 		Prompt:        prompt,
 		DefaultPrompt: downloader.DefaultTranslationPrompt,
+		Concurrency:   concurrency,
 	}
 	writeJSON(w, resp)
 }
 
 func (s *Server) updateTranslationConfig(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider  *string `json:"provider"`
-		GeminiKey *string `json:"gemini_api_key"`
-		GroqKey   *string `json:"groq_api_key"`
-		Prompt    *string `json:"prompt"`
+		Provider    *string `json:"provider"`
+		GeminiKey   *string `json:"gemini_api_key"`
+		GroqKey     *string `json:"groq_api_key"`
+		Prompt      *string `json:"prompt"`
+		Concurrency *int    `json:"concurrency"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -117,7 +130,21 @@ func (s *Server) updateTranslationConfig(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	s.logger.Info("Translation configuration updated")
+	if req.Concurrency != nil && *req.Concurrency > 0 {
+		cVal := *req.Concurrency
+		if cVal > 20 {
+			cVal = 20
+		}
+		if s.downloads != nil {
+			s.downloads.SetConcurrency(cVal)
+		}
+		if err := s.configs.Set(ctx, "DOWNLOAD_CONCURRENCY", strconv.Itoa(cVal)); err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
+
+	s.logger.Info("Settings updated")
 	writeJSON(w, map[string]any{"status": "ok"})
 }
 

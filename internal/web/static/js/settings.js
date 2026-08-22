@@ -125,7 +125,7 @@ export async function loadTranslationConfig() {
   const geminiInput = $('#gemini-api-key');
   const groqInput = $('#groq-api-key');
   const promptArea = $('#translation-prompt');
-  const badge = $('#fallback-chain-badge');
+  const concurrencyInput = $('#downloader-concurrency-input');
   if (!providerSelect) return;
 
   try {
@@ -143,6 +143,9 @@ export async function loadTranslationConfig() {
       }
       if (promptArea && data.prompt) {
         promptArea.value = data.prompt;
+      }
+      if (concurrencyInput && data.concurrency) {
+        concurrencyInput.value = data.concurrency;
       }
       updateFallbackBadge(data.provider);
     }
@@ -270,8 +273,40 @@ export async function loadConfig() {
   }
 }
 
+export async function saveConcurrency() {
+  const btn = $('#save-concurrency-btn');
+  const input = $('#downloader-concurrency-input');
+  if (!input) return;
+  const val = parseInt(input.value, 10);
+  if (isNaN(val) || val < 1 || val > 20) {
+    alert('Concurrency must be between 1 and 20');
+    return;
+  }
+  try {
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+    }
+    await api('POST', '/api/translation', { concurrency: val });
+    if (btn) {
+      btn.textContent = 'Saved!';
+      setTimeout(() => {
+        btn.textContent = 'Save';
+        btn.disabled = false;
+      }, 1500);
+    }
+  } catch (err) {
+    alert(`Failed to save concurrency: ${err.message}`);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Save';
+    }
+  }
+}
+
 export function initSettings() {
   $('#clean-storage-btn')?.addEventListener('click', cleanStorage);
+  $('#save-concurrency-btn')?.addEventListener('click', saveConcurrency);
   $('#translation-save-btn')?.addEventListener('click', saveTranslationConfig);
   $('#translation-test-btn')?.addEventListener('click', testTranslation);
 
