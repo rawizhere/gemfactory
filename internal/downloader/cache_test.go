@@ -133,3 +133,63 @@ func TestSubmitRejectsOverlongIntervals(t *testing.T) {
 		t.Errorf("31-second HQ clip must be rejected, got: %v", err)
 	}
 }
+
+func TestCleanStorageProtectsActiveJobs(t *testing.T) {
+	s := newTestService(t)
+
+	activeDir := filepath.Join(s.dataDir, "activeVid")
+	doneDir := filepath.Join(s.dataDir, "doneVid")
+	if err := os.MkdirAll(activeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(doneDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	activeFile := filepath.Join(activeDir, "clip.mp4")
+	doneFile := filepath.Join(doneDir, "clip.mp4")
+	if err := os.WriteFile(activeFile, []byte("active"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(doneFile, []byte("done"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	s.mu.Lock()
+	s.jobs["job-active"] = &Job{
+		ID:      "job-active",
+		VideoID: "activeVid",
+		Status:  StatusProcessing,
+	}
+	s.jobs["job-done-old"] = &Job{
+		ID:         "job-done-old",
+		VideoID:    "doneVid",
+		Status:     StatusDone,
+		OutputDir:  doneFile,
+		lastProgAt: time.Now().Add(-10 * time.Minute),
+	}
+	s.mu.Unlock()
+
+	freed, removed, err := s.CleanStorage()
+	if err != nil {
+		t.Fatalf("CleanStorage failed: %v", err)
+	}
+
+	if removed != 1 {
+		t.Errorf("want 1 removed file, got %d (freed: %d)", removed, freed)
+	}
+
+	if _, err := os.Stat(activeFile); os.IsNotExist(err) {
+		t.Errorf("active job file was deleted by CleanStorage")
+	}
+
+	if _, err := os.Stat(doneFile); !os.IsNotExist(err) {
+		t.Errorf("old completed job file was not deleted by CleanStorage")
+	}
+
+	s.mu.Lock()
+	if s.jobs["job-done-old"].OutputDir != "" {
+		t.Errorf("cleaned job OutputDir should be emptied, got %q", s.jobs["job-done-old"].OutputDir)
+	}
+	s.mu.Unlock()
+}

@@ -59,10 +59,10 @@ type Job struct {
 }
 
 type Service struct {
-	cookies     model.CookieRepository
-	configs     model.ConfigRepository
-	dataDir     string
-	logger      *zap.Logger
+	cookies model.CookieRepository
+	configs model.ConfigRepository
+	dataDir string
+	logger  *zap.Logger
 
 	mu          sync.Mutex
 	cond        *sync.Cond
@@ -578,27 +578,101 @@ func (s *Service) GetStorageUsage() (totalBytes int64, fileCount int, err error)
 func (s *Service) CleanStorage() (freedBytes int64, removedFiles int, err error) {
 	s.mu.Lock()
 	dir := s.dataDir
+	protectedVideoIDs := make(map[string]bool)
+	now := time.Now()
+	for _, j := range s.jobs {
+		if j.Status == StatusPending || j.Status == StatusDownloading || j.Status == StatusProcessing {
+			if j.VideoID != "" {
+				protectedVideoIDs[j.VideoID] = true
+			}
+		} else if j.Status == StatusDone && now.Sub(j.lastProgAt) < 5*time.Minute {
+			if j.VideoID != "" {
+				protectedVideoIDs[j.VideoID] = true
+			}
+		}
+	}
 	s.mu.Unlock()
 
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		return 0, 0, nil
 	}
 
-	freedBytes, removedFiles, _ = s.GetStorageUsage()
-
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return 0, 0, err
 	}
+
 	for _, entry := range entries {
-		_ = os.RemoveAll(filepath.Join(dir, entry.Name()))
+		name := entry.Name()
+		if protectedVideoIDs[name] {
+			s.logger.Debug("skipping protected active download directory", zap.String("video_id", name))
+			continue
+		}
+		targetPath := filepath.Join(dir, name)
+		var targetBytes int64
+		var targetFiles int
+		_ = filepath.Walk(targetPath, func(path string, info os.FileInfo, err error) error {
+			if err == nil && !info.IsDir() {
+				targetBytes += info.Size()
+				targetFiles++
+			}
+			return nil
+		})
+		if rmErr := os.RemoveAll(targetPath); rmErr == nil {
+			freedBytes += targetBytes
+			removedFiles += targetFiles
+		}
 	}
+
+	s.mu.Lock()
+	for _, j := range s.jobs {
+		if (j.Status == StatusDone || j.Status == StatusError) && !protectedVideoIDs[j.VideoID] {
+			j.OutputDir = ""
+		}
+	}
+	s.mu.Unlock()
 
 	s.logger.Info("Downloads storage cleaned",
 		zap.Int64("freed_bytes", freedBytes),
 		zap.Int("removed_files", removedFiles),
 	)
 	return freedBytes, removedFiles, nil
+}
+
+// EncodeOptions contains video and audio encoding configuration for ffmpeg.
+type EncodeOptions struct {
+	CRF          string
+	Preset       string
+	AudioBitrate string
+}
+
+// GetEncodeOptions resolves encoding options from database config with fallback to environment or defaults.
+func (s *Service) GetEncodeOptions(ctx context.Context, hasSubs bool) EncodeOptions {
+	crfKey := "CLIP_CRF"
+	if hasSubs {
+		crfKey = "SUBS_CRF"
+	}
+	crf := s.getConfigValue(ctx, crfKey, "20")
+	preset := s.getConfigValue(ctx, "CLIP_PRESET", "fast")
+	audioBitrate := s.getConfigValue(ctx, "CLIP_AUDIO_BITRATE", "192k")
+
+	return EncodeOptions{
+		CRF:          crf,
+		Preset:       preset,
+		AudioBitrate: audioBitrate,
+	}
+}
+
+func (s *Service) getConfigValue(ctx context.Context, key, defaultVal string) string {
+	if s.configs != nil {
+		if c, err := s.configs.Get(ctx, key); err == nil && c != nil && strings.TrimSpace(c.Value) != "" {
+			return strings.TrimSpace(c.Value)
+		}
+	}
+	if env := os.Getenv(key); env != "" {
+		return strings.TrimSpace(env)
+	}
+	return defaultVal
 }
 
 // maxSegmentDuration returns the max clip length in ms: 30s for HQ, 300s otherwise.

@@ -49,4 +49,3 @@ func (m *mockReleaseRepo) Delete(ctx context.Context, id int) error {
 	m.deleted = append(m.deleted, id)
 	return nil
 }
-

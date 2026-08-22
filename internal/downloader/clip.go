@@ -460,6 +460,8 @@ func (s *Service) ReencodeWithSubs(ctx context.Context, clipPath, trimmedVTT str
 		}
 	}
 
+	opts := s.GetEncodeOptions(ctx, trimmedVTT != "")
+
 	args := []string{"-y", "-nostdin", "-i", clipPath}
 	if trimmedVTT != "" {
 		subArg := escapeFilterPath(trimmedVTT)
@@ -474,15 +476,15 @@ func (s *Service) ReencodeWithSubs(ctx context.Context, clipPath, trimmedVTT str
 	if gif {
 		args = append(args, "-an")
 	} else {
-		args = append(args, "-c:a", "aac", "-b:a", "192k")
+		args = append(args, "-c:a", "aac", "-b:a", opts.AudioBitrate)
 	}
 	if onProgress != nil && expectedDurationMS > 0 {
 		args = append(args, "-progress", "pipe:1", "-nostats")
 	}
 	args = append(args,
 		"-c:v", "libx264",
-		"-crf", "16",
-		"-preset", "fast",
+		"-crf", opts.CRF,
+		"-preset", opts.Preset,
 		"-pix_fmt", "yuv420p",
 		// moov atom first: Telegram can stream the upload without transcoding it server-side.
 		"-movflags", "+faststart",
@@ -491,7 +493,10 @@ func (s *Service) ReencodeWithSubs(ctx context.Context, clipPath, trimmedVTT str
 	cmd := exec.CommandContext(ctx, bin, args...)
 	s.logger.Info("ffmpeg re-encode starting",
 		zap.String("input", clipPath),
-		zap.Bool("burn_subs", trimmedVTT != ""))
+		zap.Bool("burn_subs", trimmedVTT != ""),
+		zap.String("crf", opts.CRF),
+		zap.String("preset", opts.Preset),
+		zap.String("audio_bitrate", opts.AudioBitrate))
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

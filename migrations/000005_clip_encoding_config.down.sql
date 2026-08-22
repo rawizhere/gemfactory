@@ -1,0 +1,1 @@
+DELETE FROM gemfactory.config WHERE key IN ('CLIP_CRF', 'SUBS_CRF', 'CLIP_PRESET', 'CLIP_AUDIO_BITRATE');

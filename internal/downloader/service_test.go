@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,5 +94,36 @@ func TestFriendlyError(t *testing.T) {
 				t.Errorf("FriendlyError() mismatch:\n got %q\nwant %q", got, c.want)
 			}
 		})
+	}
+}
+
+func TestGetEncodeOptions(t *testing.T) {
+	svc := &Service{}
+
+	// Default fallback values
+	optsClip := svc.GetEncodeOptions(context.Background(), false)
+	if optsClip.CRF != "20" || optsClip.Preset != "fast" || optsClip.AudioBitrate != "192k" {
+		t.Errorf("unexpected default clip options: %+v", optsClip)
+	}
+
+	optsSubs := svc.GetEncodeOptions(context.Background(), true)
+	if optsSubs.CRF != "20" || optsSubs.Preset != "fast" || optsSubs.AudioBitrate != "192k" {
+		t.Errorf("unexpected default subs options: %+v", optsSubs)
+	}
+
+	// Environment variable overrides
+	t.Setenv("CLIP_CRF", "23")
+	t.Setenv("SUBS_CRF", "18")
+	t.Setenv("CLIP_PRESET", "veryfast")
+	t.Setenv("CLIP_AUDIO_BITRATE", "128k")
+
+	optsClipEnv := svc.GetEncodeOptions(context.Background(), false)
+	if optsClipEnv.CRF != "23" || optsClipEnv.Preset != "veryfast" || optsClipEnv.AudioBitrate != "128k" {
+		t.Errorf("unexpected env clip options: %+v", optsClipEnv)
+	}
+
+	optsSubsEnv := svc.GetEncodeOptions(context.Background(), true)
+	if optsSubsEnv.CRF != "18" || optsSubsEnv.Preset != "veryfast" || optsSubsEnv.AudioBitrate != "128k" {
+		t.Errorf("unexpected env subs options: %+v", optsSubsEnv)
 	}
 }
