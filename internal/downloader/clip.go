@@ -18,11 +18,44 @@ import (
 	"go.uber.org/zap"
 )
 
-// ytDlpProgressRe matches "[download]   42.3% of ~  25.40MiB at  4.12MiB/s ETA 00:03" lines (--newline).
 var ytDlpProgressRe = regexp.MustCompile(`\[download\]\s+(\d+(?:\.\d+)?)%(?:\s+of\s+~?\s*([^\s]+))?(?:\s+at\s+([^\s]+))?(?:\s+ETA\s+([^\s]+))?`)
 var ffmpegSectionTimeRe = regexp.MustCompile(`time=(\d{2}:\d{2}:\d{2}(?:\.\d+)?)`)
 var ffmpegSectionSizeRe = regexp.MustCompile(`size=\s*([^\s]+)`)
 var ffmpegSectionSpeedRe = regexp.MustCompile(`speed=\s*([^\s]+)`)
+var ffmpegSectionBitrateRe = regexp.MustCompile(`bitrate=\s*([^\s]+)`)
+
+func FormatHumanSize(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	rawLower := strings.ToLower(raw)
+	if strings.HasSuffix(rawLower, "kib") || strings.HasSuffix(rawLower, "kb") {
+		valStr := strings.TrimSuffix(strings.TrimSuffix(rawLower, "kib"), "kb")
+		if v, err := strconv.ParseFloat(strings.TrimSpace(valStr), 64); err == nil {
+			if v >= 1024 {
+				return fmt.Sprintf("%.1f MB", v/1024)
+			}
+			return fmt.Sprintf("%.0f KB", v)
+		}
+	}
+	if strings.HasSuffix(rawLower, "mib") || strings.HasSuffix(rawLower, "mb") {
+		valStr := strings.TrimSuffix(strings.TrimSuffix(rawLower, "mib"), "mb")
+		if v, err := strconv.ParseFloat(strings.TrimSpace(valStr), 64); err == nil {
+			if v >= 1024 {
+				return fmt.Sprintf("%.1f GB", v/1024)
+			}
+			return fmt.Sprintf("%.1f MB", v)
+		}
+	}
+	if strings.HasSuffix(rawLower, "gib") || strings.HasSuffix(rawLower, "gb") {
+		valStr := strings.TrimSuffix(strings.TrimSuffix(rawLower, "gib"), "gb")
+		if v, err := strconv.ParseFloat(strings.TrimSpace(valStr), 64); err == nil {
+			return fmt.Sprintf("%.1f GB", v)
+		}
+	}
+	return raw
+}
 
 // formatSelector picks the yt-dlp -f expression for the given quality tier.
 func formatSelector(maxHeight int, hq, shorts, audioOnly bool) string {
@@ -154,7 +187,7 @@ func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookie
 							Percent: int(pct),
 						}
 						if len(m) > 2 && m[2] != "" {
-							upd.Size = m[2]
+							upd.Size = FormatHumanSize(m[2])
 						}
 						if len(m) > 3 && m[3] != "" && !strings.EqualFold(m[3], "unknown") {
 							upd.Speed = m[3]
@@ -175,10 +208,27 @@ func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookie
 							Percent: pct,
 						}
 						if sm := ffmpegSectionSizeRe.FindStringSubmatch(text); len(sm) > 1 {
-							upd.Size = sm[1]
+							upd.Size = FormatHumanSize(sm[1])
 						}
 						if spm := ffmpegSectionSpeedRe.FindStringSubmatch(text); len(spm) > 1 {
-							upd.Speed = spm[1]
+							speedMultStr := strings.TrimSuffix(spm[1], "x")
+							if brm := ffmpegSectionBitrateRe.FindStringSubmatch(text); len(brm) > 1 {
+								brStr := strings.TrimSuffix(strings.ToLower(brm[1]), "kbits/s")
+								brStr = strings.TrimSuffix(brStr, "kbps")
+								if brVal, err := strconv.ParseFloat(strings.TrimSpace(brStr), 64); err == nil {
+									if speedVal, err2 := strconv.ParseFloat(strings.TrimSpace(speedMultStr), 64); err2 == nil && speedVal > 0 {
+										throughputKBps := (brVal * speedVal) / 8.0
+										if throughputKBps >= 1024 {
+											upd.Speed = fmt.Sprintf("%.1f MB/s", throughputKBps/1024.0)
+										} else {
+											upd.Speed = fmt.Sprintf("%.0f KB/s", throughputKBps)
+										}
+									}
+								}
+							}
+							if upd.Speed == "" {
+								upd.Speed = spm[1]
+							}
 						}
 						onProgress(upd)
 					}

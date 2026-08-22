@@ -208,3 +208,22 @@ func TestFileNameWithTimecode(t *testing.T) {
 		t.Errorf("unexpected name %q", got)
 	}
 }
+
+func TestFormatHumanSize(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"7168kB", "7.0 MB"},
+		{"7168KiB", "7.0 MB"},
+		{"512kB", "512 KB"},
+		{"25.40MiB", "25.4 MB"},
+		{"1024MiB", "1.0 GB"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := FormatHumanSize(c.in); got != c.want {
+			t.Errorf("FormatHumanSize(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

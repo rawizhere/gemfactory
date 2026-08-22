@@ -234,34 +234,36 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 				if p.Size != "" && p.Speed != "" && p.ETA != "" {
 					state.statusLine = fmt.Sprintf("<b>Download:</b> %s (%s • ETA %s)", p.Size, p.Speed, p.ETA)
 				} else if p.Size != "" && p.Speed != "" {
-					state.statusLine = fmt.Sprintf("<b>Download:</b> %s (Speed %s)", p.Size, p.Speed)
+					state.statusLine = fmt.Sprintf("<b>Download:</b> %s (%s)", p.Size, p.Speed)
+				} else if p.Size != "" {
+					state.statusLine = fmt.Sprintf("<b>Download:</b> %s", p.Size)
 				} else if p.Speed != "" {
-					state.statusLine = fmt.Sprintf("<b>Download:</b> %d%% (Speed %s)", p.Percent, p.Speed)
+					state.statusLine = fmt.Sprintf("<b>Download:</b> %d%% (%s)", p.Percent, p.Speed)
 				} else {
 					state.statusLine = fmt.Sprintf("<b>Download:</b> %d%%", p.Percent)
 				}
 			case downloader.StageReencode:
 				if state.subsLang != "" {
 					if p.Speed != "" {
-						state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Burning subtitles (%s • Speed %s)", state.subsLang, p.Speed)
+						state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Burning subtitles (%s • %s)", state.subsLang, p.Speed)
 					} else {
 						state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Burning subtitles (%s)", state.subsLang)
 					}
 				} else if state.audioOnly {
 					if p.Speed != "" {
-						state.statusLine = fmt.Sprintf("<b>Converting:</b> Extracting MP3 (Speed %s)", p.Speed)
+						state.statusLine = fmt.Sprintf("<b>Converting:</b> Extracting MP3 (%s)", p.Speed)
 					} else {
 						state.statusLine = "<b>Converting:</b> Extracting MP3 (192 kbps)..."
 					}
 				} else if state.gif {
 					if p.Speed != "" {
-						state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Generating GIF (Speed %s)", p.Speed)
+						state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Generating GIF (%s)", p.Speed)
 					} else {
 						state.statusLine = "<b>Re-encoding:</b> Generating GIF..."
 					}
 				} else {
 					if p.Speed != "" {
-						state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Processing video (Speed %s)", p.Speed)
+						state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Processing video (%s)", p.Speed)
 					} else {
 						state.statusLine = "<b>Re-encoding:</b> Processing video..."
 					}
@@ -381,7 +383,7 @@ func formatMode(req downloader.ClipRequest) string {
 	case req.HQ:
 		return "Clip (HQ 2K)"
 	case req.Shorts:
-		return "Shorts / TikTok"
+		return ""
 	default:
 		return "Clip"
 	}
