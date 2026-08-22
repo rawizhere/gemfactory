@@ -4,6 +4,9 @@ package telegram
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -95,17 +98,7 @@ func (c *Client) processUpdate(ctx context.Context, update telego.Update) {
 	}
 
 	if update.Message != nil {
-		if update.Message.Document != nil {
-			return
-		}
-		isCommand := false
-		for _, entity := range update.Message.Entities {
-			if entity.Type == telego.EntityTypeBotCommand && entity.Offset == 0 {
-				isCommand = true
-				break
-			}
-		}
-		if !isCommand {
+		if update.Message.Document != nil || update.Message.Text == "" {
 			return
 		}
 	}
@@ -162,6 +155,107 @@ func (c *Client) EditMessageReplyMarkup(ctx context.Context, chatID int64, messa
 		c.logger.Error("Failed to edit message reply markup", zap.Int64("chat_id", chatID), zap.Int("message_id", messageID), zap.Error(err))
 	}
 	return err
+}
+
+// SendMessageRaw sends an HTML message and returns the created message.
+func (c *Client) SendMessageRaw(ctx context.Context, chatID int64, text string) (*telego.Message, error) {
+	params := telegoutil.Message(telegoutil.ID(chatID), text).WithParseMode(telego.ModeHTML)
+	params.LinkPreviewOptions = &telego.LinkPreviewOptions{IsDisabled: true}
+	return c.bot.SendMessage(ctx, params)
+}
+
+// EditMessageText updates the text of an existing HTML message. Errors are logged and returned.
+func (c *Client) EditMessageText(ctx context.Context, chatID int64, messageID int, text string) error {
+	params := &telego.EditMessageTextParams{
+		ChatID:    telegoutil.ID(chatID),
+		MessageID: messageID,
+		Text:      text,
+		ParseMode: telego.ModeHTML,
+	}
+	params.LinkPreviewOptions = &telego.LinkPreviewOptions{IsDisabled: true}
+	_, err := c.bot.EditMessageText(ctx, params)
+	if err != nil {
+		c.logger.Warn("Failed to edit message", zap.Int64("chat_id", chatID), zap.Int("message_id", messageID), zap.Error(err))
+	}
+	return err
+}
+
+// probeVideoMeta returns the video width, height, and duration (in seconds) via ffprobe.
+// Best-effort: errors are ignored and default values are returned.
+func probeVideoMeta(filePath string) (int, int, int) {
+	out, err := exec.Command("ffprobe", "-v", "error",
+		"-show_entries", "stream=width,height:format=duration",
+		"-of", "csv=s=x:p=0", filePath).Output()
+	if err != nil {
+		return 0, 0, 0
+	}
+	fields := strings.Fields(strings.ReplaceAll(string(out), "x", " "))
+	var w, h, dur int
+	if len(fields) >= 2 {
+		w, _ = strconv.Atoi(fields[0])
+		h, _ = strconv.Atoi(fields[1])
+	}
+	if len(fields) >= 3 {
+		if d, derr := strconv.ParseFloat(fields[2], 64); derr == nil && d > 0 {
+			dur = int(d + 0.5)
+		}
+	}
+	return w, h, dur
+}
+
+// SendVideoFile uploads a local video file to the chat with an optional caption.
+func (c *Client) SendVideoFile(ctx context.Context, chatID int64, filePath, caption string) error {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("open video file: %w", err)
+	}
+	defer f.Close()
+
+	video := telegoutil.Video(telegoutil.ID(chatID), telegoutil.File(f))
+	if caption != "" {
+		video = video.WithCaption(caption).WithParseMode(telego.ModeHTML)
+	}
+	video = video.WithSupportsStreaming()
+	if w, h, dur := probeVideoMeta(filePath); w > 0 && h > 0 {
+		video = video.WithWidth(w).WithHeight(h)
+		if dur > 0 {
+			video = video.WithDuration(dur)
+		}
+	}
+
+	if _, err := c.bot.SendVideo(ctx, video); err != nil {
+		c.logger.Error("Failed to send video", zap.Int64("chat_id", chatID), zap.String("file", filePath), zap.Error(err))
+		return fmt.Errorf("send video: %w", err)
+	}
+	return nil
+}
+
+// SendAudioFile uploads a local audio file to the chat with an optional caption.
+func (c *Client) SendAudioFile(ctx context.Context, chatID int64, filePath, caption string) error {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("open audio file: %w", err)
+	}
+	defer f.Close()
+
+	audio := telegoutil.Audio(telegoutil.ID(chatID), telegoutil.File(f))
+	if caption != "" {
+		audio = audio.WithCaption(caption).WithParseMode(telego.ModeHTML)
+	}
+
+	if _, err := c.bot.SendAudio(ctx, audio); err != nil {
+		c.logger.Error("Failed to send audio", zap.Int64("chat_id", chatID), zap.String("file", filePath), zap.Error(err))
+		return fmt.Errorf("send audio: %w", err)
+	}
+	return nil
+}
+
+// DeleteMessage removes a message from the chat.
+func (c *Client) DeleteMessage(ctx context.Context, chatID int64, messageID int) error {
+	return c.bot.DeleteMessage(ctx, &telego.DeleteMessageParams{
+		ChatID:    telegoutil.ID(chatID),
+		MessageID: messageID,
+	})
 }
 
 // SetBotCommands registers bot commands with Telegram.

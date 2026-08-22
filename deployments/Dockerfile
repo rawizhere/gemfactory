@@ -11,14 +11,22 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o gemfactory c
 
 FROM alpine:3.21
 RUN apk add --no-cache \
-    chromium \
-    nss \
-    freetype \
-    harfbuzz \
     ca-certificates \
     tzdata \
     postgresql-client \
-    ttf-freefont
+    freetype \
+    ffmpeg \
+    python3 \
+    libass \
+    nodejs \
+    unzip \
+    curl
+
+# Lato font for burned-in subtitles (not packaged in alpine 3.21).
+RUN mkdir -p /usr/share/fonts/lato \
+    && curl -fsSL -o /usr/share/fonts/lato/Lato-Regular.ttf \
+      https://github.com/google/fonts/raw/main/ofl/lato/Lato-Regular.ttf \
+    && fc-cache -f >/dev/null
 
 WORKDIR /app
 

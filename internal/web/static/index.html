@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>GemFactory</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main>
+  <header class="masthead">
+    <div class="brand-row">
+      <div class="brand">
+        <h1>GemFactory</h1>
+        <div class="status-bar" id="system-stats">
+          <span class="status-dot"></span>
+          <span id="stats-summary">Connecting...</span>
+        </div>
+      </div>
+      <button type="button" class="btn-palette-hint" id="open-palette" title="Open Command Palette (Cmd+K / Ctrl+K)">
+        <span>Quick search...</span>
+        <kbd>⌘K</kbd>
+      </button>
+    </div>
+    <nav role="tablist" aria-label="Sections">
+      <button type="button" role="tab" data-tab="schedule" aria-selected="true">Schedule</button>
+      <button type="button" role="tab" data-tab="releases" aria-selected="false">Releases</button>
+      <button type="button" role="tab" data-tab="artists" aria-selected="false">Artists</button>
+      <button type="button" role="tab" data-tab="cookies" aria-selected="false">Cookies</button>
+      <button type="button" role="tab" data-tab="settings" aria-selected="false">Settings</button>
+    </nav>
+  </header>
+
+  <!-- SCHEDULE TAB (MAIN / FIRST) -->
+  <section id="tab-schedule" class="active" role="tabpanel">
+    <div class="bar">
+      <div class="sched-nav">
+        <button type="button" class="btn btn-ghost btn-sm" id="sched-prev-month" title="Previous Month">← Prev</button>
+        <span id="sched-current-month" class="sched-title">August 2026</span>
+        <button type="button" class="btn btn-ghost btn-sm" id="sched-next-month" title="Next Month">Next →</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="sched-today-btn">Today</button>
+      </div>
+      <div class="search-wrap grow">
+        <input type="text" id="sched-search" placeholder="Filter this month... (/)" autocomplete="off">
+        <button type="button" class="btn-clear" id="sched-search-clear" title="Clear filter" hidden>×</button>
+      </div>
+      <select id="sched-gender" aria-label="Gender filter">
+        <option value="">All genders</option>
+        <option value="female">Female</option>
+        <option value="male">Male</option>
+        <option value="mixed">Mixed</option>
+      </select>
+      <span class="count" id="sched-count"></span>
+    </div>
+    <div id="schedule-table"></div>
+  </section>
+
+  <!-- RELEASES TAB -->
+  <section id="tab-releases" role="tabpanel">
+    <!-- Parser Tool Bar -->
+    <div class="parser-card">
+      <div class="parser-header">
+        <span class="parser-title">Run Web Scraper</span>
+        <span class="hint" style="margin:0">Crawl kpopofficial.com for releases</span>
+      </div>
+      <form id="parser-form" class="parser-form">
+        <select id="parse-month" aria-label="Parse Month">
+          <option value="all">Whole Year (All 12 Months)</option>
+          <option value="january">January</option>
+          <option value="february">February</option>
+          <option value="march">March</option>
+          <option value="april">April</option>
+          <option value="may">May</option>
+          <option value="june">June</option>
+          <option value="july">July</option>
+          <option value="august">August</option>
+          <option value="september">September</option>
+          <option value="october">October</option>
+          <option value="november">November</option>
+          <option value="december">December</option>
+        </select>
+        <select id="parse-year" aria-label="Parse Year"></select>
+        <button class="btn btn-primary btn-sm" type="submit" id="parse-btn">Run Scraper</button>
+        <span class="parser-status msg" id="parse-msg"></span>
+      </form>
+    </div>
+
+    <div class="bar" style="margin-top:1rem">
+      <div class="search-wrap grow">
+        <input type="text" id="rel-search" placeholder="Search releases (/)..." autocomplete="off">
+        <button type="button" class="btn-clear" id="rel-search-clear" title="Clear search" hidden>×</button>
+      </div>
+      <div class="filter-artist-wrap">
+        <input type="text" id="rel-artist-input" list="rel-artist-list" placeholder="Filter artist..." autocomplete="off">
+        <datalist id="rel-artist-list"></datalist>
+        <button type="button" class="btn-clear" id="rel-artist-clear" title="Clear artist filter" hidden>×</button>
+      </div>
+      <select id="rel-year">
+        <option value="">All years</option>
+      </select>
+      <select id="rel-month">
+        <option value="">All months</option>
+        <option value="01">01 Jan</option>
+        <option value="02">02 Feb</option>
+        <option value="03">03 Mar</option>
+        <option value="04">04 Apr</option>
+        <option value="05">05 May</option>
+        <option value="06">06 Jun</option>
+        <option value="07">07 Jul</option>
+        <option value="08">08 Aug</option>
+        <option value="09">09 Sep</option>
+        <option value="10">10 Oct</option>
+        <option value="11">11 Nov</option>
+        <option value="12">12 Dec</option>
+      </select>
+      <select id="rel-sort">
+        <option value="">Default order</option>
+        <option value="new">Newest first</option>
+        <option value="old">Oldest first</option>
+      </select>
+      <button type="button" class="btn btn-ghost btn-sm" id="rel-reset" title="Reset all filters">Reset</button>
+    </div>
+    <div class="bar">
+      <label class="chk"><input type="checkbox" id="rel-check-all"> select all</label>
+      <button class="btn btn-danger btn-sm" type="button" id="rel-delete" disabled>Delete selected</button>
+      <button class="btn btn-ghost btn-sm" type="button" id="rel-export" title="Export filtered releases as CSV">Export CSV</button>
+      <span class="count" id="rel-count"></span>
+    </div>
+    <div id="releases-table"></div>
+    <div class="pager-bar" id="releases-pager"></div>
+  </section>
+
+  <!-- ARTISTS TAB -->
+  <section id="tab-artists" role="tabpanel">
+    <form id="artist-add" class="add-box">
+      <div class="add-header">
+        <span class="add-title">Add Artists</span>
+        <span id="artist-input-count" class="badge-count"></span>
+      </div>
+      <div class="add-body">
+        <textarea name="names" placeholder="Enter artist names separated by newlines, commas, or semicolons&#10;e.g. aespa, NewJeans, LE SSERAFIM" spellcheck="false"></textarea>
+        <div class="add-controls">
+          <select name="gender" aria-label="Gender">
+            <option value="female">female</option>
+            <option value="male">male</option>
+            <option value="mixed">mixed</option>
+          </select>
+          <button class="btn btn-primary" type="submit">Add</button>
+        </div>
+      </div>
+      <div class="msg"></div>
+    </form>
+
+    <div class="bar">
+      <div class="search-wrap grow">
+        <input type="text" id="artist-search" placeholder="Search artists... (/)" autocomplete="off">
+        <button type="button" class="btn-clear" id="artist-search-clear" title="Clear search" hidden>×</button>
+      </div>
+      <select id="artist-status-filter" aria-label="Status filter">
+        <option value="">All status</option>
+        <option value="active">Active</option>
+        <option value="inactive">Inactive</option>
+      </select>
+      <select id="artist-gender-filter" aria-label="Gender filter">
+        <option value="">All genders</option>
+        <option value="female">Female</option>
+        <option value="male">Male</option>
+        <option value="mixed">Mixed</option>
+      </select>
+      <label class="chk"><input type="checkbox" id="artist-check-all"> select all</label>
+      <button class="btn btn-ghost btn-sm" type="button" id="artist-toggle-active" disabled>Toggle status</button>
+      <button class="btn btn-danger btn-sm" type="button" id="artist-delete" disabled>Delete selected</button>
+      <button class="btn btn-ghost btn-sm" type="button" id="artist-export" title="Export artists as CSV">Export CSV</button>
+      <span class="count" id="artist-count"></span>
+    </div>
+    <div id="artists-table"></div>
+  </section>
+
+  <!-- COOKIES TAB -->
+  <section id="tab-cookies" role="tabpanel">
+    <p class="hint">
+      Paste your Netscape cookie file export (Cookie-Editor format). Domains, cookies count, and expiration are detected automatically.
+    </p>
+    <form id="cookie-add" class="add-box">
+      <div class="add-body">
+        <textarea name="content" placeholder="# Netscape HTTP Cookie File&#10;.youtube.com	TRUE	/	TRUE	0	VISITOR_INFO1_LIVE	…&#10;&#10;Paste full Netscape export here" spellcheck="false" style="min-height:7rem"></textarea>
+        <div class="add-controls">
+          <button class="btn btn-primary" type="submit">Save Cookies</button>
+        </div>
+      </div>
+      <div class="msg"></div>
+    </form>
+    <div id="cookies-table"></div>
+  </section>
+
+  <!-- SETTINGS TAB -->
+  <section id="tab-settings" role="tabpanel">
+    <h2>Storage & Cache</h2>
+    <div class="storage-card">
+      <div class="storage-info">
+        <span class="storage-label">Downloads Folder:</span>
+        <strong id="storage-size">0 B</strong>
+        <span id="storage-files" class="hint" style="margin:0">(0 files)</span>
+      </div>
+      <button class="btn btn-danger btn-sm" type="button" id="clean-storage-btn">Clean Downloads</button>
+    </div>
+
+    <h2>Database Configuration</h2>
+    <div id="config-db-table"></div>
+    <h2>Environment Variables (Read-Only)</h2>
+    <div id="config-env-table"></div>
+  </section>
+</main>
+
+<!-- Command Palette Modal -->
+<dialog id="cmd-palette" class="palette-dialog">
+  <div class="palette-box">
+    <div class="palette-input-wrap">
+      <span class="palette-icon">⌘</span>
+      <input type="text" id="palette-input" placeholder="Type a command, artist, or release title..." autocomplete="off" spellcheck="false">
+      <button type="button" class="btn-clear" id="palette-close">Esc</button>
+    </div>
+    <div class="palette-results" id="palette-results"></div>
+  </div>
+</dialog>
+
+<footer>
+  <span>GemFactory · kpopofficial.com</span>
+  <span class="shortcuts-hint">Tabs: 1–5 · Search: / · Palette: ⌘K · Blur: Esc</span>
+</footer>
+
+<script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

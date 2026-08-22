@@ -77,20 +77,3 @@ func (c *HTTPClient) GetHTML(ctx context.Context, url string) (*goquery.Document
 
 	return doc, nil
 }
-
-// CheckStatus checks the HTTP status code of a URL.
-func (c *HTTPClient) CheckStatus(ctx context.Context, url string) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return 0, fmt.Errorf("failed to create check request: %w", err)
-	}
-	req.Header.Set("User-Agent", c.userAgent)
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("status check failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	return resp.StatusCode, nil
-}

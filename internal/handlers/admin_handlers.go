@@ -124,42 +124,68 @@ func (h *AdminHandlers) Config(ctx context.Context, message *telego.Message) {
 	_ = h.SendMessage(ctx, message.Chat.ID, "Usage: /config OR /config <KEY> <VALUE>")
 }
 
-// Parse triggers an asynchronous release crawl for the given month and year.
+// Parse triggers an asynchronous release crawl for the given month or year.
+// Accepted forms: /parse, /parse <month>, /parse <month> <year>,
+// /parse <year> (whole year), /parse <month>-<year>.
 func (h *AdminHandlers) Parse(ctx context.Context, message *telego.Message) {
 	if !h.IsAdmin(message.From) {
 		return
 	}
 
 	args := strings.Fields(message.Text)[1:]
-	month := strings.ToLower(time.Now().Format("January"))
-	year := time.Now().Year()
 
-	if len(args) >= 1 {
-		month = strings.ToLower(args[0])
-	}
-	if len(args) >= 2 {
-		if y, err := strconv.Atoi(args[1]); err == nil {
-			year = y
-		}
-	}
+	if len(args) == 1 {
+		if y, err := strconv.Atoi(args[0]); err == nil && len(args[0]) == 4 && y >= 2000 {
+			yearStr := strconv.Itoa(y)
+			_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("🔄 Running parser for entire year %s...", yearStr))
+			go func() {
+				bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+				defer cancel()
 
-	_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("🔄 Running parser for %s %d...", month, year))
-
-	go func() {
-		bgCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-		defer cancel()
-
-		monthQuery := fmt.Sprintf("%s-%d", month, year)
-		count, err := h.Services.Release.ParseReleasesForMonth(bgCtx, monthQuery)
-		if err != nil {
-			h.HandleError(bgCtx, message.Chat.ID, err, "Parser error")
+				count, err := h.Services.Release.ParseReleasesForYear(bgCtx, yearStr)
+				if err != nil {
+					h.HandleError(bgCtx, message.Chat.ID, fmt.Errorf("year %s: %w", yearStr, err), "Parser error")
+					return
+				}
+				_ = h.SendMessage(bgCtx, message.Chat.ID, fmt.Sprintf("✅ Parsing complete for %s. Found %d releases", yearStr, count))
+			}()
 			return
 		}
-		_ = h.SendMessage(bgCtx, message.Chat.ID, fmt.Sprintf("✅ Parsing complete. Found %d releases", count))
+	}
+
+	var monthQueries []string
+	switch {
+	case len(args) >= 2:
+		if _, err := strconv.Atoi(args[1]); err != nil {
+			_ = h.SendMessage(ctx, message.Chat.ID, "Usage: /parse [<month>|<year>] [<year>]")
+			return
+		}
+		monthQueries = []string{strings.ToLower(args[0]) + "-" + args[1]}
+	case len(args) == 1:
+		monthQueries = []string{strings.ToLower(args[0])}
+	default:
+		monthQueries = []string{strings.ToLower(time.Now().Format("January")) + "-" + strconv.Itoa(time.Now().Year())}
+	}
+
+	_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("🔄 Running parser for %s...", strings.Join(monthQueries, ", ")))
+
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), time.Duration(len(monthQueries))*5*time.Minute)
+		defer cancel()
+
+		total := 0
+		for _, q := range monthQueries {
+			count, err := h.Services.Release.ParseReleasesForMonth(bgCtx, q)
+			if err != nil {
+				h.HandleError(bgCtx, message.Chat.ID, fmt.Errorf("%s: %w", q, err), "Parser error")
+				continue
+			}
+			total += count
+		}
+		_ = h.SendMessage(bgCtx, message.Chat.ID, fmt.Sprintf("✅ Parsing complete. Found %d releases", total))
 	}()
 }
 
-// Export returns a comma-separated list of all tracked artist names.
 func (h *AdminHandlers) Export(ctx context.Context, message *telego.Message) {
 	if !h.IsAdmin(message.From) {
 		return
@@ -183,4 +209,9 @@ func (h *AdminHandlers) parseArtistList(input string) []string {
 		}
 	}
 	return result
+}
+
+var monthNames = []string{
+	"january", "february", "march", "april", "may", "june",
+	"july", "august", "september", "october", "november", "december",
 }

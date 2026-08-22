@@ -65,7 +65,7 @@ func (r *ReleaseRepository) GetByGender(ctx context.Context, gender model.Gender
 	err := r.db.NewSelect().
 		Model(&releases).
 		Relation("Artist").
-		Where("artist.gender = ? AND releases.is_active = true", gender).
+		Where("artist.gender = ? AND release.is_active = true", gender).
 		Order("date ASC").
 		Scan(ctx)
 	if err != nil {
@@ -80,7 +80,7 @@ func (r *ReleaseRepository) GetByArtistID(ctx context.Context, artistID int) ([]
 	err := r.db.NewSelect().
 		Model(&releases).
 		Relation("Artist").
-		Where("artist_id = ? AND is_active = true", artistID).
+		Where("release.artist_id = ? AND release.is_active = true", artistID).
 		Order("date ASC").
 		Scan(ctx)
 	if err != nil {
@@ -95,7 +95,7 @@ func (r *ReleaseRepository) GetByArtist(ctx context.Context, artistName string) 
 	err := r.db.NewSelect().
 		Model(&releases).
 		Relation("Artist").
-		Where("LOWER(artist.name) = LOWER(?) AND releases.is_active = true", artistName).
+		Where("LOWER(artist.name) = LOWER(?) AND release.is_active = true", artistName).
 		Order("date ASC").
 		Scan(ctx)
 	if err != nil {
@@ -110,7 +110,7 @@ func (r *ReleaseRepository) GetByDateRange(ctx context.Context, start, end time.
 	err := r.db.NewSelect().
 		Model(&releases).
 		Relation("Artist").
-		Where("date >= ? AND date <= ? AND releases.is_active = true", start, end).
+		Where("date >= ? AND date <= ? AND release.is_active = true", start, end).
 		Order("date ASC").
 		Scan(ctx)
 	if err != nil {
@@ -125,7 +125,7 @@ func (r *ReleaseRepository) GetActive(ctx context.Context) ([]model.Release, err
 	err := r.db.NewSelect().
 		Model(&releases).
 		Relation("Artist").
-		Where("releases.is_active = true").
+		Where("release.is_active = true").
 		Order("date ASC").
 		Scan(ctx)
 	if err != nil {
@@ -230,6 +230,19 @@ func (r *ReleaseRepository) Delete(ctx context.Context, id int) error {
 		return fmt.Errorf("failed to delete release: %w", err)
 	}
 	return nil
+}
+
+// DeleteByIDs removes release records by their IDs and returns the number of deleted rows.
+func (r *ReleaseRepository) DeleteByIDs(ctx context.Context, ids []int) (int, error) {
+	res, err := r.db.NewDelete().
+		Model((*model.Release)(nil)).
+		Where("release_id IN (?)", bun.In(ids)).
+		Exec(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete releases by IDs: %w", err)
+	}
+	affected, _ := res.RowsAffected()
+	return int(affected), nil
 }
 
 // Upsert adds or updates a release record.

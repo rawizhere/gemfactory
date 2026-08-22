@@ -319,26 +319,18 @@ func (s *ReleaseService) ParseReleasesForMonth(ctx context.Context, monthName st
 		artistObjectMap[strings.ToLower(activeArtists[i].Name.String())] = &activeArtists[i]
 	}
 
-	monthsList := []string{month}
-	links, err := s.scraper.FetchMonthlyLinks(ctx, monthsList, year)
-	if err != nil {
-		return 0, fmt.Errorf("failed to fetch monthly links for %s-%s: %w", month, year, err)
-	}
-
-	if len(links) == 0 {
-		s.logger.Warn("No links found for month", zap.String("month", month))
-		return 0, nil
-	}
-
-	url := links[0]
 	savedCount := 0
-	for scrapedRelease, err := range s.scraper.ParseKProfilesMonthlyPage(ctx, url, month, year) {
+	for scrapedRelease, err := range s.scraper.ParseMonth(ctx, month, year) {
 		if err != nil {
 			return savedCount, fmt.Errorf("failed to parse monthly page: %w", err)
 		}
 
 		artist := s.findArtist(scrapedRelease.Artist, artistObjectMap)
 		if artist == nil {
+			s.logger.Debug("Scraped release artist not matched in active artists",
+				zap.String("artist", scrapedRelease.Artist),
+				zap.String("title", scrapedRelease.Title),
+				zap.String("date", scrapedRelease.Date.Format("2006-01-02")))
 			continue
 		}
 
@@ -365,8 +357,71 @@ func (s *ReleaseService) ParseReleasesForMonth(ctx context.Context, monthName st
 		savedCount++
 	}
 
-	s.logger.Info("Completed parsing releases",
+	s.logger.Info("Completed parsing releases for month",
 		zap.String("month", month),
+		zap.String("year", year),
+		zap.Int("saved", savedCount))
+
+	return savedCount, nil
+}
+
+// ParseReleasesForYear initiates a scraping job to collect and save releases for an entire calendar year.
+func (s *ReleaseService) ParseReleasesForYear(ctx context.Context, year string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.logger.Info("Starting to parse releases for year", zap.String("year", year))
+
+	activeArtists, err := s.artistRepo.GetActive(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get active artists: %w", err)
+	}
+
+	artistObjectMap := make(map[string]*model.Artist)
+	for i := range activeArtists {
+		artistObjectMap[strings.ToLower(activeArtists[i].Name.String())] = &activeArtists[i]
+	}
+
+	savedCount := 0
+	for scrapedRelease, err := range s.scraper.ParseYear(ctx, year) {
+		if err != nil {
+			return savedCount, fmt.Errorf("failed to parse year %s: %w", year, err)
+		}
+
+		artist := s.findArtist(scrapedRelease.Artist, artistObjectMap)
+		if artist == nil {
+			s.logger.Debug("Scraped release artist not matched in active artists",
+				zap.String("artist", scrapedRelease.Artist),
+				zap.String("title", scrapedRelease.Title),
+				zap.String("date", scrapedRelease.Date.Format("2006-01-02")))
+			continue
+		}
+
+		release := &model.Release{
+			ArtistID:   artist.ArtistID,
+			Title:      model.NewUniqueString(scrapedRelease.Title),
+			TitleTrack: model.NewUniqueString(scrapedRelease.TitleTrack),
+			AlbumName:  model.NewUniqueString(scrapedRelease.AlbumName),
+			MV:         model.NewUniqueString(scrapedRelease.MV),
+			Spotify:    model.NewUniqueString(scrapedRelease.Spotify),
+			SourceURL:  model.NewUniqueString(scrapedRelease.SourceURL),
+			Date:       scrapedRelease.Date,
+			IsActive:   true,
+		}
+
+		err = s.Upsert(ctx, release)
+		if err != nil {
+			s.logger.Warn("Failed to save release",
+				zap.String("artist", scrapedRelease.Artist),
+				zap.Error(err))
+			continue
+		}
+
+		savedCount++
+	}
+
+	s.logger.Info("Completed parsing releases for year",
+		zap.String("year", year),
 		zap.Int("saved", savedCount))
 
 	return savedCount, nil

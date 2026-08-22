@@ -37,6 +37,10 @@ func (c *HTTPClient) FetchAlbumsWindow(ctx context.Context, after, before time.T
 	var all []AlbumPost
 
 	for page := 1; ; page++ {
+		if err := c.limiter.Wait(ctx); err != nil {
+			return nil, fmt.Errorf("rate limit wait failed: %w", err)
+		}
+
 		q := url.Values{}
 		q.Set("per_page", strconv.Itoa(albumsPerPage))
 		q.Set("page", strconv.Itoa(page))
@@ -61,6 +65,24 @@ func (c *HTTPClient) FetchAlbumsWindow(ctx context.Context, after, before time.T
 			return nil, fmt.Errorf("rest request failed: %w", err)
 		}
 
+		if resp.StatusCode == http.StatusBadRequest {
+			// WordPress returns 400 rest_post_invalid_page_number when page > total_pages
+			_ = resp.Body.Close()
+			break
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			return nil, fmt.Errorf("unexpected rest status code: %d", resp.StatusCode)
+		}
+
+		totalPages := 0
+		if tpHeader := resp.Header.Get("X-WP-TotalPages"); tpHeader != "" {
+			if tp, convErr := strconv.Atoi(tpHeader); convErr == nil {
+				totalPages = tp
+			}
+		}
+
 		var posts []AlbumPost
 		decodeErr := json.NewDecoder(resp.Body).Decode(&posts)
 		closeErr := resp.Body.Close()
@@ -70,13 +92,10 @@ func (c *HTTPClient) FetchAlbumsWindow(ctx context.Context, after, before time.T
 		if closeErr != nil {
 			return nil, fmt.Errorf("failed to close response body: %w", closeErr)
 		}
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("unexpected rest status code: %d", resp.StatusCode)
-		}
 
 		all = append(all, posts...)
 
-		if len(posts) < albumsPerPage {
+		if (totalPages > 0 && page >= totalPages) || len(posts) < albumsPerPage {
 			break
 		}
 		if ctx.Err() != nil {
@@ -104,4 +123,16 @@ func monthWindow(month, year string) (time.Time, time.Time, error) {
 	end := start.AddDate(0, 1, -1)
 	const pad = 45 * 24 * time.Hour
 	return start.Add(-pad), end.Add(pad), nil
+}
+
+// yearWindow returns the publication-date window for an entire year (padded by 30 days before and 60 days after).
+func yearWindow(year string) (time.Time, time.Time, error) {
+	y, err := strconv.Atoi(strings.TrimSpace(year))
+	if err != nil || y <= 0 {
+		return time.Time{}, time.Time{}, fmt.Errorf("invalid year: %q", year)
+	}
+
+	start := time.Date(y, time.January, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(y, time.December, 31, 23, 59, 59, 0, time.UTC)
+	return start.AddDate(0, 0, -30), end.AddDate(0, 0, 60), nil
 }

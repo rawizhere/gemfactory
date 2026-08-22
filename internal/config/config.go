@@ -21,6 +21,8 @@ type Config struct {
 	AdminUsername        string
 	HealthPort           string
 	HealthCheckEnabled   bool
+	WebPort              string
+	WebEnabled           bool
 	LogLevel             string
 	Timezone             string
 	AppDataDir           string
@@ -38,6 +40,8 @@ func Load() (*Config, error) {
 		AdminUsername:        getEnv("ADMIN_USERNAME", ""),
 		HealthPort:           getEnv("HEALTH_PORT", "8080"),
 		HealthCheckEnabled:   getEnvBool("HEALTH_CHECK_ENABLED", true),
+		WebPort:              getEnv("WEB_PORT", "9090"),
+		WebEnabled:           getEnvBool("WEB_ENABLED", true),
 		LogLevel:             getEnv("LOG_LEVEL", "info"),
 		Timezone:             getEnv("TIMEZONE", "Europe/Moscow"),
 		AppDataDir:           getEnv("APP_DATA_DIR", "./data"),

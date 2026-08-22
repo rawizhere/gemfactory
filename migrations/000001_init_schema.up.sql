@@ -107,7 +107,7 @@ INSERT INTO gemfactory.artists (name, gender, is_active) VALUES
 ('YOUNG POSSE', 'female', true), ('YUJU', 'female', true), ('YUQI', 'female', true), ('Yves', 'female', true), ('ablume', 'female', true),
 ('aespa', 'female', true), ('dodree', 'female', true), ('fromis_9', 'female', true), ('hanhee', 'female', true), ('i-dle', 'female', true),
 ('ifeye', 'female', true), ('izna', 'female', true), ('rescence', 'female', true), ('tripleS', 'female', true),
-('&TEAM', 'male', true), ('104', 'male', true), ('82MAJOR', 'male', true), ('8TURN', 'male', true), ('AB6IX', 'male', true),
+('&TEAM', 'male', true), ('82MAJOR', 'male', true), ('8TURN', 'male', true), ('AB6IX', 'male', true),
 ('ALL(H)OURS', 'male', true), ('ALLDAY PROJECT', 'male', true), ('ALPHA DRIVE ONE', 'male', true), ('AMPERS&ONE', 'male', true), ('ATEEZ', 'male', true),
 ('AxMxP', 'male', true), ('BAND LUCY', 'male', true), ('BOYNEXTDOOR', 'male', true), ('BamBam', 'male', true), ('CHEN', 'male', true),
 ('CORTIS', 'male', true), ('ENHYPEN', 'male', true), ('Forestella', 'male', true), ('GOT7', 'male', true), ('HIGHLIGHT', 'male', true),

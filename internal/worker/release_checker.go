@@ -2,9 +2,8 @@ package worker
 
 import (
 	"context"
-	"fmt"
 	"gemfactory/internal/service"
-	"strings"
+	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -59,32 +58,44 @@ func (w *ReleaseChecker) Start(ctx context.Context) {
 }
 
 func (w *ReleaseChecker) checkReleases(ctx context.Context) {
-	w.logger.Info("Checking for new releases (previous + current + 3 months ahead)...")
-
 	now := time.Now()
-	for i := -1; i <= 3; i++ {
-		targetDate := now.AddDate(0, i, 0)
-		monthName := strings.ToLower(targetDate.Format("January"))
-		yearStr := targetDate.Format("2006")
+	currentYear := now.Format("2006")
+	w.logger.Info("Checking releases for current year via REST...", zap.String("year", currentYear))
 
-		w.logger.Info("Parsing releases", zap.String("month", monthName), zap.String("year", yearStr))
+	count, err := w.releaseService.ParseReleasesForYear(ctx, currentYear)
+	if err != nil {
+		w.logger.Error("Failed to check releases for current year", zap.String("year", currentYear), zap.Error(err))
+	} else {
+		w.logger.Info("Current year release check completed",
+			zap.String("year", currentYear),
+			zap.Int("saved_releases", count))
+	}
 
-		count, err := w.releaseService.ParseReleasesForMonth(ctx, fmt.Sprintf("%s-%s", monthName, yearStr))
-		if err != nil {
-			if strings.Contains(err.Error(), "404") || strings.Contains(err.Error(), "not found") {
-				w.logger.Warn("Monthly page not found, stopping forward scan for this cycle",
-					zap.String("month", monthName),
-					zap.String("year", yearStr))
-				break
-			}
-
-			w.logger.Error("Failed to check releases", zap.String("month", monthName), zap.Error(err))
-			continue
+	// In January, check previous year to catch late backfills
+	if now.Month() == time.January {
+		prevYear := strconv.Itoa(now.Year() - 1)
+		w.logger.Info("Checking releases for previous year backfills...", zap.String("year", prevYear))
+		prevCount, prevErr := w.releaseService.ParseReleasesForYear(ctx, prevYear)
+		if prevErr != nil {
+			w.logger.Warn("Failed to check releases for previous year", zap.String("year", prevYear), zap.Error(prevErr))
+		} else {
+			w.logger.Info("Previous year release check completed",
+				zap.String("year", prevYear),
+				zap.Int("saved_releases", prevCount))
 		}
+	}
 
-		w.logger.Info("Month check completed",
-			zap.String("month", monthName),
-			zap.String("year", yearStr),
-			zap.Int("new_releases", count))
+	// In Q4 (Oct, Nov, Dec), check next year for early comebacks
+	if now.Month() >= time.October {
+		nextYear := strconv.Itoa(now.Year() + 1)
+		w.logger.Info("Checking releases for next year...", zap.String("year", nextYear))
+		nextCount, nextErr := w.releaseService.ParseReleasesForYear(ctx, nextYear)
+		if nextErr != nil {
+			w.logger.Warn("Failed to check releases for next year", zap.String("year", nextYear), zap.Error(nextErr))
+		} else {
+			w.logger.Info("Next year release check completed",
+				zap.String("year", nextYear),
+				zap.Int("saved_releases", nextCount))
+		}
 	}
 }

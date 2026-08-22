@@ -8,8 +8,8 @@ import (
 
 // Fetcher defines the contract for retrieving and parsing music release information.
 type Fetcher interface {
-	FetchMonthlyLinks(ctx context.Context, months []string, year string) ([]string, error)
-	ParseKProfilesMonthlyPage(ctx context.Context, url, month, year string) iter.Seq2[Release, error]
+	ParseMonth(ctx context.Context, month, year string) iter.Seq2[Release, error]
+	ParseYear(ctx context.Context, year string) iter.Seq2[Release, error]
 }
 
 // Config represents scraper configuration.

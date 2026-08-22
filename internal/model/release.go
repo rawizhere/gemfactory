@@ -45,5 +45,6 @@ type ReleaseRepository interface {
 	Create(ctx context.Context, release *Release) error
 	Update(ctx context.Context, release *Release) error
 	Delete(ctx context.Context, id int) error
+	DeleteByIDs(ctx context.Context, ids []int) (int, error)
 	Upsert(ctx context.Context, release *Release) error
 }

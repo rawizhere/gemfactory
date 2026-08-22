@@ -3,7 +3,10 @@ package app
 
 import (
 	"context"
+	"strings"
+
 	"gemfactory/internal/config"
+	"gemfactory/internal/downloader"
 	"gemfactory/internal/handlers"
 	"gemfactory/internal/keyboard"
 	"gemfactory/internal/middleware"
@@ -24,9 +27,9 @@ type Router struct {
 }
 
 // NewRouter initializes a Router instance.
-func NewRouter(services *service.Services, config *config.Config, keyboard *keyboard.Manager, logger *zap.Logger, tg *telegram.Client) *Router {
+func NewRouter(services *service.Services, config *config.Config, keyboard *keyboard.Manager, logger *zap.Logger, tg *telegram.Client, downloads *downloader.Service) *Router {
 	return &Router{
-		handlers:   handlers.New(services, config, keyboard, logger, tg),
+		handlers:   handlers.New(services, config, keyboard, logger, tg, downloads),
 		middleware: middleware.New(config, logger),
 		config:     config,
 		services:   services,
@@ -50,12 +53,16 @@ func (r *Router) handleMessage(ctx context.Context, message *telego.Message) {
 	command := ""
 	for _, entity := range message.Entities {
 		if entity.Type == telego.EntityTypeBotCommand && entity.Offset == 0 {
-			command = message.Text[1:entity.Length]
+			rawCmd := message.Text[1:entity.Length]
+			command = strings.Split(rawCmd, "@")[0]
 			break
 		}
 	}
 
 	if command == "" {
+		if u := downloader.ExtractFirstURL(message.Text); u != "" {
+			r.handlers.Clip.DirectLink(ctx, message, u)
+		}
 		return
 	}
 
@@ -63,7 +70,22 @@ func (r *Router) handleMessage(ctx context.Context, message *telego.Message) {
 	case "start":
 		r.handlers.User.Start(ctx, message)
 	case "help":
-		r.handlers.User.Help(ctx, message)
+		if r.isClipHelpTopic(message) {
+			r.handlers.Clip.Help(ctx, message)
+		} else {
+			r.handlers.User.Help(ctx, message)
+		}
+	case "clip", "gif", "subs", "mp3":
+		switch command {
+		case "clip":
+			r.handlers.Clip.Clip(ctx, message)
+		case "gif":
+			r.handlers.Clip.Gif(ctx, message)
+		case "subs":
+			r.handlers.Clip.Subs(ctx, message)
+		case "mp3":
+			r.handlers.Clip.MP3(ctx, message)
+		}
 	case "month":
 		r.handlers.User.Month(ctx, message)
 	case "search":
@@ -90,6 +112,20 @@ func (r *Router) handleMessage(ctx context.Context, message *telego.Message) {
 
 func (r *Router) handleCallbackQuery(ctx context.Context, query *telego.CallbackQuery) {
 	r.handlers.HandleCallbackQuery(ctx, query)
+}
+
+// isClipHelpTopic reports whether "/help <topic>" targets a clip command.
+func (r *Router) isClipHelpTopic(message *telego.Message) bool {
+	parts := strings.Fields(message.Text)
+	if len(parts) < 2 {
+		return false
+	}
+	switch strings.TrimPrefix(parts[1], "/") {
+	case "clip", "gif", "subs", "mp3":
+		return true
+	default:
+		return false
+	}
 }
 
 // RegisterBotCommands returns the list of public bot commands for Telegram UI.

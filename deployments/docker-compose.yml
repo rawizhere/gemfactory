@@ -37,11 +37,19 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME}
 
       # Application settings
+      # Always enabled so the container healthcheck works
+      HEALTH_CHECK_ENABLED: "true"
       HEALTH_PORT: 8080
+      WEB_ENABLED: ${WEB_ENABLED:-true}
+      WEB_PORT: 9090
       LOG_LEVEL: ${LOG_LEVEL:-info}
       SCRAPER_REQUEST_DELAY: ${SCRAPER_REQUEST_DELAY:-2s}
     ports:
       - "8080:8080"
+      - "9090:9090"
+    volumes:
+      # Persist downloaded clips + cache markers across restarts
+      - app_data:/app/data
     restart: unless-stopped
     depends_on:
       postgres:
@@ -66,6 +74,7 @@ services:
 
 volumes:
   postgres_data:
+  app_data:
 
 networks:
   gemfactory:
