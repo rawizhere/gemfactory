@@ -518,6 +518,9 @@ func (s *Server) listConfig(w http.ResponseWriter, r *http.Request) {
 
 	out := []entry{}
 	for _, c := range rows {
+		if c.Key == "TRANSLATION_PROMPT" {
+			continue // configured via dedicated Subtitle Translation section
+		}
 		value := c.Value
 		if sensitive(c.Key) {
 			value = "•••"

@@ -657,10 +657,11 @@ const (
 	ProviderGroq   = "groq"
 )
 
-const DefaultTranslationPrompt = `RULES ON NAMES & PROPER NOUNS:
-1. NEVER translate proper names, stage names, idol/artist names, group names, or personal names into dictionary words/common nouns (e.g., 'Winter', 'Joy', 'Solar', 'Rain', 'Summer' must remain names and not be translated into common seasonal/weather nouns). Keep names in their original Latin form or as proper name transliterations.
-2. NEVER translate or delete speaker/singer tags or bracketed identifiers (e.g. [SUI], [WONYOUNG], [ALL], (Chorus), [수이], SUI:) — keep them verbatim at the start of each line.
-3. Preserve emotional tone, slang, honorifics (like Unnie/Oppa/Hyung if appropriate) and conversational/lyric style.`
+const DefaultTranslationPrompt = `Translate for video subtitles (music videos, variety shows, livestreams):
+1. Use natural, modern spoken language. Avoid wooden or robotic phrasing.
+2. Proper nouns, stage/idol names, and fandom terms must stay as names (e.g. Winter, Joy, Karina — do not translate as dictionary words).
+3. Keep speaker tags like [ALL], [WONYOUNG], (Chorus) untouched.
+4. For song lyrics: translate the meaning and vibe poetically, not word-by-word.`
 
 var speakerTagRe = regexp.MustCompile(`^(\[[^\]]+\]|\([^\)]+\)|[A-Za-z0-9_가-힣]+:)\s*`)
 
