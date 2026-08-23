@@ -127,3 +127,32 @@ func TestGetEncodeOptions(t *testing.T) {
 		t.Errorf("unexpected env subs options: %+v", optsSubsEnv)
 	}
 }
+
+func TestOutputPathFor(t *testing.T) {
+	svc := &Service{
+		dataDir: "/tmp/workbench",
+	}
+
+	fullJob := &Job{
+		VideoID: "abc123XYZ",
+		Request: ClipRequest{
+			URL:    "https://youtube.com/shorts/abc123XYZ",
+			Shorts: true,
+		},
+	}
+	if got := svc.outputPathFor(fullJob); got != "/tmp/workbench/abc123XYZ/abc123XYZ_full.mp4" {
+		t.Errorf("want full path, got %q", got)
+	}
+
+	clipJob := &Job{
+		VideoID: "abc123XYZ",
+		Request: ClipRequest{
+			URL:   "https://youtube.com/shorts/abc123XYZ",
+			Start: "0:10",
+			End:   "0:30",
+		},
+	}
+	if got := svc.outputPathFor(clipJob); got != "/tmp/workbench/abc123XYZ/abc123XYZ_000010-000-000030-000.mp4" {
+		t.Errorf("want clip path, got %q", got)
+	}
+}

@@ -130,7 +130,7 @@ func (s *Service) Submit(ctx context.Context, req ClipRequest) (*Job, error) {
 
 func (s *Service) SubmitWithCallbacks(ctx context.Context, req ClipRequest, cbs *ClipCallbacks) (*Job, error) {
 	videoID := ""
-	if !req.Shorts && (req.Start != "" || req.End != "") {
+	if req.Start != "" || req.End != "" {
 		startMs, err := ParseTimecode(req.Start)
 		if err != nil {
 			return nil, fmt.Errorf("invalid start: %w", err)
@@ -162,7 +162,7 @@ func (s *Service) SubmitWithCallbacks(ctx context.Context, req ClipRequest, cbs 
 
 	variant := variantSuffix(req)
 	var jobID string
-	if req.Shorts || (req.Start == "" && req.End == "") {
+	if req.Start == "" && req.End == "" {
 		jobID = videoID + "_full" + variant
 	} else {
 		jobID = fmt.Sprintf("%s_%s-%s%s", videoID, req.Start, req.End, variant)
@@ -325,7 +325,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 				return
 			}
 		}
-	} else if job.Request.Shorts || (job.Request.Start == "" && job.Request.End == "") {
+	} else if job.Request.Start == "" && job.Request.End == "" {
 		s.reportStage(job, StageDownload, "")
 		if _, err := os.Stat(clipPath); os.IsNotExist(err) {
 			if err := s.downloadFullVideo(ctx, job.Request, clipPath, cookieFile, func(p ProgressUpdate) {
@@ -384,7 +384,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 	}
 
 	var caption string
-	if job.Request.Shorts {
+	if job.Request.Shorts && job.Request.Start == "" && job.Request.End == "" {
 		caption = FormatCaption(meta)
 	}
 
@@ -405,7 +405,7 @@ func (s *Service) outputPathFor(job *Job) string {
 	if job.Request.AudioOnly {
 		ext = ".mp3"
 	}
-	if job.Request.Shorts || (job.Request.Start == "" && job.Request.End == "") {
+	if job.Request.Start == "" && job.Request.End == "" {
 		return filepath.Join(s.workbenchDir(job.VideoID), job.VideoID+"_full"+variant+ext)
 	}
 	startMs, endMs := mustParsePair(job.Request.Start, job.Request.End)

@@ -69,6 +69,19 @@ func TestParseClipArgsShorts(t *testing.T) {
 	}
 }
 
+func TestParseClipArgsShortsWithIntervals(t *testing.T) {
+	p, err := ParseClipArgs([]string{"https://www.youtube.com/shorts/abc123XYZ_-", "0:10", "0:25"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Shorts {
+		t.Error("expected Shorts to be false when intervals are provided")
+	}
+	if len(p.Intervals) != 1 || p.Intervals[0].Start != "0:10" || p.Intervals[0].End != "0:25" {
+		t.Errorf("expected 1 interval (0:10 - 0:25), got %+v", p.Intervals)
+	}
+}
+
 func TestParseClipArgsTikTok(t *testing.T) {
 	p, err := ParseClipArgs([]string{"https://www.tiktok.com/@user/video/7123456789012345678"})
 	if err != nil {

@@ -113,7 +113,7 @@ func ParseClipArgs(args []string) (*ParsedCommand, error) {
 		SubsLang:  lang,
 		HQ:        hq,
 		Meta:      meta,
-		Shorts:    shorts,
+		Shorts:    false,
 	}, nil
 }
 
