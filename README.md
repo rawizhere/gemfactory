@@ -22,7 +22,7 @@ Telegram bot for tracking music releases from kpopofficial.com and downloading m
 - `/artists` - Show active artists lists
 - `/playlist` - Playlist information
 - `/clip [url] [start] [end] [options]` - Download video clip (`-mp3`, `-q <res>`, `-sub [lang]`)
-- `/subs [url] [lang]` - Download subtitles with optional translation
+- `/subs [url] [start] [end] [lang] [hq] [nollm]` - Cut clip with burned-in subtitles; `nollm` translates via Google Translate, skipping AI providers
 
 ### Admin Commands
 - `/add_artist [name] [-f|-m]` - Add artist to list

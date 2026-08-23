@@ -18,14 +18,17 @@ RUN apk add --no-cache \
     ffmpeg \
     python3 \
     libass \
+    font-dejavu \
     nodejs \
     unzip \
     curl
 
-# Lato font for burned-in subtitles (not packaged in alpine 3.21).
+# Lato for burned subtitles; monochrome Noto Emoji (font-noto-emoji CBDT is unusable by libass).
 RUN mkdir -p /usr/share/fonts/lato \
     && curl -fsSL -o /usr/share/fonts/lato/Lato-Regular.ttf \
       https://github.com/google/fonts/raw/main/ofl/lato/Lato-Regular.ttf \
+    && curl -fsSL -o /usr/share/fonts/lato/NotoEmoji.ttf \
+      "https://github.com/google/fonts/raw/main/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf" \
     && fc-cache -f >/dev/null
 
 WORKDIR /app

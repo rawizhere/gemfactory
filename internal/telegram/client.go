@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/mymmrac/telego"
+	th "github.com/mymmrac/telego/telegohandler"
 	"github.com/mymmrac/telego/telegoapi"
 	"github.com/mymmrac/telego/telegoutil"
 	"go.uber.org/zap"
@@ -19,8 +19,9 @@ import (
 
 const maxMessageLength = 4000
 
+// Router registers update handlers on the telegohandler bot handler.
 type Router interface {
-	HandleUpdate(ctx context.Context, update telego.Update)
+	RegisterRoutes(bh *th.BotHandler)
 	RegisterBotCommands() []telego.BotCommand
 }
 
@@ -28,7 +29,6 @@ type Client struct {
 	bot    *telego.Bot
 	router Router
 	logger *zap.Logger
-	wg     sync.WaitGroup
 }
 
 func NewClient(botToken string, logger *zap.Logger) (*Client, error) {
@@ -54,8 +54,7 @@ func (c *Client) Start(ctx context.Context, router Router) error {
 
 	_ = c.bot.DeleteWebhook(ctx, &telego.DeleteWebhookParams{DropPendingUpdates: true})
 
-	commands := c.router.RegisterBotCommands()
-	if err := c.SetBotCommands(ctx, commands); err != nil {
+	if err := c.SetBotCommands(ctx, c.router.RegisterBotCommands()); err != nil {
 		c.logger.Error("Failed to set bot commands", zap.Error(err))
 	}
 
@@ -65,42 +64,14 @@ func (c *Client) Start(ctx context.Context, router Router) error {
 		return fmt.Errorf("failed to create updates channel: %w", err)
 	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			c.logger.Info("Update loop cancelled by context")
-			c.wg.Wait()
-			return ctx.Err()
-		case update, ok := <-updatesChan:
-			if !ok {
-				c.logger.Warn("Update channel closed")
-				c.wg.Wait()
-				return fmt.Errorf("update channel closed")
-			}
-
-			c.wg.Add(1)
-			go func(upd telego.Update) {
-				defer c.wg.Done()
-				updateCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-				defer cancel()
-				c.processUpdate(updateCtx, upd)
-			}(update)
-		}
+	bh, err := th.NewBotHandler(c.bot, updatesChan)
+	if err != nil {
+		return fmt.Errorf("failed to create bot handler: %w", err)
 	}
-}
+	c.router.RegisterRoutes(bh)
 
-func (c *Client) processUpdate(ctx context.Context, update telego.Update) {
-	if update.Message == nil && update.CallbackQuery == nil {
-		return
-	}
-
-	if update.Message != nil {
-		if update.Message.Document != nil || update.Message.Text == "" {
-			return
-		}
-	}
-
-	c.router.HandleUpdate(ctx, update)
+	// Blocks until the updates channel closes (ctx cancellation) or Stop is called.
+	return bh.Start()
 }
 
 func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) error {

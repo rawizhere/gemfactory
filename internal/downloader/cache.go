@@ -15,9 +15,12 @@ import (
 
 // cacheMarker marks a finished clip so repeats survive restarts.
 type cacheMarker struct {
-	Title     string    `json:"title,omitempty"`
-	Caption   string    `json:"caption,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	Title       string    `json:"title,omitempty"`
+	AltTitle    string    `json:"alt_title,omitempty"`
+	Caption     string    `json:"caption,omitempty"`
+	Tags        []string  `json:"tags,omitempty"`
+	Translation string    `json:"translation,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // markerPath is the sidecar path for a finished output file.
@@ -43,8 +46,8 @@ func readCacheHit(outputPath string) *cacheMarker {
 }
 
 // writeCacheMarker records a successfully produced clip.
-func writeCacheMarker(outputPath, title, caption string) {
-	m := cacheMarker{Title: title, Caption: caption, CreatedAt: time.Now()}
+func writeCacheMarker(outputPath string, m cacheMarker) {
+	m.CreatedAt = time.Now()
 	data, err := json.Marshal(m)
 	if err != nil {
 		return

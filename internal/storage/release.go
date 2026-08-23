@@ -87,7 +87,7 @@ func (r *ReleaseRepository) GetByArtist(ctx context.Context, artistName string) 
 	err := r.db.NewSelect().
 		Model(&releases).
 		Relation("Artist").
-		Where("LOWER(artist.name) = LOWER(?) AND release.is_active = true", artistName).
+		Where("(artist.name ILIKE ? OR release.display_artist ILIKE ?) AND release.is_active = true", "%"+artistName+"%", "%"+artistName+"%").
 		Order("date ASC").
 		Scan(ctx)
 	if err != nil {

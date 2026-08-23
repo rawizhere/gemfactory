@@ -29,16 +29,18 @@ func TestDebouncerShouldProcess(t *testing.T) {
 	}
 }
 
-func TestDebouncerCleanup(t *testing.T) {
+func TestDebouncerEntriesExpire(t *testing.T) {
 	d := NewDebouncer(10*time.Millisecond, zap.NewNop())
 	d.ShouldProcess(1, "a")
 	d.ShouldProcess(2, "b")
 
 	time.Sleep(30 * time.Millisecond)
-	d.Cleanup()
 
-	if len(d.lastProcess) != 0 {
-		t.Errorf("expected empty map after cleanup, got %d entries", len(d.lastProcess))
+	if _, ok := d.lastProcess.Get("1:a"); ok {
+		t.Errorf("expected expired entry to be gone")
+	}
+	if _, ok := d.lastProcess.Get("2:b"); ok {
+		t.Errorf("expected expired entry to be gone")
 	}
 }
 
@@ -63,15 +65,14 @@ func TestRateLimiterAllow(t *testing.T) {
 	}
 }
 
-func TestRateLimiterCleanup(t *testing.T) {
+func TestRateLimiterEntriesExpire(t *testing.T) {
 	rl := NewRateLimiter(2, 20*time.Millisecond, zap.NewNop())
 	rl.Allow(1)
 	rl.Allow(1)
 
 	time.Sleep(40 * time.Millisecond)
-	rl.Cleanup()
 
-	if len(rl.requests) != 0 {
-		t.Errorf("expected empty map after cleanup, got %d entries", len(rl.requests))
+	if _, ok := rl.requests.Get(1); ok {
+		t.Errorf("expected expired user state to be gone")
 	}
 }

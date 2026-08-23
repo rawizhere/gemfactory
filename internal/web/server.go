@@ -12,41 +12,50 @@ import (
 	"strings"
 	"time"
 
-	"github.com/uptrace/bun"
 	"go.uber.org/zap"
 
 	"gemfactory/internal/config"
 	"gemfactory/internal/downloader"
 	"gemfactory/internal/model"
 	"gemfactory/internal/service"
-	"gemfactory/internal/storage"
 )
 
 //go:embed static
 var staticFS embed.FS
 
+// Deps wires the server's collaborators; repositories are injected as interfaces.
+type Deps struct {
+	AppCfg     *config.Config
+	Artists    model.ArtistRepository
+	Releases   model.ReleaseRepository
+	Configs    model.ConfigRepository
+	Cookies    model.CookieRepository
+	Downloads  *downloader.Service
+	ReleaseSvc *service.ReleaseService
+}
+
 type Server struct {
 	server     *http.Server
 	logger     *zap.Logger
 	appCfg     *config.Config
-	artists    *storage.ArtistRepository
-	releases   *storage.ReleaseRepository
+	artists    model.ArtistRepository
+	releases   model.ReleaseRepository
 	configs    model.ConfigRepository
 	cookies    model.CookieRepository
 	downloads  *downloader.Service
 	releaseSvc *service.ReleaseService
 }
 
-func NewServer(port string, logger *zap.Logger, db *bun.DB, appCfg *config.Config, downloads *downloader.Service, releaseSvc *service.ReleaseService) *Server {
+func NewServer(port string, logger *zap.Logger, deps Deps) *Server {
 	s := &Server{
 		logger:     logger,
-		appCfg:     appCfg,
-		artists:    storage.NewArtistRepository(db, logger),
-		releases:   storage.NewReleaseRepository(db, logger),
-		configs:    storage.NewConfigRepository(db, logger),
-		cookies:    storage.NewCookieRepository(db, logger),
-		downloads:  downloads,
-		releaseSvc: releaseSvc,
+		appCfg:     deps.AppCfg,
+		artists:    deps.Artists,
+		releases:   deps.Releases,
+		configs:    deps.Configs,
+		cookies:    deps.Cookies,
+		downloads:  deps.Downloads,
+		releaseSvc: deps.ReleaseSvc,
 	}
 
 	mux := http.NewServeMux()
@@ -509,6 +518,19 @@ func (s *Server) listConfig(w http.ResponseWriter, r *http.Request) {
 		Editable    bool   `json:"editable"`
 	}
 
+	isDedicatedKey := func(key string) bool {
+		switch key {
+		case "TRANSLATION_FALLBACK_ORDER", "TRANSLATION_PROMPT",
+			"SUBS_SOURCE_PREF_RU", "GEMINI_API_KEY", "GEMINI_MODELS",
+			"GROQ_API_KEY", "GROQ_MODELS", "OPENCODE_API_KEY", "OPENCODE_MODELS",
+			"DOWNLOAD_CONCURRENCY", "CLIP_CRF", "SUBS_CRF", "CLIP_PRESET", "CLIP_AUDIO_BITRATE", "CLIP_DELETE_STATUS",
+			"NVIDIA_API_KEY", "NVIDIA_MODELS":
+			return true
+		default:
+			return false
+		}
+	}
+
 	sensitive := func(key string) bool {
 		key = strings.ToUpper(key)
 		return strings.Contains(key, "TOKEN") ||
@@ -518,8 +540,8 @@ func (s *Server) listConfig(w http.ResponseWriter, r *http.Request) {
 
 	out := []entry{}
 	for _, c := range rows {
-		if c.Key == "TRANSLATION_PROMPT" {
-			continue // configured via dedicated Subtitle Translation section
+		if isDedicatedKey(c.Key) {
+			continue // configured via dedicated Downloader or Subtitle Translation sections
 		}
 		value := c.Value
 		if sensitive(c.Key) {
@@ -536,13 +558,9 @@ func (s *Server) listConfig(w http.ResponseWriter, r *http.Request) {
 
 	if s.appCfg != nil {
 		out = append(out,
-			entry{Source: "env", Key: "ADMIN_USERNAME", Value: s.appCfg.AdminUsername},
-			entry{Source: "env", Key: "LOG_LEVEL", Value: s.appCfg.LogLevel},
-			entry{Source: "env", Key: "TIMEZONE", Value: s.appCfg.Timezone},
-			entry{Source: "env", Key: "HEALTH_PORT", Value: s.appCfg.HealthPort},
-			entry{Source: "env", Key: "WEB_PORT", Value: s.appCfg.WebPort},
-			entry{Source: "env", Key: "SCRAPER_REQUEST_DELAY", Value: s.appCfg.ScraperDelay.String()},
-			entry{Source: "env", Key: "RELEASE_CHECK_INTERVAL", Value: s.appCfg.ReleaseCheckInterval.String()},
+			entry{Source: "env", Key: "WEB_PORT", Value: s.appCfg.WebPort, Description: "Web UI HTTP server port"},
+			entry{Source: "env", Key: "HEALTH_PORT", Value: s.appCfg.HealthPort, Description: "Health check HTTP server port"},
+			entry{Source: "env", Key: "APP_DATA_DIR", Value: s.appCfg.AppDataDir, Description: "Runtime data directory path"},
 		)
 	}
 

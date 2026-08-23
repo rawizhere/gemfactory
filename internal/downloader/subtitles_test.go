@@ -203,17 +203,17 @@ func TestResolveSubtitleTrack(t *testing.T) {
 		},
 	}
 
-	koRes, err := ResolveSubtitleTrack(meta, "ko")
+	koRes, err := ResolveSubtitleTrack(meta, "ko", nil)
 	if err != nil || koRes.FinalLang != "ko" || koRes.TargetLang != "" {
 		t.Errorf("ResolveSubtitleTrack(ko) = (%+v, %v), want ko direct", koRes, err)
 	}
 
-	enUSRes, err := ResolveSubtitleTrack(meta, "en-US")
-	if err != nil || enUSRes.FinalLang != "en-US" || enUSRes.TargetLang != "" {
-		t.Errorf("ResolveSubtitleTrack(en-US) = (%+v, %v), want en-US direct", enUSRes, err)
+	enUSRes, err := ResolveSubtitleTrack(meta, "en-US", nil)
+	if err != nil || enUSRes.FinalLang != "en" || enUSRes.TargetLang != "" {
+		t.Errorf("ResolveSubtitleTrack(en-US) = (%+v, %v), want en direct", enUSRes, err)
 	}
 
-	ruRes, err := ResolveSubtitleTrack(meta, "ru")
+	ruRes, err := ResolveSubtitleTrack(meta, "ru", nil)
 	if err != nil || ruRes.FinalLang != "ru" || ruRes.TargetLang != "ru" || ruRes.SourceLang != "ko" {
 		t.Errorf("ResolveSubtitleTrack(ru) = (%+v, %v), want translated from ko to ru", ruRes, err)
 	}
@@ -221,21 +221,19 @@ func TestResolveSubtitleTrack(t *testing.T) {
 	autoFr := &SourceMeta{
 		AutomaticCaptions: map[string][]SubtitleTrack{"fr": {{Ext: "vtt", URL: "https://example.com/auto-fr"}}},
 	}
-	frRes, err := ResolveSubtitleTrack(autoFr, "fr")
-	if err != nil || frRes.FinalLang != "fr" || frRes.TargetLang != "" || frRes.TrackURL != "https://example.com/auto-fr" {
-		t.Errorf("ResolveSubtitleTrack(autoFr, fr) = (%+v, %v), want fr from auto captions", frRes, err)
+	if _, err := ResolveSubtitleTrack(autoFr, "fr", nil); err == nil {
+		t.Error("expected error when only auto captions exist")
 	}
 
 	autoOnly := &SourceMeta{
 		AutomaticCaptions: map[string][]SubtitleTrack{"ko": {{Ext: "vtt", URL: "https://example.com/auto-ko"}}},
 	}
-	enAutoRes, err := ResolveSubtitleTrack(autoOnly, "en")
-	if err != nil || enAutoRes.FinalLang != "en" || enAutoRes.TargetLang != "en" || enAutoRes.SourceLang != "ko" {
-		t.Errorf("ResolveSubtitleTrack(autoOnly, en) = (%+v, %v), want translated from auto-ko to en", enAutoRes, err)
+	if _, err := ResolveSubtitleTrack(autoOnly, "en", nil); err == nil {
+		t.Error("expected error when only auto captions exist")
 	}
 
 	emptyMeta := &SourceMeta{}
-	if _, err := ResolveSubtitleTrack(emptyMeta, "en"); err == nil {
+	if _, err := ResolveSubtitleTrack(emptyMeta, "en", nil); err == nil {
 		t.Error("expected error when no subtitles exist")
 	}
 }
@@ -273,22 +271,46 @@ func TestFormatCaption(t *testing.T) {
 	}
 }
 
+func TestDisplayTitle(t *testing.T) {
+	metaWithAlt := &SourceMeta{
+		Title:    "아이돌이 결정사를 간다면",
+		AltTitle: "If an Idol Goes to a Matchmaking Agency",
+	}
+	if got := DisplayTitle(metaWithAlt); got != "If an Idol Goes to a Matchmaking Agency" {
+		t.Errorf("expected alt title when present, got: %s", got)
+	}
+
+	metaSame := &SourceMeta{
+		Title:    "Hello World",
+		AltTitle: "hello world",
+	}
+	if got := DisplayTitle(metaSame); got != "hello world" {
+		t.Errorf("expected alt title, got: %s", got)
+	}
+
+	metaNoAlt := &SourceMeta{
+		Title: "Hello World",
+	}
+	if got := DisplayTitle(metaNoAlt); got != "Hello World" {
+		t.Errorf("expected original title when no alt, got: %s", got)
+	}
+}
+
 func TestBuildFallbackChain(t *testing.T) {
 	tests := []struct {
 		cfg  TranslationConfig
 		want []string
 	}{
-		{TranslationConfig{PrimaryProvider: ProviderGoogle}, []string{ProviderGoogle, ProviderGemini, ProviderGroq}},
-		{TranslationConfig{PrimaryProvider: ProviderGemini}, []string{ProviderGemini, ProviderGroq, ProviderGoogle}},
-		{TranslationConfig{PrimaryProvider: ProviderGroq}, []string{ProviderGroq, ProviderGemini, ProviderGoogle}},
-		{TranslationConfig{PrimaryProvider: "unknown"}, []string{ProviderGoogle, ProviderGemini, ProviderGroq}},
+		{TranslationConfig{}, []string{ProviderGemini, ProviderNvidia, ProviderGroq, ProviderOpencode}},
+		{TranslationConfig{FallbackOrder: []string{"nvidia", "gemini", "groq", "opencode"}}, []string{"nvidia", "gemini", "groq", "opencode"}},
 		{TranslationConfig{FallbackOrder: []string{"groq", "gemini"}}, []string{"groq", "gemini"}},
+		{TranslationConfig{GoogleOnly: true}, []string{ProviderGoogle}},
 	}
 
 	for _, tt := range tests {
-		got := buildFallbackChain(tt.cfg)
+		got := BuildFallbackChain(tt.cfg)
 		if !reflect.DeepEqual(got, tt.want) {
-			t.Errorf("buildFallbackChain(%+v) = %v, want %v", tt.cfg, got, tt.want)
+			t.Errorf("BuildFallbackChain(%+v) = %v, want %v", tt.cfg, got, tt.want)
 		}
 	}
 }
@@ -380,5 +402,78 @@ func TestPreserveSpeakerTags(t *testing.T) {
 	gotSingle := preserveSpeakerTags(origSingle, alreadyPreserved)
 	if gotSingle[0] != "[SUI] Pop off, pop off" {
 		t.Errorf("expected no duplicate [SUI], got: %q", gotSingle[0])
+	}
+}
+
+func TestSanitizeSubtitleTypography(t *testing.T) {
+	in := "Кэнди\u2011пинк магический флип\u2011фон \u00A0 \u200B тест\u2013слово ‘кавычки’ “двойные”"
+	want := "Кэнди-пинк магический флип-фон    тест-слово 'кавычки' \"двойные\""
+	got := sanitizeSubtitleTypography(in)
+	if got != want {
+		t.Errorf("sanitizeSubtitleTypography(%q) = %q, want %q", in, got, want)
+	}
+}
+
+func TestMaxOutputTokens(t *testing.T) {
+	if got := maxOutputTokens(10, "gemini-flash"); got != 1024 {
+		t.Errorf("small batch floor = %d, want 1024", got)
+	}
+	if got := maxOutputTokens(400, "gemini-flash"); got != 400*60+256 {
+		t.Errorf("scaled budget = %d, want %d", got, 400*60+256)
+	}
+	if got := maxOutputTokens(10, "openai/gpt-oss-120b"); got != 10*60+256+2048 {
+		t.Errorf("reasoning budget = %d, want %d", got, 10*60+256+2048)
+	}
+}
+
+func TestIsReasoningModel(t *testing.T) {
+	for _, m := range []string{"openai/gpt-oss-120b", "big-pickle", "minimaxai/minimax-m3"} {
+		if !isReasoningModel(m) {
+			t.Errorf("isReasoningModel(%q) = false, want true", m)
+		}
+	}
+	if isReasoningModel("gemini-3.7-flash") {
+		t.Error("gemini must not be treated as a reasoning model")
+	}
+}
+
+func TestStripMarkdownBold(t *testing.T) {
+	if got := stripMarkdownBold("**Да.** - Ой!"); got != "Да. - Ой!" {
+		t.Errorf("stripMarkdownBold = %q", got)
+	}
+	if got := stripMarkdownBold("a * b ** c"); got != "a * b ** c" {
+		t.Errorf("lone asterisks must survive, got %q", got)
+	}
+}
+
+func TestBuildSystemInstruction(t *testing.T) {
+	base := "rules"
+	if got := BuildSystemInstruction(base, "en"); got != base {
+		t.Errorf("en instruction = %q, want base without addendum", got)
+	}
+	if got := BuildSystemInstruction(base, "ru"); !strings.Contains(got, ruAddendum) || !strings.Contains(got, base) {
+		t.Errorf("ru instruction must combine prompt and addendum, got %q", got)
+	}
+}
+
+func TestSanitizeKeepsEmojiSequences(t *testing.T) {
+	in := "😂 👨‍👩‍👧 ✈️ ♪"
+	if got := sanitizeSubtitleTypography(in); got != in {
+		t.Errorf("sanitizeSubtitleTypography(%q) = %q, want unchanged", in, got)
+	}
+}
+
+func TestSplitDialogueLines(t *testing.T) {
+	cases := map[string]string{
+		"- Да. - Ой, ты меня испугал!": "- Да.\n- Ой, ты меня испугал!",
+		"Обычная строка без диалога":   "Обычная строка без диалога",
+		"I - I don't know":    "I - I don't know",
+		"- А. - Б. - В.":      "- А.\n- Б.\n- В.",
+		"Первая\n- Да. - Ой!": "Первая\n- Да.\n- Ой!",
+	}
+	for in, want := range cases {
+		if got := splitDialogueLines(in); got != want {
+			t.Errorf("splitDialogueLines(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

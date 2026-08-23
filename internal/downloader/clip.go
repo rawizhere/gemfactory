@@ -84,6 +84,8 @@ func (s *Service) baseYTDLPArgs(cookieFile string) []string {
 		"--js-runtimes", "node",
 		"--remote-components", "ejs:github",
 		"-N", "4",
+		"--add-header", "Accept-Language:en-US,en;q=0.9",
+		"--extractor-args", "youtube:lang=en",
 		"--progress-template", "download:[download] %(progress._percent_str)s of %(progress._total_bytes_estimate_str|progress._total_bytes_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s",
 	}
 	args = append(args, s.authArgs(cookieFile)...)
@@ -281,6 +283,9 @@ func variantSuffix(req ClipRequest) string {
 	}
 	if req.SubsLang != "" {
 		parts = append(parts, sanitizeName(req.SubsLang))
+	}
+	if req.SubsNoLLM {
+		parts = append(parts, "gt")
 	}
 	if len(parts) == 0 {
 		return ""

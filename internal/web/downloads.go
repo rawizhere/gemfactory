@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/dustin/go-humanize"
+
 	"gemfactory/internal/downloader"
 )
 
@@ -112,15 +114,10 @@ func (s *Server) cleanStorage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// formatBytes renders byte counts in binary (1024-based) units.
 func formatBytes(b int64) string {
-	const unit = 1024
-	if b < unit {
+	if b < 1024 {
 		return fmt.Sprintf("%d B", b)
 	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+	return humanize.IBytes(uint64(b))
 }

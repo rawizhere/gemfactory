@@ -4,7 +4,7 @@ import (
 	"gemfactory/internal/config"
 	"time"
 
-	"github.com/mymmrac/telego"
+	th "github.com/mymmrac/telego/telegohandler"
 	"go.uber.org/zap"
 )
 
@@ -24,32 +24,15 @@ func New(config *config.Config, logger *zap.Logger) *Middleware {
 	}
 }
 
-func (m *Middleware) Process(update telego.Update) bool {
-	if update.Message != nil && update.Message.From != nil {
-		userID := update.Message.From.ID
-		if !m.rateLimiter.Allow(userID) {
-			m.logger.Warn("Rate limit exceeded", zap.Int64("user_id", userID))
-			return false
-		}
+// Handlers returns the telegohandler middleware chain.
+// Entries are applied in order: panic recovery, logging, debouncing, rate limiting.
+// Expired state is evicted automatically by the underlying expirable caches.
+func (m *Middleware) Handlers() []th.Handler {
+	return []th.Handler{
+		th.PanicRecovery(),
+		th.Timeout(60 * time.Second),
+		Logging(m.logger),
+		Debounce(m.debouncer, m.logger),
+		RateLimit(m.rateLimiter),
 	}
-	return true
-}
-
-func (m *Middleware) ProcessWithMiddleware(update telego.Update, handler func(telego.Update)) {
-	Recovery(m.logger)(update, func(update telego.Update) {
-		Logging(m.logger)(update, func(update telego.Update) {
-			Debounce(m.debouncer, m.logger)(update, func(update telego.Update) {
-				DebounceCallback(m.debouncer, m.logger)(update, func(update telego.Update) {
-					if m.Process(update) {
-						handler(update)
-					}
-				})
-			})
-		})
-	})
-}
-
-func (m *Middleware) Cleanup() {
-	m.rateLimiter.Cleanup()
-	m.debouncer.Cleanup()
 }

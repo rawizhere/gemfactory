@@ -7,16 +7,22 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"golang.org/x/text/language"
 )
 
 // timecodePattern matches "SS(.ms)", "MM:SS(.ms)" and "HH:MM:SS(.ms)" tokens.
 var timecodePattern = regexp.MustCompile(`\b(?:\d{1,2}:)?(?:\d{1,2}:)?\d+(?:\.\d+)?\b`)
 
 // langPattern matches BCP-47-ish language tags like en, ru, en-US, ko.
-var langPattern = regexp.MustCompile(`^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$`)
+// IsValidLangTag reports whether s is a well-formed BCP-47 language tag.
+func IsValidLangTag(s string) bool {
+	tag, err := language.Parse(s)
+	return err == nil && !tag.IsRoot()
+}
 
 // commandFlags are stripped from arguments before interval extraction.
-var commandFlags = map[string]bool{"hq": true, "meta": true}
+var commandFlags = map[string]bool{"hq": true, "meta": true, "nollm": true}
 
 // TimeInterval is a raw start/end timecode pair as provided by the user.
 type TimeInterval struct {
@@ -31,6 +37,7 @@ type ParsedCommand struct {
 	SubsLang  string // empty when not requested
 	HQ        bool
 	Meta      bool
+	NoLLM     bool // translate subs via Google Translate only
 	GIF       bool
 	Shorts    bool
 	AudioOnly bool
@@ -39,10 +46,10 @@ type ParsedCommand struct {
 // ParseClipArgs parses telegram command arguments: URL, flags, optional language tag and timecode pairs.
 func ParseClipArgs(args []string) (*ParsedCommand, error) {
 	var (
-		url      string
-		lang     string
-		hq, meta bool
-		rest     []string
+		url             string
+		lang            string
+		hq, meta, noLLM bool
+		rest            []string
 	)
 
 	for _, arg := range args {
@@ -53,12 +60,15 @@ func ParseClipArgs(args []string) (*ParsedCommand, error) {
 			}
 			// Extra URL-like tokens (e.g. Telegram link previews) are ignored.
 		case commandFlags[arg]:
-			if arg == "hq" {
+			switch arg {
+			case "hq":
 				hq = true
-			} else {
+			case "meta":
 				meta = true
+			case "nollm":
+				noLLM = true
 			}
-		case lang == "" && langPattern.MatchString(arg):
+		case lang == "" && IsValidLangTag(arg):
 			lang = arg
 		default:
 			rest = append(rest, arg)
@@ -68,7 +78,7 @@ func ParseClipArgs(args []string) (*ParsedCommand, error) {
 	if url == "" {
 		return nil, fmt.Errorf("no video URL found")
 	}
-	if lang != "" && !langPattern.MatchString(lang) {
+	if lang != "" && !IsValidLangTag(lang) {
 		return nil, fmt.Errorf("invalid subtitle language %q", lang)
 	}
 
@@ -83,6 +93,7 @@ func ParseClipArgs(args []string) (*ParsedCommand, error) {
 			SubsLang:  lang,
 			HQ:        hq,
 			Meta:      meta,
+			NoLLM:     noLLM,
 			Shorts:    true,
 		}, nil
 	}
@@ -113,6 +124,7 @@ func ParseClipArgs(args []string) (*ParsedCommand, error) {
 		SubsLang:  lang,
 		HQ:        hq,
 		Meta:      meta,
+		NoLLM:     noLLM,
 		Shorts:    false,
 	}, nil
 }

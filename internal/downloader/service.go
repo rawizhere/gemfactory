@@ -9,10 +9,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"go.uber.org/zap"
 
 	"gemfactory/internal/model"
+	"gemfactory/internal/settings"
 )
 
 // ClipRequest describes a single clip job.
@@ -20,12 +22,13 @@ type ClipRequest struct {
 	URL       string `json:"url"`
 	Start     string `json:"start,omitempty"`
 	End       string `json:"end,omitempty"`
-	SubsLang  string `json:"subs_lang,omitempty"`  // empty = no subs
-	Quality   int    `json:"quality,omitempty"`    // max height, default 1080
-	HQ        bool   `json:"hq,omitempty"`         // up to 2K
-	GIF       bool   `json:"gif,omitempty"`        // drop audio track
-	Shorts    bool   `json:"shorts,omitempty"`     // download whole short, best quality
-	AudioOnly bool   `json:"audio_only,omitempty"` // extract mp3
+	SubsLang  string `json:"subs_lang,omitempty"`   // empty = no subs
+	SubsNoLLM bool   `json:"subs_no_llm,omitempty"` // translate via Google Translate only
+	Quality   int    `json:"quality,omitempty"`     // max height, default 1080
+	HQ        bool   `json:"hq,omitempty"`          // up to 2K
+	GIF       bool   `json:"gif,omitempty"`         // drop audio track
+	Shorts    bool   `json:"shorts,omitempty"`      // download whole short, best quality
+	AudioOnly bool   `json:"audio_only,omitempty"`  // extract mp3
 }
 
 // JobStatus is the lifecycle state of a download job.
@@ -41,13 +44,14 @@ const (
 
 // Job tracks progress of one clip request.
 type Job struct {
-	ID        string      `json:"id"`
-	VideoID   string      `json:"video_id"`
-	Request   ClipRequest `json:"request"`
-	Status    JobStatus   `json:"status"`
-	Error     string      `json:"error,omitempty"`
-	OutputDir string      `json:"output_dir,omitempty"`
-	Caption   string      `json:"caption,omitempty"`
+	ID          string      `json:"id"`
+	VideoID     string      `json:"video_id"`
+	Request     ClipRequest `json:"request"`
+	Status      JobStatus   `json:"status"`
+	Error       string      `json:"error,omitempty"`
+	OutputDir   string      `json:"output_dir,omitempty"`
+	Caption     string      `json:"caption,omitempty"`
+	Translation string      `json:"translation,omitempty"`
 
 	callbacks *ClipCallbacks `json:"-"`
 
@@ -182,15 +186,21 @@ func (s *Service) SubmitWithCallbacks(ctx context.Context, req ClipRequest, cbs 
 			// Failed run: drop it so this submit starts a fresh attempt.
 			delete(s.jobs, job.ID)
 		case StatusDone:
-			// Already produced: serve instantly through the new callbacks.
-			existing.callbacks = cbs
-			output := existing.OutputDir
-			caption := existing.Caption
-			s.mu.Unlock()
-			if cbs != nil && cbs.OnDone != nil {
-				go cbs.OnDone(output, caption)
+			if existing.OutputDir != "" {
+				if _, err := os.Stat(existing.OutputDir); err == nil {
+					// Already produced & file exists on disk: serve instantly through callbacks.
+					existing.callbacks = cbs
+					output := existing.OutputDir
+					caption := existing.Caption
+					s.mu.Unlock()
+					if cbs != nil && cbs.OnDone != nil {
+						go cbs.OnDone(output, caption)
+					}
+					return existing, nil
+				}
 			}
-			return existing, nil
+			// File was deleted from disk or OutputDir is empty: drop stale job so fresh attempt starts.
+			delete(s.jobs, job.ID)
 		default:
 			// Still running: re-point callbacks so the new status message keeps receiving stage/progress updates.
 			existing.callbacks = cbs
@@ -243,16 +253,19 @@ type ProgressUpdate struct {
 
 // ClipCallbacks receives progress events for one job. All fields optional.
 type ClipCallbacks struct {
-	OnStage    func(stage, detail string)
-	OnProgress func(p ProgressUpdate) // throttled
-	OnDone     func(path, caption string)
-	OnError    func(message string) // user-facing text
+	OnStage       func(stage, detail string)
+	OnHashtags    func(tags []string)
+	OnTranslation func(providerModel string)
+	OnProgress    func(p ProgressUpdate) // throttled
+	OnDone        func(path, caption string)
+	OnError       func(message string) // user-facing text
 }
 
 // Stage names reported via ClipCallbacks.OnStage.
 const (
 	StageMetadata  = "metadata"
 	StageSubtitles = "subtitles"
+	StageTranslate = "translate"
 	StageDownload  = "download"
 	StageReencode  = "reencode"
 	StageUpload    = "upload"
@@ -285,7 +298,18 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		s.fail(job, "metadata extraction failed: "+err.Error())
 		return
 	}
-	s.reportStage(job, StageMetadata, meta.Title)
+	if meta.AltTitle == "" && hasNonLatin(meta.Title) {
+		if trs, _, trErr := s.TranslateTextsWithFallback(ctx, []string{meta.Title}, "en"); trErr == nil && len(trs) > 0 {
+			enTitle := strings.TrimSpace(trs[0])
+			if enTitle != "" && !strings.EqualFold(enTitle, meta.Title) {
+				meta.AltTitle = enTitle
+			}
+		}
+	}
+	s.reportStage(job, StageMetadata, DisplayTitle(meta))
+	if cbs := job.callbacks; cbs != nil && cbs.OnHashtags != nil {
+		cbs.OnHashtags(AllHashtags(meta))
+	}
 
 	if job.Request.AudioOnly {
 		s.reportStage(job, StageDownload, "")
@@ -388,7 +412,14 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		caption = FormatCaption(meta)
 	}
 
-	writeCacheMarker(clipPath, meta.Title, caption)
+	baseTitle, altTitle := displayTitleParts(meta)
+	writeCacheMarker(clipPath, cacheMarker{
+		Title:       baseTitle,
+		AltTitle:    altTitle,
+		Caption:     caption,
+		Tags:        AllHashtags(meta),
+		Translation: job.Translation,
+	})
 	s.mu.Lock()
 	job.Status = StatusDone
 	job.OutputDir = clipPath
@@ -415,7 +446,20 @@ func (s *Service) outputPathFor(job *Job) string {
 
 func (s *Service) serveFromCache(job *Job, clipPath string, marker *cacheMarker) {
 	s.logger.Info("cache hit", zap.String("job", job.ID), zap.String("output", clipPath))
-	s.reportStage(job, StageMetadata, marker.Title)
+	title := marker.Title
+	if marker.AltTitle != "" {
+		title = marker.AltTitle
+	}
+	s.reportStage(job, StageMetadata, title)
+	if cbs := job.callbacks; cbs != nil {
+		if cbs.OnHashtags != nil && len(marker.Tags) > 0 {
+			cbs.OnHashtags(marker.Tags)
+		}
+		if cbs.OnTranslation != nil && marker.Translation != "" {
+			job.Translation = marker.Translation
+			cbs.OnTranslation(marker.Translation)
+		}
+	}
 	s.reportStage(job, StageUpload, "")
 
 	s.mu.Lock()
@@ -625,9 +669,9 @@ func (s *Service) CleanStorage() (freedBytes int64, removedFiles int, err error)
 	}
 
 	s.mu.Lock()
-	for _, j := range s.jobs {
+	for id, j := range s.jobs {
 		if (j.Status == StatusDone || j.Status == StatusError) && !protectedVideoIDs[j.VideoID] {
-			j.OutputDir = ""
+			delete(s.jobs, id)
 		}
 	}
 	s.mu.Unlock()
@@ -664,15 +708,7 @@ func (s *Service) GetEncodeOptions(ctx context.Context, hasSubs bool) EncodeOpti
 }
 
 func (s *Service) getConfigValue(ctx context.Context, key, defaultVal string) string {
-	if s.configs != nil {
-		if c, err := s.configs.Get(ctx, key); err == nil && c != nil && strings.TrimSpace(c.Value) != "" {
-			return strings.TrimSpace(c.Value)
-		}
-	}
-	if env := os.Getenv(key); env != "" {
-		return strings.TrimSpace(env)
-	}
-	return defaultVal
+	return settings.New(s.configs).Value(ctx, key, defaultVal)
 }
 
 // maxSegmentDuration returns the max clip length in ms: 30s for HQ, 300s otherwise.
@@ -781,4 +817,13 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "...(truncated)"
+}
+
+func hasNonLatin(s string) bool {
+	for _, r := range s {
+		if r > 0x024F && !unicode.IsPunct(r) && !unicode.IsSymbol(r) && !unicode.IsSpace(r) && !unicode.IsDigit(r) {
+			return true
+		}
+	}
+	return false
 }

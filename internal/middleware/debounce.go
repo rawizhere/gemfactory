@@ -2,104 +2,65 @@ package middleware
 
 import (
 	"fmt"
-	"gemfactory/internal/telegram"
-	"sync"
 	"time"
 
+	"gemfactory/internal/telegram"
+
 	"github.com/mymmrac/telego"
+	th "github.com/mymmrac/telego/telegohandler"
+	lru "github.com/hashicorp/golang-lru/v2/expirable"
 	"go.uber.org/zap"
 )
 
 type Debouncer struct {
-	lastProcess map[string]time.Time
-	mu          sync.RWMutex
+	lastProcess *lru.LRU[string, time.Time]
 	interval    time.Duration
 	logger      *zap.Logger
 }
 
 func NewDebouncer(interval time.Duration, logger *zap.Logger) *Debouncer {
 	return &Debouncer{
-		lastProcess: make(map[string]time.Time),
+		lastProcess: lru.NewLRU[string, time.Time](maxTrackedUsers, nil, interval*2),
 		interval:    interval,
 		logger:      logger,
 	}
 }
 
 func (d *Debouncer) ShouldProcess(userID int64, action string) bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	key := fmt.Sprintf("%d:%s", userID, action)
-	last, exists := d.lastProcess[key]
 
-	if exists && time.Since(last) < d.interval {
+	if last, exists := d.lastProcess.Get(key); exists && time.Since(last) < d.interval {
 		return false
 	}
 
-	d.lastProcess[key] = time.Now()
+	d.lastProcess.Add(key, time.Now())
 	return true
 }
 
-func (d *Debouncer) Cleanup() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	now := time.Now()
-	for key, last := range d.lastProcess {
-		if now.Sub(last) > d.interval*2 {
-			delete(d.lastProcess, key)
-		}
-	}
-}
-
-func Debounce(debouncer *Debouncer, logger *zap.Logger) func(update telego.Update, next func(telego.Update)) {
-	return func(update telego.Update, next func(telego.Update)) {
-		if update.Message == nil {
-			next(update)
-			return
-		}
-
-		userID := update.Message.From.ID
-		command := ""
-		for _, entity := range update.Message.Entities {
-			if entity.Type == telego.EntityTypeBotCommand && entity.Offset == 0 {
-				command = update.Message.Text[1:entity.Length]
-				break
+// Debounce drops duplicate commands and repeated callback queries within the debounce interval.
+func Debounce(debouncer *Debouncer, logger *zap.Logger) th.Handler {
+	return func(ctx *th.Context, update telego.Update) error {
+		switch {
+		case update.Message != nil:
+			userID := update.Message.From.ID
+			command := telegram.MessageCommand(update.Message)
+			if command != "" && !debouncer.ShouldProcess(userID, "msg:"+command) {
+				logDebounced(logger, userID, "msg:"+command, command)
+				return nil
+			}
+		case update.CallbackQuery != nil:
+			if !debouncer.ShouldProcess(update.CallbackQuery.From.ID, "cb:"+update.CallbackQuery.Data) {
+				logDebounced(logger, update.CallbackQuery.From.ID, "cb:"+update.CallbackQuery.Data, update.CallbackQuery.Data)
+				return nil
 			}
 		}
-
-		if command != "" && !debouncer.ShouldProcess(userID, "msg:"+command) {
-			user := telegram.GetUserIdentifier(update.Message.From)
-			logger.Debug("Message debounced",
-				zap.Int64("user_id", userID),
-				zap.String("user", user),
-				zap.String("command", command))
-			return
-		}
-
-		next(update)
+		return ctx.Next(update)
 	}
 }
 
-func DebounceCallback(debouncer *Debouncer, logger *zap.Logger) func(update telego.Update, next func(telego.Update)) {
-	return func(update telego.Update, next func(telego.Update)) {
-		if update.CallbackQuery == nil {
-			next(update)
-			return
-		}
-
-		userID := update.CallbackQuery.From.ID
-		data := update.CallbackQuery.Data
-
-		if !debouncer.ShouldProcess(userID, "cb:"+data) {
-			user := telegram.GetUserIdentifier(&update.CallbackQuery.From)
-			logger.Debug("Callback debounced",
-				zap.Int64("user_id", userID),
-				zap.String("user", user),
-				zap.String("data", data))
-			return
-		}
-
-		next(update)
-	}
+func logDebounced(logger *zap.Logger, userID int64, key, action string) {
+	logger.Debug("Update debounced",
+		zap.Int64("user_id", userID),
+		zap.String("key", key),
+		zap.String("action", action))
 }

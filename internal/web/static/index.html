@@ -199,92 +199,195 @@
 
   <!-- SETTINGS TAB -->
   <section id="tab-settings" role="tabpanel">
-    <h2>Downloader & Storage</h2>
-    <div class="storage-card" style="flex-direction:column; align-items:stretch; gap:1rem;">
-      <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:1rem;">
-        <div class="storage-info">
-          <span class="storage-label">Downloads Folder:</span>
-          <strong id="storage-size">0 B</strong>
-          <span id="storage-files" class="hint" style="margin:0">(0 files)</span>
+    <div class="settings-section">
+      <h2>Downloader & Storage</h2>
+      <div class="settings-card">
+        <div class="settings-row">
+          <div class="storage-info">
+            <span class="storage-label">Downloads Folder:</span>
+            <strong id="storage-size">0 B</strong>
+            <span id="storage-files" class="hint" style="margin:0">(0 files)</span>
+          </div>
+          <button class="btn btn-danger btn-sm" type="button" id="clean-storage-btn">Clean Downloads</button>
         </div>
-        <button class="btn btn-danger btn-sm" type="button" id="clean-storage-btn">Clean Downloads</button>
-      </div>
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; border-top:1px solid var(--border-color, #333); padding-top:0.75rem; flex-wrap:wrap;">
-        <div>
-          <label style="font-weight:600; display:block; font-size:0.9rem;">Max Concurrent Downloads:</label>
-          <span class="hint" style="margin:0; font-size:0.75rem;">Number of parallel video download &amp; re-encode jobs (1–20)</span>
+
+        <hr class="settings-divider">
+
+        <div class="settings-grid">
+          <div class="settings-field">
+            <label for="downloader-concurrency-input">Max Concurrent Downloads</label>
+            <span class="hint">Parallel download & re-encode jobs (1–20)</span>
+            <input type="number" id="downloader-concurrency-input" min="1" max="20" value="4">
+          </div>
+          <div class="settings-field">
+            <label for="clip-crf-input">Clip Video Quality (CRF)</label>
+            <span class="hint">H.264 CRF: lower = better quality (18–28)</span>
+            <input type="number" id="clip-crf-input" min="15" max="35" value="20">
+          </div>
+          <div class="settings-field">
+            <label for="subs-crf-input">Subtitled Video Quality (CRF)</label>
+            <span class="hint">H.264 CRF for hardsubbed video (18–28)</span>
+            <input type="number" id="subs-crf-input" min="15" max="35" value="20">
+          </div>
+          <div class="settings-field">
+            <label for="clip-preset-select">x264 Encoding Preset</label>
+            <span class="hint">CPU speed vs file compression</span>
+            <select id="clip-preset-select">
+              <option value="ultrafast">ultrafast</option>
+              <option value="superfast">superfast</option>
+              <option value="veryfast">veryfast</option>
+              <option value="faster">faster</option>
+              <option value="fast">fast (recommended)</option>
+              <option value="medium">medium</option>
+              <option value="slow">slow</option>
+            </select>
+          </div>
+          <div class="settings-field">
+            <label for="clip-audio-bitrate-select">Audio Bitrate</label>
+            <span class="hint">AAC audio encoding bitrate</span>
+            <select id="clip-audio-bitrate-select">
+              <option value="128k">128k</option>
+              <option value="192k">192k (default)</option>
+              <option value="256k">256k</option>
+              <option value="320k">320k (high)</option>
+            </select>
+          </div>
+          <div class="settings-field">
+            <label for="clip-delete-status-select">Status Message (/clip & /subs)</label>
+            <span class="hint">Action on completion</span>
+            <select id="clip-delete-status-select">
+              <option value="false">Keep status message (default)</option>
+              <option value="true">Delete status message</option>
+            </select>
+          </div>
         </div>
-        <div style="display:flex; align-items:center; gap:0.5rem;">
-          <input type="number" id="downloader-concurrency-input" min="1" max="20" value="4" style="width:70px; text-align:center;">
-          <button class="btn btn-primary btn-sm" type="button" id="save-concurrency-btn">Save</button>
+
+        <div style="display:flex; justify-content:flex-end;">
+          <button class="btn btn-primary btn-sm" type="button" id="save-downloader-btn">Save Downloader Settings</button>
         </div>
       </div>
     </div>
 
-    <h2>Subtitle Translation (AI & Machine)</h2>
-    <div class="storage-card" style="flex-direction:column; align-items:stretch; gap:1rem;">
-      <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:0.75rem;">
-        <label style="font-weight:600; min-width:140px;">Primary Provider:</label>
-        <select id="translation-provider-select" style="min-width:220px;">
-          <option value="google">Google Translate (Free Web)</option>
-          <option value="gemini">Google Gemini (AI Studio)</option>
-          <option value="groq">Groq (LPU AI)</option>
-        </select>
-        <span id="fallback-chain-badge" class="badge" style="background:var(--card-bg, #2a2a2a); border:1px solid var(--border-color, #444); padding:0.25rem 0.5rem; border-radius:4px; font-size:0.8rem;">
-          Chain: Google Translate
-        </span>
-      </div>
-
-      <div id="gemini-key-row" style="display:flex; flex-wrap:wrap; align-items:center; gap:0.75rem;">
-        <label style="min-width:140px; font-size:0.85rem;">Gemini API Key:</label>
-        <input type="password" id="gemini-api-key" placeholder="AQ.Ab8... or AIza..." style="flex:1; min-width:200px;">
-        <button type="button" class="btn btn-ghost btn-sm" id="gemini-key-toggle">Show</button>
-      </div>
-
-      <div id="gemini-models-row" style="display:flex; flex-direction:column; gap:0.35rem;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <label style="font-size:0.85rem; font-weight:600;">Gemini Models Fallback Chain:</label>
-          <button type="button" class="btn btn-ghost btn-sm" id="gemini-models-reset" style="font-size:0.75rem;">Reset Default</button>
+    <div class="settings-section">
+      <h2>Subtitle Translation (AI & Machine)</h2>
+      <div class="settings-card">
+        <div class="settings-row">
+          <span id="fallback-chain-badge" class="badge" style="background:var(--surface-hover); border:1px solid var(--line); padding:0.3rem 0.6rem; border-radius:4px; font-size:0.8rem;">
+            Chain:
+          </span>
         </div>
-        <input type="text" id="gemini-models-input" placeholder="gemini-3.7-flash, gemini-3.5-flash-lite, gemini-3.1-flash-lite, gemini-2.5-flash-lite, gemini-2.5-flash, gemini-flash-latest" style="width:100%; font-family:monospace; font-size:0.8rem;">
-      </div>
 
-      <div id="groq-key-row" style="display:flex; flex-wrap:wrap; align-items:center; gap:0.75rem; border-top:1px solid var(--border-color, #333); padding-top:0.75rem;">
-        <label style="min-width:140px; font-size:0.85rem;">Groq API Key:</label>
-        <input type="password" id="groq-api-key" placeholder="gsk_..." style="flex:1; min-width:200px;">
-        <button type="button" class="btn btn-ghost btn-sm" id="groq-key-toggle">Show</button>
-      </div>
-
-      <div id="groq-models-row" style="display:flex; flex-direction:column; gap:0.35rem;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <label style="font-size:0.85rem; font-weight:600;">Groq Models Fallback Chain:</label>
-          <button type="button" class="btn btn-ghost btn-sm" id="groq-models-reset" style="font-size:0.75rem;">Reset Default</button>
+        <div class="settings-grid">
+          <div class="settings-field">
+            <label for="fallback-order-input">Provider Fallback Chain</label>
+            <span class="hint">Order of fallback providers if primary fails</span>
+            <input type="text" id="fallback-order-input" placeholder="gemini, nvidia, groq, opencode" style="font-family:monospace; font-size:0.8rem;">
+          </div>
+          <div class="settings-field">
+            <label for="source-pref-ru-input">RU Source Subtitle Priority</label>
+            <span class="hint">Preferred source languages for RU translation (e.g. en,ko)</span>
+            <input type="text" id="source-pref-ru-input" placeholder="en,ko" style="font-family:monospace; font-size:0.8rem;">
+          </div>
         </div>
-        <input type="text" id="groq-models-input" placeholder="openai/gpt-oss-120b, qwen/qwen3.6-27b, groq/compound, openai/gpt-oss-20b" style="width:100%; font-family:monospace; font-size:0.8rem;">
-      </div>
 
-      <div style="display:flex; flex-direction:column; gap:0.5rem; border-top:1px solid var(--border-color, #333); padding-top:0.75rem;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <label style="font-size:0.85rem; font-weight:600;">AI Translation Prompt (Custom Rules):</label>
-          <button type="button" class="btn btn-ghost btn-sm" id="translation-prompt-reset" style="font-size:0.75rem;">Reset to Default</button>
-        </div>
-        <textarea id="translation-prompt" rows="5" placeholder="Custom rules for AI translation..." style="width:100%; font-family:monospace; font-size:0.8rem; line-height:1.4; resize:vertical; padding:0.5rem;"></textarea>
-      </div>
+        <hr class="settings-divider">
 
-      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem; border-top:1px solid var(--border-color, #333); padding-top:0.75rem;">
-        <div style="display:flex; gap:0.5rem; align-items:center; flex:1; min-width:260px;">
-          <input type="text" id="translation-test-input" placeholder="대박! 오늘 무대 진짜 레전드였어!" style="flex:1; font-size:0.85rem;">
-          <button class="btn btn-ghost btn-sm" type="button" id="translation-test-btn">Test Translation</button>
+        <div class="settings-field" id="gemini-key-row">
+          <label>Google Gemini API Key</label>
+          <div style="display:flex; gap:0.5rem;">
+            <input type="password" id="gemini-api-key" placeholder="AIzaSy... or AQ.Ab8..." style="flex:1;">
+            <button type="button" class="btn btn-ghost btn-sm" id="gemini-key-toggle">Show</button>
+          </div>
         </div>
-        <button class="btn btn-primary btn-sm" type="button" id="translation-save-btn">Save Translation Settings</button>
+        <div class="settings-field" id="gemini-models-row">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <label for="gemini-models-input">Gemini Models Fallback Chain</label>
+            <button type="button" class="btn btn-ghost btn-sm" id="gemini-models-reset" style="font-size:0.75rem;">Reset Default</button>
+          </div>
+          <input type="text" id="gemini-models-input" placeholder="gemini-3.7-flash, gemini-3.5-flash-lite, gemini-3.1-flash-lite, gemini-2.5-flash-lite, gemini-2.5-flash, gemini-flash-latest" style="font-family:monospace; font-size:0.8rem;">
+        </div>
+
+        <hr class="settings-divider">
+
+        <div class="settings-field" id="groq-key-row">
+          <label>Groq API Key</label>
+          <div style="display:flex; gap:0.5rem;">
+            <input type="password" id="groq-api-key" placeholder="gsk_..." style="flex:1;">
+            <button type="button" class="btn btn-ghost btn-sm" id="groq-key-toggle">Show</button>
+          </div>
+        </div>
+        <div class="settings-field" id="groq-models-row">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <label for="groq-models-input">Groq Models Fallback Chain</label>
+            <button type="button" class="btn btn-ghost btn-sm" id="groq-models-reset" style="font-size:0.75rem;">Reset Default</button>
+          </div>
+          <input type="text" id="groq-models-input" placeholder="groq/compound, openai/gpt-oss-120b" style="font-family:monospace; font-size:0.8rem;">
+        </div>
+
+        <hr class="settings-divider">
+
+        <div class="settings-field" id="opencode-key-row">
+          <label>OpenCode Zen API Key</label>
+          <div style="display:flex; gap:0.5rem;">
+            <input type="password" id="opencode-api-key" placeholder="sk-..." style="flex:1;">
+            <button type="button" class="btn btn-ghost btn-sm" id="opencode-key-toggle">Show</button>
+          </div>
+        </div>
+        <div class="settings-field" id="opencode-models-row">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <label for="opencode-models-input">OpenCode Models Fallback Chain</label>
+            <button type="button" class="btn btn-ghost btn-sm" id="opencode-models-reset" style="font-size:0.75rem;">Reset Default</button>
+          </div>
+          <input type="text" id="opencode-models-input" placeholder="x-preview-f-free, nemotron-3-ultra-free, big-pickle" style="font-family:monospace; font-size:0.8rem;">
+        </div>
+
+        <hr class="settings-divider">
+
+        <div class="settings-field" id="nvidia-key-row">
+          <label>NVIDIA NIM API Key</label>
+          <div style="display:flex; gap:0.5rem;">
+            <input type="password" id="nvidia-api-key" placeholder="nvapi-..." style="flex:1;">
+            <button type="button" class="btn btn-ghost btn-sm" id="nvidia-key-toggle">Show</button>
+          </div>
+        </div>
+        <div class="settings-field" id="nvidia-models-row">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <label for="nvidia-models-input">NVIDIA Models Fallback Chain</label>
+            <button type="button" class="btn btn-ghost btn-sm" id="nvidia-models-reset" style="font-size:0.75rem;">Reset Default</button>
+          </div>
+          <input type="text" id="nvidia-models-input" placeholder="minimaxai/minimax-m3" style="font-family:monospace; font-size:0.8rem;">
+        </div>
+
+        <hr class="settings-divider">
+
+        <div class="settings-field">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <label for="translation-prompt">AI Translation System Prompt</label>
+            <button type="button" class="btn btn-ghost btn-sm" id="translation-prompt-reset" style="font-size:0.75rem;">Reset to Default</button>
+          </div>
+          <textarea id="translation-prompt" rows="5" placeholder="Custom rules for AI translation..." style="width:100%; font-family:monospace; font-size:0.8rem; line-height:1.4; resize:vertical; padding:0.5rem;"></textarea>
+        </div>
+
+        <div class="settings-row" style="border-top:1px solid var(--line); padding-top:0.75rem;">
+          <div style="display:flex; gap:0.5rem; align-items:center; flex:1; min-width:260px;">
+            <input type="text" id="translation-test-input" placeholder="리브 미모 난ри도 아니야" style="flex:1; font-size:0.85rem;">
+            <button class="btn btn-ghost btn-sm" type="button" id="translation-test-btn">Test Translation</button>
+          </div>
+          <button class="btn btn-primary btn-sm" type="button" id="translation-save-btn">Save Translation Settings</button>
+        </div>
+        <div id="translation-test-result" style="font-size:0.85rem; color:var(--muted); word-break:break-word;"></div>
       </div>
-      <div id="translation-test-result" style="font-size:0.85rem; color:var(--muted); margin-top:0.25rem; word-break:break-word;"></div>
     </div>
 
-    <h2>Database Configuration</h2>
-    <div id="config-db-table"></div>
-    <h2>Environment Variables (Read-Only)</h2>
-    <div id="config-env-table"></div>
+    <div class="settings-section">
+      <h2>Scraper & Bot Configuration</h2>
+      <div id="config-db-table"></div>
+    </div>
+
+    <div class="settings-section">
+      <h2>Server & Environment Info (Read-Only)</h2>
+      <div id="config-env-table"></div>
+    </div>
   </section>
 </main>
 

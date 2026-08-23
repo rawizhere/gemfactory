@@ -8,7 +8,6 @@ import (
 	"gemfactory/internal/downloader"
 	"gemfactory/internal/health"
 	"gemfactory/internal/keyboard"
-	"gemfactory/internal/middleware"
 	"gemfactory/internal/service"
 	"gemfactory/internal/storage"
 	"gemfactory/internal/telegram"
@@ -33,7 +32,6 @@ type Bot struct {
 	health         *health.Server
 	web            *web.Server
 	services       *service.Services
-	middleware     *middleware.Middleware
 	keyboard       *keyboard.Manager
 	router         *Router
 	releaseChecker *worker.ReleaseChecker
@@ -102,7 +100,15 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 
 	var webServer *web.Server
 	if cfg.WebEnabled {
-		webServer = web.NewServer(cfg.WebPort, logger, db.GetDB(), cfg, downloaderSvc, services.Release)
+		webServer = web.NewServer(cfg.WebPort, logger, web.Deps{
+			AppCfg:     cfg,
+			Artists:    storage.NewArtistRepository(db.GetDB(), logger),
+			Releases:   storage.NewReleaseRepository(db.GetDB(), logger),
+			Configs:    configRepo,
+			Cookies:    cookieRepo,
+			Downloads:  downloaderSvc,
+			ReleaseSvc: services.Release,
+		})
 	}
 
 	releaseChecker := worker.NewReleaseChecker(services.Release, logger, cfg.ReleaseCheckInterval)
@@ -115,7 +121,6 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 		health:         healthServer,
 		web:            webServer,
 		services:       services,
-		middleware:     middleware.New(cfg, logger),
 		keyboard:       keyboardManager,
 		router:         router,
 		releaseChecker: releaseChecker,
@@ -159,22 +164,6 @@ func (b *Bot) Start(ctx context.Context) error {
 			}
 		}()
 	}
-
-	b.wg.Add(1)
-	go func() {
-		defer b.wg.Done()
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				b.middleware.Cleanup()
-			case <-b.ctx.Done():
-				return
-			}
-		}
-	}()
 
 	b.wg.Add(1)
 	go func() {

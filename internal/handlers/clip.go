@@ -82,10 +82,11 @@ func (h *ClipHandlers) Help(ctx context.Context, message *telego.Message) {
 				"Example: <code>/gif https://youtu.be/dQw4w9WgXcQ 0:43 0:48</code>"
 		case "subs":
 			text = "<b>/subs</b> — Cut clip with burned-in subtitles\n\n" +
-				"<code>/subs &lt;url&gt; &lt;start&gt; &lt;end&gt; [...] [lang] [hq]</code>\n\n" +
+				"<code>/subs &lt;url&gt; &lt;start&gt; &lt;end&gt; [...] [lang] [hq] [nollm]</code>\n\n" +
 				"• Multiple timecode pairs produce multiple clips in one command\n" +
 				"• Default language is en; auto-translated if not available\n" +
-				"Example: <code>/subs https://youtu.be/r0u5URS3VXE 4:00 4:01 4:02 4:04 en</code>"
+				"• <code>nollm</code> — translate via Google Translate, skipping AI providers\n" +
+				"Example: <code>/subs https://youtu.be/r0u5URS3VXE 4:00 4:01 4:02 4:04 ru nollm</code>"
 		case "mp3":
 			text = "<b>/mp3</b> — Extract audio track from video\n\n" +
 				"<code>/mp3 &lt;url&gt; [start] [end]</code>\n\n" +
@@ -140,6 +141,7 @@ func (h *ClipHandlers) handleClipCommand(ctx context.Context, message *telego.Me
 		} else if subs {
 			req.SubsLang = "en"
 		}
+		req.SubsNoLLM = subs && parsed.NoLLM
 
 		statusText := initialStatusCard(req)
 		statusID := h.sendStatus(ctx, chatID, statusText, message.MessageID)
@@ -161,21 +163,26 @@ func (h *ClipHandlers) sendStatus(ctx context.Context, chatID int64, text string
 }
 
 type clipTaskState struct {
-	title      string
-	interval   string
-	mode       string
-	subsLang   string
-	audioOnly  bool
-	gif        bool
-	stage      string
-	percent    int
-	statusLine string
+	title         string
+	interval      string
+	mode          string
+	subsLang      string
+	audioOnly     bool
+	gif           bool
+	stage         string
+	percent       int
+	statusLine    string
+	translatedVia string
+	hashtags      []string
+	url           string
+	done          bool
 }
 
 func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *downloader.ParsedCommand, req downloader.ClipRequest, replyToMsgID int) *downloader.ClipCallbacks {
 	state := clipTaskState{
 		interval:   formatInterval(req),
 		mode:       formatMode(req),
+		url:        req.URL,
 		subsLang:   req.SubsLang,
 		audioOnly:  req.AudioOnly,
 		gif:        req.GIF,
@@ -190,6 +197,16 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 	}
 
 	return &downloader.ClipCallbacks{
+		OnHashtags: func(tags []string) {
+			state.hashtags = tags
+			edit()
+		},
+
+		OnTranslation: func(providerModel string) {
+			state.translatedVia = providerModel
+			edit()
+		},
+
 		OnStage: func(stage, detail string) {
 			state.stage = stage
 			switch stage {
@@ -201,7 +218,11 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 					state.statusLine = "Extracting metadata..."
 				}
 			case downloader.StageSubtitles:
+				state.percent = 0
 				state.statusLine = fmt.Sprintf("Extracting subtitles (%s)...", detail)
+			case downloader.StageTranslate:
+				state.percent = 0
+				state.statusLine = fmt.Sprintf("<b>Translating:</b> %s...", detail)
 			case downloader.StageDownload:
 				state.percent = 0
 				if state.audioOnly {
@@ -300,7 +321,14 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 				_ = h.SendMessage(bgCtx, chatID, "Failed to send file: "+html.EscapeString(sendErr.Error()))
 			}
 			if statusID > 0 {
-				_ = h.TG.DeleteMessage(bgCtx, chatID, statusID)
+				if (req.Shorts && req.Start == "" && req.End == "") || h.shouldDeleteStatus(bgCtx) {
+					_ = h.TG.DeleteMessage(bgCtx, chatID, statusID)
+				} else {
+					state.done = true
+					state.percent = 100
+					state.statusLine = ""
+					edit()
+				}
 			}
 		},
 		OnError: func(errMsg string) {
@@ -316,6 +344,7 @@ func initialStatusCard(req downloader.ClipRequest) string {
 	state := clipTaskState{
 		interval:   formatInterval(req),
 		mode:       formatMode(req),
+		url:        req.URL,
 		statusLine: "Processing " + html.EscapeString(req.URL) + "...",
 	}
 	return renderStatusCard(state)
@@ -323,8 +352,24 @@ func initialStatusCard(req downloader.ClipRequest) string {
 
 func renderStatusCard(state clipTaskState) string {
 	var sb strings.Builder
+
+	verb := "Working"
+	if state.done {
+		verb = "Done"
+	}
+	if state.url != "" {
+		sb.WriteString(verb + " " + html.EscapeString(state.url) + "\n")
+	}
+
 	if state.title != "" {
-		sb.WriteString("<b>" + html.EscapeString(state.title) + "</b>\n")
+		sb.WriteString("\n" + html.EscapeString(state.title) + "\n")
+	}
+
+	if len(state.hashtags) > 0 {
+		if state.title == "" {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("<pre>" + html.EscapeString(strings.Join(state.hashtags, " ")) + "</pre>\n")
 	}
 
 	var metaParts []string
@@ -332,23 +377,27 @@ func renderStatusCard(state clipTaskState) string {
 		metaParts = append(metaParts, "<code>"+html.EscapeString(state.interval)+"</code>")
 	}
 	if state.mode != "" {
-		metaParts = append(metaParts, "<b>"+html.EscapeString(state.mode)+"</b>")
+		metaParts = append(metaParts, html.EscapeString(state.mode))
 	}
 	if len(metaParts) > 0 {
-		sb.WriteString(strings.Join(metaParts, " • ") + "\n\n")
-	} else if state.title != "" {
-		sb.WriteString("\n")
+		if state.title == "" && len(state.hashtags) == 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString(strings.Join(metaParts, " • ") + "\n")
+	}
+	if state.translatedVia != "" {
+		sb.WriteString("Translate: <b>" + html.EscapeString(state.translatedVia) + "</b>\n")
 	}
 
-	if (state.stage == downloader.StageDownload || state.stage == downloader.StageReencode || state.stage == downloader.StageUpload) ||
+	if (state.stage == downloader.StageDownload || state.stage == downloader.StageReencode || state.stage == downloader.StageUpload || state.done) ||
 		(state.percent > 0 && state.percent <= 100) {
-		sb.WriteString("<code>" + progressBar(state.percent, 16) + "</code>\n")
+		fmt.Fprintf(&sb, "\n<code>%s</code> %d%%\n", progressBar(state.percent, 16), state.percent)
 	}
 
-	if state.statusLine != "" {
-		sb.WriteString(state.statusLine)
+	if state.statusLine != "" && !state.done {
+		sb.WriteString(state.statusLine + "\n")
 	}
-	return sb.String()
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 func progressBar(percent, length int) string {
@@ -363,9 +412,8 @@ func progressBar(percent, length int) string {
 	}
 	filled := percent * length / 100
 	empty := length - filled
-	return "[" + strings.Repeat("█", filled) + strings.Repeat("░", empty) + fmt.Sprintf("] %d%%", percent)
+	return "[" + strings.Repeat("█", filled) + strings.Repeat("░", empty) + "]"
 }
-
 func formatMode(req downloader.ClipRequest) string {
 	switch {
 	case req.AudioOnly:
@@ -388,10 +436,18 @@ func formatMode(req downloader.ClipRequest) string {
 		return "Clip"
 	}
 }
-
 func formatInterval(req downloader.ClipRequest) string {
 	if req.Start != "" && req.End != "" {
 		return fmt.Sprintf("%s – %s", req.Start, req.End)
 	}
 	return ""
+}
+
+func (h *ClipHandlers) shouldDeleteStatus(ctx context.Context) bool {
+	if h.Services != nil && h.Services.Config != nil {
+		if val, err := h.Services.Config.Get(ctx, "CLIP_DELETE_STATUS"); err == nil && val != "" {
+			return strings.ToLower(strings.TrimSpace(val)) == "true" || strings.TrimSpace(val) == "1"
+		}
+	}
+	return false
 }

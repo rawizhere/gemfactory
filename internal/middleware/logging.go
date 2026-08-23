@@ -2,28 +2,23 @@ package middleware
 
 import (
 	"fmt"
-	"gemfactory/internal/telegram"
 	"time"
 
+	"gemfactory/internal/telegram"
+
 	"github.com/mymmrac/telego"
+	th "github.com/mymmrac/telego/telegohandler"
 	"go.uber.org/zap"
 )
 
-func Logging(logger *zap.Logger) func(update telego.Update, next func(telego.Update)) {
-	return func(update telego.Update, next func(telego.Update)) {
-		if update.Message == nil {
-			next(update)
-			return
+// Logging logs incoming commands and their duration.
+func Logging(logger *zap.Logger) th.Handler {
+	return func(ctx *th.Context, update telego.Update) error {
+		if update.Message == nil || update.Message.From == nil {
+			return ctx.Next(update)
 		}
 
-		command := ""
-		for _, entity := range update.Message.Entities {
-			if entity.Type == telego.EntityTypeBotCommand && entity.Offset == 0 {
-				command = update.Message.Text[1:entity.Length]
-				break
-			}
-		}
-
+		command := telegram.MessageCommand(update.Message)
 		startTime := time.Now()
 		reqID := fmt.Sprintf("%d-%d", update.UpdateID, startTime.UnixNano())
 		user := telegram.GetUserIdentifier(update.Message.From)
@@ -36,11 +31,13 @@ func Logging(logger *zap.Logger) func(update telego.Update, next func(telego.Upd
 			zap.String("user", user),
 			zap.Int("update_id", update.UpdateID))
 
-		next(update)
+		err := ctx.Next(update)
 
 		logger.Info("Command completed",
 			zap.String("request_id", reqID),
 			zap.String("command", command),
 			zap.Duration("duration", time.Since(startTime)))
+
+		return err
 	}
 }

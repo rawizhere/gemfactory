@@ -5,6 +5,10 @@ import (
 	"context"
 	"strings"
 
+	"github.com/mymmrac/telego"
+	th "github.com/mymmrac/telego/telegohandler"
+	"go.uber.org/zap"
+
 	"gemfactory/internal/config"
 	"gemfactory/internal/downloader"
 	"gemfactory/internal/handlers"
@@ -12,12 +16,10 @@ import (
 	"gemfactory/internal/middleware"
 	"gemfactory/internal/service"
 	"gemfactory/internal/telegram"
-
-	"github.com/mymmrac/telego"
-	"go.uber.org/zap"
 )
 
-// Router dispatches updates to their respective handlers through the middleware pipeline.
+// Router registers handlers dispatching updates to their respective
+// handler methods through the middleware pipeline.
 type Router struct {
 	handlers   *handlers.Handlers
 	middleware *middleware.Middleware
@@ -36,81 +38,81 @@ func NewRouter(services *service.Services, config *config.Config, keyboard *keyb
 	}
 }
 
-// HandleUpdate processes a Telegram update with context through the middleware stack.
-func (r *Router) HandleUpdate(ctx context.Context, update telego.Update) {
-	r.middleware.ProcessWithMiddleware(update, func(update telego.Update) {
-		if update.Message != nil {
-			r.handleMessage(ctx, update.Message)
+// RegisterRoutes wires all command and callback handlers onto the bot handler.
+// Handlers match in registration order; only the first matching one runs.
+func (r *Router) RegisterRoutes(bh *th.BotHandler) {
+	bh.Use(r.middleware.Handlers()...)
+
+	commandRoutes := []struct {
+		command string
+		handler th.MessageHandler
+	}{
+		{"start", func(ctx *th.Context, m telego.Message) error { r.handlers.User.Start(ctx, &m); return nil }},
+		{"month", func(ctx *th.Context, m telego.Message) error { r.handlers.User.Month(ctx, &m); return nil }},
+		{"search", func(ctx *th.Context, m telego.Message) error { r.handlers.User.Search(ctx, &m); return nil }},
+		{"artists", func(ctx *th.Context, m telego.Message) error { r.handlers.User.Artists(ctx, &m); return nil }},
+		{"metrics", func(ctx *th.Context, m telego.Message) error { r.handlers.User.Metrics(ctx, &m); return nil }},
+		{"admin", func(ctx *th.Context, m telego.Message) error { r.handlers.Admin.Admin(ctx, &m); return nil }},
+		{"add_artist", func(ctx *th.Context, m telego.Message) error { r.handlers.Admin.AddArtist(ctx, &m); return nil }},
+		{"remove_artist", func(ctx *th.Context, m telego.Message) error { r.handlers.Admin.RemoveArtist(ctx, &m); return nil }},
+		{"export", func(ctx *th.Context, m telego.Message) error { r.handlers.Admin.Export(ctx, &m); return nil }},
+		{"config", func(ctx *th.Context, m telego.Message) error { r.handlers.Admin.Config(ctx, &m); return nil }},
+		{"parse", func(ctx *th.Context, m telego.Message) error { r.handlers.Admin.Parse(ctx, &m); return nil }},
+		{"clip", clipHandler(r.handlers, "clip")},
+		{"gif", clipHandler(r.handlers, "gif")},
+		{"subs", clipHandler(r.handlers, "subs")},
+		{"mp3", clipHandler(r.handlers, "mp3")},
+	}
+	for _, route := range commandRoutes {
+		bh.HandleMessage(route.handler, th.CommandEqual(route.command))
+	}
+
+	bh.HandleMessage(func(ctx *th.Context, m telego.Message) error {
+		if r.isClipHelpTopic(&m) {
+			r.handlers.Clip.Help(ctx, &m)
+		} else {
+			r.handlers.User.Help(ctx, &m)
 		}
-		if update.CallbackQuery != nil {
-			r.handleCallbackQuery(ctx, update.CallbackQuery)
-		}
-	})
+		return nil
+	}, th.CommandEqual("help"))
+
+	// Non-command messages containing a URL start a direct download; registered last so commands win.
+	bh.HandleMessage(func(ctx *th.Context, m telego.Message) error {
+		r.handlers.Clip.DirectLink(ctx, &m, downloader.ExtractFirstURL(m.Text))
+		return nil
+	}, messageWithURL())
+
+	bh.HandleCallbackQuery(func(ctx *th.Context, q telego.CallbackQuery) error {
+		r.handlers.HandleCallbackQuery(ctx, &q)
+		return nil
+	}, th.AnyCallbackQuery())
 }
 
-func (r *Router) handleMessage(ctx context.Context, message *telego.Message) {
-	command := ""
-	for _, entity := range message.Entities {
-		if entity.Type == telego.EntityTypeBotCommand && entity.Offset == 0 {
-			rawCmd := message.Text[1:entity.Length]
-			command = strings.Split(rawCmd, "@")[0]
-			break
-		}
-	}
-
-	if command == "" {
-		if u := downloader.ExtractFirstURL(message.Text); u != "" {
-			r.handlers.Clip.DirectLink(ctx, message, u)
-		}
-		return
-	}
-
-	switch command {
-	case "start":
-		r.handlers.User.Start(ctx, message)
-	case "help":
-		if r.isClipHelpTopic(message) {
-			r.handlers.Clip.Help(ctx, message)
-		} else {
-			r.handlers.User.Help(ctx, message)
-		}
-	case "clip", "gif", "subs", "mp3":
+func clipHandler(h *handlers.Handlers, command string) th.MessageHandler {
+	return func(ctx *th.Context, m telego.Message) error {
 		switch command {
 		case "clip":
-			r.handlers.Clip.Clip(ctx, message)
+			h.Clip.Clip(ctx, &m)
 		case "gif":
-			r.handlers.Clip.Gif(ctx, message)
+			h.Clip.Gif(ctx, &m)
 		case "subs":
-			r.handlers.Clip.Subs(ctx, message)
+			h.Clip.Subs(ctx, &m)
 		case "mp3":
-			r.handlers.Clip.MP3(ctx, message)
+			h.Clip.MP3(ctx, &m)
 		}
-	case "month":
-		r.handlers.User.Month(ctx, message)
-	case "search":
-		r.handlers.User.Search(ctx, message)
-	case "artists":
-		r.handlers.User.Artists(ctx, message)
-	case "metrics":
-		r.handlers.User.Metrics(ctx, message)
-
-	case "admin":
-		r.handlers.Admin.Admin(ctx, message)
-	case "add_artist":
-		r.handlers.Admin.AddArtist(ctx, message)
-	case "remove_artist":
-		r.handlers.Admin.RemoveArtist(ctx, message)
-	case "export":
-		r.handlers.Admin.Export(ctx, message)
-	case "config":
-		r.handlers.Admin.Config(ctx, message)
-	case "parse":
-		r.handlers.Admin.Parse(ctx, message)
+		return nil
 	}
 }
 
-func (r *Router) handleCallbackQuery(ctx context.Context, query *telego.CallbackQuery) {
-	r.handlers.HandleCallbackQuery(ctx, query)
+// messageWithURL matches non-command text messages carrying a downloadable URL.
+func messageWithURL() th.Predicate {
+	return func(_ context.Context, update telego.Update) bool {
+		m := update.Message
+		if m == nil || m.Text == "" || telegram.MessageCommand(m) != "" {
+			return false
+		}
+		return downloader.ExtractFirstURL(m.Text) != ""
+	}
 }
 
 // isClipHelpTopic reports whether "/help <topic>" targets a clip command.

@@ -21,6 +21,7 @@ func TestVariantSuffix(t *testing.T) {
 		{ClipRequest{GIF: true}, "-gif"},
 		{ClipRequest{SubsLang: "ru"}, "-ru"},
 		{ClipRequest{HQ: true, GIF: true, SubsLang: "en-US"}, "-hq-gif-en-US"},
+		{ClipRequest{SubsLang: "ru", SubsNoLLM: true}, "-ru-gt"},
 	}
 	for _, c := range cases {
 		if got := variantSuffix(c.req); got != c.want {
@@ -47,7 +48,7 @@ func TestCacheMarkerRoundTrip(t *testing.T) {
 		t.Error("cache hit must not exist without marker")
 	}
 
-	writeCacheMarker(out, "Test Title", "<b>Test Title</b>\n\n#tag")
+	writeCacheMarker(out, cacheMarker{Title: "Test Title", Caption: "<b>Test Title</b>\n\n#tag"})
 	m := readCacheHit(out)
 	if m == nil || m.Title != "Test Title" || m.Caption != "<b>Test Title</b>\n\n#tag" {
 		t.Fatalf("marker = %+v", m)
@@ -57,7 +58,7 @@ func TestCacheMarkerRoundTrip(t *testing.T) {
 func TestCacheHitRequiresVideoFile(t *testing.T) {
 	dir := t.TempDir()
 	out := filepath.Join(dir, "clip.mp4")
-	writeCacheMarker(out, "orphan", "")
+	writeCacheMarker(out, cacheMarker{Title: "orphan"})
 	if readCacheHit(out) != nil {
 		t.Error("marker without video file must be ignored")
 	}
@@ -115,7 +116,7 @@ func TestSubmitRejectsOverlongIntervals(t *testing.T) {
 	t.Setenv("CLIP_MAX_DURATION_HQ_SECONDS", "30")
 	s := newTestService(t)
 
-	// Invalid URL on purpose: Submit validates duration first, so a video-id error proves the duration check passed without spawning any download work.
+	// Invalid URL on purpose: duration is validated before the video-id lookup, so no download work starts.
 	badURL := "https://example.com/video"
 
 	_, err := s.Submit(context.Background(), ClipRequest{URL: badURL, Start: "0:00", End: "6:01"})
@@ -188,8 +189,8 @@ func TestCleanStorageProtectsActiveJobs(t *testing.T) {
 	}
 
 	s.mu.Lock()
-	if s.jobs["job-done-old"].OutputDir != "" {
-		t.Errorf("cleaned job OutputDir should be emptied, got %q", s.jobs["job-done-old"].OutputDir)
+	if _, ok := s.jobs["job-done-old"]; ok {
+		t.Errorf("cleaned job should be removed from s.jobs, but still present")
 	}
 	s.mu.Unlock()
 }
