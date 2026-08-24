@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -148,11 +147,6 @@ func (s *Service) SubmitWithCallbacks(ctx context.Context, req ClipRequest, cbs 
 		}
 		if endMs <= startMs {
 			return nil, fmt.Errorf("end %s must be after start %s", req.End, req.Start)
-		}
-		if maxDur := s.maxSegmentDuration(req.HQ); endMs-startMs > maxDur {
-			return nil, fmt.Errorf(
-				"interval %s-%s is too long (%.0f s), maximum is %.0f seconds",
-				req.Start, req.End, (endMs-startMs)/1000, maxDur/1000)
 		}
 	}
 
@@ -309,6 +303,23 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		cbs.OnHashtags(AllHashtags(meta))
 	}
 
+	// Clamp the requested interval to the real video length before any work.
+	var segStartMs, segEndMs float64
+	if job.Request.Start != "" && job.Request.End != "" {
+		segStartMs, segEndMs, err = s.resolveSegmentBounds(ctx, meta, job.Request)
+		if err != nil {
+			s.fail(job, err.Error())
+			return
+		}
+		if clamped := s.segmentOutputPath(job, segStartMs, segEndMs); clamped != clipPath {
+			clipPath = clamped
+			if marker := readCacheHit(clipPath); marker != nil {
+				s.serveFromCache(job, clipPath, marker)
+				return
+			}
+		}
+	}
+
 	switch {
 	case job.Request.AudioOnly:
 		s.reportStage(job, StageDownload, "")
@@ -317,7 +328,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		if _, err := os.Stat(clipPath); os.IsNotExist(err) {
 			if _, err := os.Stat(rawMedia); os.IsNotExist(err) {
 				if hasSections {
-					if err := s.downloadSegment(ctx, job.Request, rawMedia, cookieFile, func(p ProgressUpdate) {
+					if err := s.downloadSegment(ctx, job.Request, rawMedia, cookieFile, segStartMs, segEndMs, func(p ProgressUpdate) {
 						s.reportProgress(job, p)
 					}); err != nil {
 						s.fail(job, "download failed: "+err.Error())
@@ -336,8 +347,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 			s.reportStage(job, StageReencode, "mp3")
 			var durMS float64
 			if hasSections {
-				sMs, eMs := mustParsePair(job.Request.Start, job.Request.End)
-				durMS = eMs - sMs
+				durMS = segEndMs - segStartMs
 			} else if meta.Duration > 0 {
 				durMS = meta.Duration * 1000.0
 			}
@@ -364,7 +374,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 			clipPath = finalPath
 		}
 	default:
-		startMs, endMs := mustParsePair(job.Request.Start, job.Request.End)
+		startMs, endMs := segStartMs, segEndMs
 
 		var trimmedVTT string
 		if lang := job.Request.SubsLang; lang != "" {
@@ -381,7 +391,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		s.setStatus(job, StatusDownloading)
 		s.reportStage(job, StageDownload, "")
 		if _, err := os.Stat(clipPath); os.IsNotExist(err) {
-			if err := s.downloadSegment(ctx, job.Request, clipPath, cookieFile, func(p ProgressUpdate) {
+			if err := s.downloadSegment(ctx, job.Request, clipPath, cookieFile, startMs, endMs, func(p ProgressUpdate) {
 				s.reportProgress(job, p)
 			}); err != nil {
 				s.fail(job, "download failed: "+err.Error())
@@ -439,6 +449,15 @@ func (s *Service) outputPathFor(job *Job) string {
 		return filepath.Join(s.workbenchDir(job.VideoID), job.VideoID+"_full"+variant+ext)
 	}
 	startMs, endMs := mustParsePair(job.Request.Start, job.Request.End)
+	return s.segmentOutputPath(job, startMs, endMs)
+}
+
+func (s *Service) segmentOutputPath(job *Job, startMs, endMs float64) string {
+	variant := variantSuffix(job.Request)
+	ext := ".mp4"
+	if job.Request.AudioOnly {
+		ext = ".mp3"
+	}
 	return filepath.Join(s.workbenchDir(job.VideoID),
 		fileNameWithTimecodeVariant(job.VideoID, startMs, endMs, variant)+ext)
 }
@@ -705,34 +724,37 @@ func (s *Service) getConfigValue(ctx context.Context, key, defaultVal string) st
 	return settings.New(s.configs).Value(ctx, key, defaultVal)
 }
 
-// maxSegmentDuration returns the max clip length in ms: 30s for HQ, 300s otherwise.
-func (s *Service) maxSegmentDuration(hq bool) float64 {
-	if hq {
-		if v := durationEnvMs("CLIP_MAX_DURATION_HQ_SECONDS"); v > 0 {
-			return v
+// resolveSegmentBounds clamps the requested interval to the actual video length and enforces the duration limit.
+func (s *Service) resolveSegmentBounds(ctx context.Context, meta *SourceMeta, req ClipRequest) (float64, float64, error) {
+	startMs, endMs := mustParsePair(req.Start, req.End)
+	if meta != nil && meta.Duration > 0 {
+		videoEndMs := meta.Duration * 1000.0
+		if startMs >= videoEndMs {
+			return 0, 0, fmt.Errorf("start %s is beyond the end of the video (%s)", req.Start, FormatTimecode(videoEndMs))
 		}
-		return 30 * 1000
+		if endMs > videoEndMs {
+			endMs = videoEndMs
+		}
 	}
-	if v := durationEnvMs("CLIP_MAX_DURATION_SECONDS"); v > 0 {
-		return v
+	if maxDur := s.maxSegmentDuration(ctx, req.HQ); endMs-startMs > maxDur {
+		return 0, 0, fmt.Errorf(
+			"interval %s-%s is too long (%.0f s), maximum is %.0f seconds",
+			req.Start, req.End, (endMs-startMs)/1000, maxDur/1000)
 	}
-	return 300 * 1000
+	return startMs, endMs, nil
 }
 
-func durationEnvMs(key string) float64 {
-	raw := os.Getenv(key)
-	if raw == "" {
-		return 0
+// maxSegmentDuration returns the max clip length in ms: 30s for HQ, 300s otherwise.
+func (s *Service) maxSegmentDuration(ctx context.Context, hq bool) float64 {
+	key, def := "CLIP_MAX_DURATION_SECONDS", 300
+	if hq {
+		key, def = "CLIP_MAX_DURATION_HQ_SECONDS", 30
 	}
-	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil || v <= 0 {
-		return 0
-	}
-	return v * 1000
+	return float64(settings.New(s.configs).Int(ctx, key, def)) * 1000
 }
 
-func (s *Service) MaxSegmentDurationSeconds(hq bool) float64 {
-	return s.maxSegmentDuration(hq) / 1000
+func (s *Service) MaxSegmentDurationSeconds(ctx context.Context, hq bool) float64 {
+	return s.maxSegmentDuration(ctx, hq) / 1000
 }
 
 func (s *Service) telegramFileLimitBytes(ctx context.Context) int64 {

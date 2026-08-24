@@ -12,15 +12,39 @@ import (
 
 func TestMaxSegmentDuration(t *testing.T) {
 	svc := &Service{}
+	ctx := context.Background()
 
-	require.Equal(t, float64(30), svc.MaxSegmentDurationSeconds(true), "want 30s HQ limit")
-	require.Equal(t, float64(300), svc.MaxSegmentDurationSeconds(false), "want 300s standard limit")
+	require.Equal(t, float64(30), svc.MaxSegmentDurationSeconds(ctx, true), "want 30s HQ limit")
+	require.Equal(t, float64(300), svc.MaxSegmentDurationSeconds(ctx, false), "want 300s standard limit")
 
 	t.Setenv("CLIP_MAX_DURATION_HQ_SECONDS", "45")
 	t.Setenv("CLIP_MAX_DURATION_SECONDS", "600")
 
-	require.Equal(t, float64(45), svc.MaxSegmentDurationSeconds(true), "want 45s HQ limit from env")
-	require.Equal(t, float64(600), svc.MaxSegmentDurationSeconds(false), "want 600s standard limit from env")
+	require.Equal(t, float64(45), svc.MaxSegmentDurationSeconds(ctx, true), "want 45s HQ limit from env")
+	require.Equal(t, float64(600), svc.MaxSegmentDurationSeconds(ctx, false), "want 600s standard limit from env")
+}
+
+func TestResolveSegmentBounds(t *testing.T) {
+	svc := &Service{}
+	ctx := context.Background()
+	// 61-second video.
+	meta := &SourceMeta{Duration: 61}
+
+	start, end, err := svc.resolveSegmentBounds(ctx, meta, ClipRequest{Start: "0:06", End: "9:99"})
+	require.NoError(t, err, "end past video length must clamp to the end")
+	require.Equal(t, float64(6000), start)
+	require.Equal(t, float64(61000), end)
+
+	_, _, err = svc.resolveSegmentBounds(ctx, meta, ClipRequest{Start: "1:02", End: "9:99"})
+	require.ErrorContains(t, err, "beyond the end", "start past the video must fail")
+
+	// 10-minute video: clamping cannot rescue an overlong interval.
+	long := &SourceMeta{Duration: 600}
+	_, _, err = svc.resolveSegmentBounds(ctx, long, ClipRequest{Start: "0:20", End: "11:06"})
+	require.ErrorContains(t, err, "is too long")
+
+	_, _, err = svc.resolveSegmentBounds(ctx, long, ClipRequest{Start: "0:00", End: "4:59", HQ: true})
+	require.ErrorContains(t, err, "is too long", "HQ limit is 30s")
 }
 
 func TestCheckFileSize(t *testing.T) {

@@ -97,16 +97,16 @@ func (s *Service) baseYTDLPArgs(ctx context.Context, cookieFile string) []string
 
 // downloadFullVideo downloads an entire video (shorts / tiktok) at best quality.
 func (s *Service) downloadFullVideo(ctx context.Context, req ClipRequest, outPath, cookieFile string, onProgress func(ProgressUpdate)) error {
-	return s.download(ctx, req, outPath, cookieFile, false, onProgress)
+	return s.download(ctx, req, outPath, cookieFile, false, 0, 0, onProgress)
 }
 
 // downloadSegment downloads a video section via yt-dlp --download-sections and merges it to mp4.
-func (s *Service) downloadSegment(ctx context.Context, req ClipRequest, outPath, cookieFile string, onProgress func(ProgressUpdate)) error {
-	return s.download(ctx, req, outPath, cookieFile, true, onProgress)
+func (s *Service) downloadSegment(ctx context.Context, req ClipRequest, outPath, cookieFile string, startMs, endMs float64, onProgress func(ProgressUpdate)) error {
+	return s.download(ctx, req, outPath, cookieFile, true, startMs, endMs, onProgress)
 }
 
-// download runs the yt-dlp download; withSections adds --download-sections using req.Start/req.End.
-func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookieFile string, withSections bool, onProgress func(ProgressUpdate)) error {
+// download runs the yt-dlp download; withSections cuts [startMs, endMs) via --download-sections.
+func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookieFile string, withSections bool, startMs, endMs float64, onProgress func(ProgressUpdate)) error {
 	bin, err := YTDLPBinary()
 	if err != nil {
 		return err
@@ -116,10 +116,8 @@ func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookie
 	}
 
 	var expectedDurationMS float64
-	if withSections && req.Start != "" && req.End != "" {
-		if startMs, endMs, parseErr := parseIntervalPair(req.Start, req.End); parseErr == nil && endMs > startMs {
-			expectedDurationMS = endMs - startMs
-		}
+	if withSections && endMs > startMs {
+		expectedDurationMS = endMs - startMs
 	}
 
 	format := formatSelector(req.Quality, req.HQ, req.Shorts, req.AudioOnly)
@@ -131,8 +129,8 @@ func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookie
 	if !req.AudioOnly {
 		args = append(args, "--merge-output-format", "mp4")
 	}
-	if withSections && req.Start != "" && req.End != "" {
-		section := fmt.Sprintf("*%s-%s", req.Start, req.End)
+	if withSections && endMs > startMs {
+		section := fmt.Sprintf("*%s-%s", FormatTimecode(startMs), FormatTimecode(endMs))
 		args = append(args, "--download-sections", section, "--force-keyframes-at-cuts")
 	}
 
@@ -358,18 +356,6 @@ func parseFFmpegTimeString(ts string) (float64, error) {
 	default:
 		return 0, fmt.Errorf("invalid time %q", ts)
 	}
-}
-
-func parseIntervalPair(startStr, endStr string) (float64, float64, error) {
-	startMs, err := ParseTimecode(startStr)
-	if err != nil {
-		return 0, 0, err
-	}
-	endMs, err := ParseTimecode(endStr)
-	if err != nil {
-		return 0, 0, err
-	}
-	return startMs, endMs, nil
 }
 
 var (

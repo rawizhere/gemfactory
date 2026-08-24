@@ -71,8 +71,9 @@ func (h *ClipHandlers) Help(ctx context.Context, message *telego.Message) {
 			text = "<b>/clip</b> — Cut video clip\n\n" +
 				"<code>/clip &lt;url&gt; &lt;start&gt; &lt;end&gt; [hq]</code>\n\n" +
 				"• Timecodes: <code>SS.ms</code>, <code>MM:SS</code>, <code>MM:SS.ms</code>, <code>HH:MM:SS</code>\n" +
-				"• <code>hq</code> — Quality up to 2K, max " + fmt.Sprintf("%.0f", h.maxSeconds(true)) + "s\n" +
-				"• Standard quality — Up to " + fmt.Sprintf("%.0f", h.maxSeconds(false)/60) + " minutes per clip\n" +
+				"• <code>hq</code> — Quality up to 2K, max " + fmt.Sprintf("%.0f", h.maxSeconds(ctx, true)) + "s\n" +
+				"• Standard quality — Up to " + fmt.Sprintf("%.0f", h.maxSeconds(ctx, false)/60) + " minutes per clip\n" +
+				"• An end beyond the video length means \"to the end\"\n" +
 				"• Direct links: Send YouTube Shorts or TikTok directly without commands\n" +
 				"Example: <code>/clip https://youtu.be/X56FLo6qslE 0:26 0:32</code>"
 		case "gif":
@@ -103,14 +104,14 @@ func (h *ClipHandlers) Help(ctx context.Context, message *telego.Message) {
 	h.user.Help(ctx, message)
 }
 
-func (h *ClipHandlers) maxSeconds(hq bool) float64 {
+func (h *ClipHandlers) maxSeconds(ctx context.Context, hq bool) float64 {
 	if h.downloads == nil {
 		if hq {
 			return 30
 		}
 		return 300
 	}
-	return h.downloads.MaxSegmentDurationSeconds(hq)
+	return h.downloads.MaxSegmentDurationSeconds(ctx, hq)
 }
 
 func (h *ClipHandlers) handleClipCommand(ctx context.Context, message *telego.Message, gif, subs, audioOnly bool) {

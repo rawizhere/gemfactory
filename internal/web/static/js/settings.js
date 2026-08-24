@@ -16,6 +16,8 @@ const SECTIONS = [
       FIELD('DOWNLOAD_CONCURRENCY', 'Max Concurrent Downloads', 'number', { min: 1, max: 20, hint: 'Parallel download & re-encode jobs' }),
       FIELD('DOWNLOAD_RETENTION_HOURS', 'Auto-Cleanup Retention', 'number', { min: 1, max: 8760, unit: 'hours', hint: 'Downloaded files older than this are removed hourly' }),
       FIELD('TG_FILE_LIMIT_MB', 'Telegram File Limit', 'number', { min: 1, max: 2048, unit: 'MB', hint: 'Larger clips are rejected with a "shorter interval" error' }),
+      FIELD('CLIP_MAX_DURATION_SECONDS', 'Max Clip Length', 'number', { min: 5, max: 3600, unit: 'sec', hint: 'Standard quality limit; end past video length clamps to the end' }),
+      FIELD('CLIP_MAX_DURATION_HQ_SECONDS', 'Max HQ Clip Length', 'number', { min: 5, max: 600, unit: 'sec', hint: 'Limit for hq clips' }),
       FIELD('YTDLP_PROXY', 'yt-dlp Proxy', 'text', { placeholder: 'socks5://host:port (empty = direct)', hint: 'Applies to new yt-dlp processes' }),
       FIELD('CLIP_DELETE_STATUS', 'Status Card After Completion', 'select', { options: [['false', 'Keep status message'], ['true', 'Delete status message']] }),
     ],

@@ -83,23 +83,19 @@ func TestCleanupOnceRemovesOldArtifactsOnly(t *testing.T) {
 	require.True(t, os.IsNotExist(isMissing(oldDir)), "empty dir after cleanup should be pruned")
 }
 
-func TestSubmitRejectsOverlongIntervals(t *testing.T) {
+func TestSubmitAcceptsOverlongIntervals(t *testing.T) {
 	t.Setenv("CLIP_MAX_DURATION_SECONDS", "300")
 	t.Setenv("CLIP_MAX_DURATION_HQ_SECONDS", "30")
 	s := newTestService(t)
 
-	// Invalid URL on purpose: duration is validated before the video-id lookup, so no download work starts.
-	badURL := "https://example.com/video"
+	// Overlong intervals are clamped/fail later, after metadata reveals the real duration.
+	// Invalid URL on purpose: its error proves the video-id lookup is now the first rejection point.
+	_, err := s.Submit(context.Background(), ClipRequest{URL: "https://example.com/video", Start: "0:00", End: "6:01"})
+	require.ErrorContains(t, err, "cannot extract video id")
+	require.NotContains(t, err.Error(), "is too long", "duration must not be validated at submit time")
 
-	_, err := s.Submit(context.Background(), ClipRequest{URL: badURL, Start: "0:00", End: "6:01"})
-	require.ErrorContains(t, err, "is too long", "6-minute normal clip must be rejected")
-
-	_, err = s.Submit(context.Background(), ClipRequest{URL: badURL, Start: "0:00", End: "4:59"})
-	require.Error(t, err)
-	require.NotContains(t, err.Error(), "is too long", "4:59 must pass duration check (next error should be url)")
-
-	_, err = s.Submit(context.Background(), ClipRequest{URL: badURL, Start: "0:00", End: "0:31", HQ: true})
-	require.ErrorContains(t, err, "is too long", "31-second HQ clip must be rejected")
+	_, err = s.Submit(context.Background(), ClipRequest{URL: "https://example.com/video", Start: "0:31", End: "0:30"})
+	require.ErrorContains(t, err, "must be after start", "reversed interval still fails at submit")
 }
 
 func TestCleanStorageProtectsActiveJobs(t *testing.T) {
