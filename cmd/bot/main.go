@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"gemfactory/internal/app"
 	"gemfactory/internal/config"
 	"gemfactory/internal/logger"
@@ -19,9 +20,18 @@ func main() {
 	}
 	log := l.Logger
 
+	if err := run(log); err != nil {
+		log.Error("Bot stopped with error", zap.Error(err))
+		os.Exit(1)
+	}
+
+	log.Info("Bot stopped successfully")
+}
+
+func run(log *zap.Logger) error {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatal("Failed to load configuration", zap.Error(err))
+		return err
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -29,18 +39,17 @@ func main() {
 
 	bot, err := app.NewBot(ctx, cfg, log)
 	if err != nil {
-		log.Fatal("Failed to create bot", zap.Error(err))
+		return err
 	}
 
-	if err := bot.Start(ctx); err != nil && err != context.Canceled {
-		log.Error("Bot stopped with error", zap.Error(err))
+	if err := bot.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		_ = bot.Stop()
-		os.Exit(1)
+		return err
 	}
 
 	if err := bot.Stop(); err != nil {
 		log.Error("Failed to stop bot gracefully", zap.Error(err))
 	}
 
-	log.Info("Bot stopped successfully")
+	return nil
 }

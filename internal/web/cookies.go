@@ -45,20 +45,19 @@ func (s *Server) listCookies(w http.ResponseWriter, r *http.Request) {
 		var health string
 		days := 0
 
-		if maxExp > 0 {
-			if maxExp < now {
-				health = "expired"
-				days = int((maxExp - now) / 86400)
-			} else if minExp > 0 && minExp < now+7*86400 {
-				health = "expiring_soon"
-				days = int((minExp - now) / 86400)
-			} else {
-				health = "valid"
-				days = int((maxExp - now) / 86400)
-			}
-		} else if count > 0 {
+		switch {
+		case maxExp > 0 && maxExp < now:
+			health = "expired"
+			days = int((maxExp - now) / 86400)
+		case maxExp > 0 && minExp > 0 && minExp < now+7*86400:
+			health = "expiring_soon"
+			days = int((minExp - now) / 86400)
+		case maxExp > 0:
+			health = "valid"
+			days = int((maxExp - now) / 86400)
+		case count > 0:
 			health = "session"
-		} else {
+		default:
 			health = "empty"
 		}
 

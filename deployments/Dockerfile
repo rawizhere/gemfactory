@@ -24,21 +24,25 @@ RUN apk add --no-cache \
     curl
 
 # Lato for burned subtitles; monochrome Noto Emoji (font-noto-emoji CBDT is unusable by libass).
+# Fonts pinned to google/fonts@ec62651 to keep builds reproducible.
 RUN mkdir -p /usr/share/fonts/lato \
     && curl -fsSL -o /usr/share/fonts/lato/Lato-Regular.ttf \
-      https://github.com/google/fonts/raw/main/ofl/lato/Lato-Regular.ttf \
+      https://github.com/google/fonts/raw/ec626514f79f831f1ab848a82114a0ce7e2d6372/ofl/lato/Lato-Regular.ttf \
     && curl -fsSL -o /usr/share/fonts/lato/NotoEmoji.ttf \
-      "https://github.com/google/fonts/raw/main/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf" \
-    && fc-cache -f >/dev/null
+      "https://github.com/google/fonts/raw/ec626514f79f831f1ab848a82114a0ce7e2d6372/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf" \
+    && fc-cache -f >/dev/null \
+    && addgroup -S app && adduser -S app -G app
 
 WORKDIR /app
 
-COPY --from=builder /app/gemfactory ./
-COPY deployments/start.sh ./start.sh
+COPY --from=builder --chown=app:app /app/gemfactory ./
+COPY --chown=app:app deployments/start.sh ./start.sh
 
-RUN mkdir -p /app/data /app/logs && \
-    chmod +x /app/start.sh /app/gemfactory && \
-    chmod -R 777 /app/logs /app/data
+RUN chmod +x ./start.sh ./gemfactory \
+    && mkdir -p /app/data /app/logs \
+    && chown -R app:app /app/data /app/logs
+
+USER app
 
 WORKDIR /app
 

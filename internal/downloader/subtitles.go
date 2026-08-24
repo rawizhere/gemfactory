@@ -19,7 +19,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/MercuryEngineering/CookieMonster"
+	cookiemonster "github.com/MercuryEngineering/CookieMonster"
 	"github.com/avast/retry-go/v4"
 	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"

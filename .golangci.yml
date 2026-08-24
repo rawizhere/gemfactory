@@ -1,0 +1,15 @@
+version: "2"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+linters:
+  default: standard
+  enable:
+    - gocritic
+    - misspell
+  settings:
+    unused:
+      whole-program: true

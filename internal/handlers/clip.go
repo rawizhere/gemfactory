@@ -255,13 +255,14 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 				}
 			case downloader.StageReencode:
 				state.percent = 0
-				if state.subsLang != "" {
+				switch {
+				case state.subsLang != "":
 					state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Burning subtitles (%s)...", state.subsLang)
-				} else if state.audioOnly {
+				case state.audioOnly:
 					state.statusLine = "<b>Converting:</b> Extracting MP3 (192 kbps)..."
-				} else if state.gif {
+				case state.gif:
 					state.statusLine = "<b>Re-encoding:</b> Generating GIF..."
-				} else {
+				default:
 					state.statusLine = "<b>Re-encoding:</b> Processing video..."
 				}
 			case downloader.StageUpload:
@@ -275,42 +276,36 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 			state.percent = p.Percent
 			switch p.Stage {
 			case downloader.StageDownload:
-				if p.Size != "" && p.Speed != "" && p.ETA != "" {
+				switch {
+				case p.Size != "" && p.Speed != "" && p.ETA != "":
 					state.statusLine = fmt.Sprintf("<b>Download:</b> %s (%s • ETA %s)", p.Size, p.Speed, p.ETA)
-				} else if p.Size != "" && p.Speed != "" {
+				case p.Size != "" && p.Speed != "":
 					state.statusLine = fmt.Sprintf("<b>Download:</b> %s (%s)", p.Size, p.Speed)
-				} else if p.Size != "" {
+				case p.Size != "":
 					state.statusLine = fmt.Sprintf("<b>Download:</b> %s", p.Size)
-				} else if p.Speed != "" {
+				case p.Speed != "":
 					state.statusLine = fmt.Sprintf("<b>Download:</b> %d%% (%s)", p.Percent, p.Speed)
-				} else {
+				default:
 					state.statusLine = fmt.Sprintf("<b>Download:</b> %d%%", p.Percent)
 				}
 			case downloader.StageReencode:
-				if state.subsLang != "" {
-					if p.Speed != "" {
-						state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Burning subtitles (%s • %s)", state.subsLang, p.Speed)
-					} else {
-						state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Burning subtitles (%s)", state.subsLang)
-					}
-				} else if state.audioOnly {
-					if p.Speed != "" {
-						state.statusLine = fmt.Sprintf("<b>Converting:</b> Extracting MP3 (%s)", p.Speed)
-					} else {
-						state.statusLine = "<b>Converting:</b> Extracting MP3 (192 kbps)..."
-					}
-				} else if state.gif {
-					if p.Speed != "" {
-						state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Generating GIF (%s)", p.Speed)
-					} else {
-						state.statusLine = "<b>Re-encoding:</b> Generating GIF..."
-					}
-				} else {
-					if p.Speed != "" {
-						state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Processing video (%s)", p.Speed)
-					} else {
-						state.statusLine = "<b>Re-encoding:</b> Processing video..."
-					}
+				switch {
+				case state.subsLang != "" && p.Speed != "":
+					state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Burning subtitles (%s • %s)", state.subsLang, p.Speed)
+				case state.subsLang != "":
+					state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Burning subtitles (%s)", state.subsLang)
+				case state.audioOnly && p.Speed != "":
+					state.statusLine = fmt.Sprintf("<b>Converting:</b> Extracting MP3 (%s)", p.Speed)
+				case state.audioOnly:
+					state.statusLine = "<b>Converting:</b> Extracting MP3 (192 kbps)..."
+				case state.gif && p.Speed != "":
+					state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Generating GIF (%s)", p.Speed)
+				case state.gif:
+					state.statusLine = "<b>Re-encoding:</b> Generating GIF..."
+				case p.Speed != "":
+					state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Processing video (%s)", p.Speed)
+				default:
+					state.statusLine = "<b>Re-encoding:</b> Processing video..."
 				}
 			}
 			edit()

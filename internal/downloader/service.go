@@ -309,7 +309,8 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		cbs.OnHashtags(AllHashtags(meta))
 	}
 
-	if job.Request.AudioOnly {
+	switch {
+	case job.Request.AudioOnly:
 		s.reportStage(job, StageDownload, "")
 		hasSections := job.Request.Start != "" && job.Request.End != ""
 		rawMedia := filepath.Join(s.workbenchDir(job.VideoID), job.ID+"_raw.mp4")
@@ -347,7 +348,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 				return
 			}
 		}
-	} else if job.Request.Start == "" && job.Request.End == "" {
+	case job.Request.Start == "" && job.Request.End == "":
 		s.reportStage(job, StageDownload, "")
 		if _, err := os.Stat(clipPath); os.IsNotExist(err) {
 			if err := s.downloadFullVideo(ctx, job.Request, clipPath, cookieFile, func(p ProgressUpdate) {
@@ -362,7 +363,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		if finalPath, rerr := s.ReencodeWithSubs(ctx, clipPath, "", false, 0, nil); rerr == nil {
 			clipPath = finalPath
 		}
-	} else {
+	default:
 		startMs, endMs := mustParsePair(job.Request.Start, job.Request.End)
 
 		var trimmedVTT string
