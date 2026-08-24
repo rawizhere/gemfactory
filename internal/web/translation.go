@@ -59,7 +59,6 @@ func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
 	clipPreset := cfg.Value(ctx, "CLIP_PRESET", "fast")
 	clipAudioBitrate := cfg.Value(ctx, "CLIP_AUDIO_BITRATE", "192k")
 	clipDeleteStatus := cfg.Bool(ctx, "CLIP_DELETE_STATUS", false)
-
 	resp := translationConfigResponse{
 		Chain:                 chainLabel(tc),
 		FallbackOrder:         strings.Join(tc.FallbackOrder, ", "),
@@ -380,7 +379,7 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 			}
 			for _, m := range tc.GeminiModels {
 				testModel(p, m, func() ([]string, string, error) {
-					return downloader.TranslateWithGemini(ctx, []string{sampleText}, targetLang, "", tc.GeminiKey, instr, videoTitle, []string{m})
+					return downloader.TranslateWithGemini(ctx, []string{sampleText}, targetLang, "", tc.GeminiKey, instr, videoTitle, nil, []string{m})
 				})
 			}
 		case downloader.ProviderGroq:
@@ -390,7 +389,7 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 			}
 			for _, m := range tc.GroqModels {
 				testModel(p, m, func() ([]string, string, error) {
-					return downloader.TranslateWithGroq(ctx, []string{sampleText}, targetLang, "", tc.GroqKey, instr, videoTitle, []string{m})
+					return downloader.TranslateWithGroq(ctx, []string{sampleText}, targetLang, "", tc.GroqKey, instr, videoTitle, nil, []string{m})
 				})
 			}
 		case downloader.ProviderOpencode:
@@ -400,7 +399,7 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 			}
 			for _, m := range tc.OpencodeModels {
 				testModel(p, m, func() ([]string, string, error) {
-					return downloader.TranslateWithOpencode(ctx, []string{sampleText}, targetLang, "", tc.OpencodeKey, instr, videoTitle, []string{m})
+					return downloader.TranslateWithOpencode(ctx, []string{sampleText}, targetLang, "", tc.OpencodeKey, instr, videoTitle, nil, []string{m})
 				})
 			}
 		case downloader.ProviderNvidia:
@@ -410,7 +409,7 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 			}
 			for _, m := range tc.NvidiaModels {
 				testModel(p, m, func() ([]string, string, error) {
-					return downloader.TranslateWithNvidia(ctx, []string{sampleText}, targetLang, "", tc.NvidiaKey, instr, videoTitle, []string{m})
+					return downloader.TranslateWithNvidia(ctx, []string{sampleText}, targetLang, "", tc.NvidiaKey, instr, videoTitle, nil, []string{m})
 				})
 			}
 		}

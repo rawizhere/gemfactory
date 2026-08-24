@@ -60,6 +60,10 @@ type Job struct {
 	lastProgPercent int
 	lastProgSpeed   string
 	lastProgAt      time.Time
+
+	// Last reported pipeline stage (with its detail), for callback re-attachment.
+	lastStage       string
+	lastStageDetail string
 }
 
 type Service struct {
@@ -253,16 +257,18 @@ type ProgressUpdate struct {
 
 // ClipCallbacks receives progress events for one job. All fields optional.
 type ClipCallbacks struct {
-	OnStage       func(stage, detail string)
-	OnHashtags    func(tags []string)
-	OnTranslation func(providerModel string)
-	OnProgress    func(p ProgressUpdate) // throttled
-	OnDone        func(path, caption string)
-	OnError       func(message string) // user-facing text
+	OnStage            func(stage, detail string)
+	OnHashtags         func(tags []string)
+	OnTranslation      func(providerModel string)
+	OnTranslateAttempt func(providerModel string) // fired before each LLM provider/model attempt
+	OnProgress         func(p ProgressUpdate)     // throttled
+	OnDone             func(path, caption string)
+	OnError            func(message string) // user-facing text
 }
 
 // Stage names reported via ClipCallbacks.OnStage.
 const (
+	StageQueued    = "queued"
 	StageMetadata  = "metadata"
 	StageSubtitles = "subtitles"
 	StageTranslate = "translate"
@@ -272,6 +278,7 @@ const (
 )
 
 func (s *Service) run(ctx context.Context, job *Job) {
+	s.reportStage(job, StageQueued, "")
 	s.acquireSlot()
 	defer s.releaseSlot()
 
@@ -472,6 +479,8 @@ func (s *Service) serveFromCache(job *Job, clipPath string, marker *cacheMarker)
 
 func (s *Service) reportStage(job *Job, stage, detail string) {
 	s.mu.Lock()
+	job.lastStage = stage
+	job.lastStageDetail = detail
 	cbs := job.callbacks
 	s.mu.Unlock()
 	if cbs != nil && cbs.OnStage != nil {
@@ -522,24 +531,17 @@ func abs(v int) int {
 
 func (s *Service) snapshotStage(job *Job, cbs *ClipCallbacks) {
 	s.mu.Lock()
-	status := job.Status
+	stage, detail := job.lastStage, job.lastStageDetail
 	lastPct := job.lastProgPercent
 	lastSpd := job.lastProgSpeed
 	s.mu.Unlock()
 
-	switch status {
-	case StatusDownloading:
-		cbs.OnStage(StageDownload, "")
-		if lastPct > 0 {
-			cbs.OnProgress(ProgressUpdate{Stage: StageDownload, Percent: lastPct, Speed: lastSpd})
-		}
-	case StatusProcessing:
-		cbs.OnStage(StageReencode, "")
-		if lastPct > 0 {
-			cbs.OnProgress(ProgressUpdate{Stage: StageReencode, Percent: lastPct, Speed: lastSpd})
-		}
-	case StatusPending:
-		cbs.OnStage(StageMetadata, "")
+	if stage == "" {
+		stage = StageQueued
+	}
+	cbs.OnStage(stage, detail)
+	if lastPct > 0 && (stage == StageDownload || stage == StageReencode) {
+		cbs.OnProgress(ProgressUpdate{Stage: stage, Percent: lastPct, Speed: lastSpd})
 	}
 }
 

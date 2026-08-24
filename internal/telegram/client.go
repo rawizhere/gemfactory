@@ -144,6 +144,9 @@ func (c *Client) EditMessageText(ctx context.Context, chatID int64, messageID in
 	}
 	params.LinkPreviewOptions = &telego.LinkPreviewOptions{IsDisabled: true}
 	_, err := c.bot.EditMessageText(ctx, params)
+	if err != nil && strings.Contains(err.Error(), "message is not modified") {
+		return nil
+	}
 	if err != nil {
 		c.logger.Warn("Failed to edit message", zap.Int64("chat_id", chatID), zap.Int("message_id", messageID), zap.Error(err))
 	}

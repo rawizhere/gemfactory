@@ -172,10 +172,12 @@ type clipTaskState struct {
 	stage         string
 	percent       int
 	statusLine    string
+	translating   string
 	translatedVia string
 	hashtags      []string
 	url           string
 	done          bool
+	lastRender    string
 }
 
 func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *downloader.ParsedCommand, req downloader.ClipRequest, replyToMsgID int) *downloader.ClipCallbacks {
@@ -187,13 +189,21 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 		audioOnly:  req.AudioOnly,
 		gif:        req.GIF,
 		statusLine: "Initializing...",
+		lastRender: initialStatusCard(req),
 	}
 
 	edit := func() {
 		if statusID < 0 {
 			return
 		}
-		_ = h.TG.EditMessageText(context.Background(), chatID, statusID, renderStatusCard(state))
+		text := renderStatusCard(state)
+		if text == state.lastRender {
+			return
+		}
+		state.lastRender = text
+		if err := h.TG.EditMessageText(context.Background(), chatID, statusID, text); err != nil {
+			h.Logger.Warn("failed to update status card", zap.Error(err))
+		}
 	}
 
 	return &downloader.ClipCallbacks{
@@ -207,9 +217,21 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 			edit()
 		},
 
+		OnTranslateAttempt: func(providerModel string) {
+			state.stage = downloader.StageTranslate
+			target := state.translating
+			if target == "" {
+				target = state.subsLang
+			}
+			state.statusLine = fmt.Sprintf("<b>Translating:</b> %s → %s...", target, providerModel)
+			edit()
+		},
+
 		OnStage: func(stage, detail string) {
 			state.stage = stage
 			switch stage {
+			case downloader.StageQueued:
+				state.statusLine = "Waiting for a free slot..."
 			case downloader.StageMetadata:
 				if detail != "" {
 					state.title = detail
@@ -222,6 +244,7 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 				state.statusLine = fmt.Sprintf("Extracting subtitles (%s)...", detail)
 			case downloader.StageTranslate:
 				state.percent = 0
+				state.translating = detail
 				state.statusLine = fmt.Sprintf("<b>Translating:</b> %s...", detail)
 			case downloader.StageDownload:
 				state.percent = 0

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -56,8 +55,8 @@ func (s *Service) subtitlesForClip(
 	if _, err := os.Stat(fullVTT); os.IsNotExist(err) {
 		dlErr := downloadSubtitlesDirect(ctx, res.TrackURL, cookieFile, fullVTT)
 		if dlErr != nil {
-			slog.Warn("direct subtitle download failed, falling back to yt-dlp",
-				"video_id", videoID, "error", dlErr)
+			s.logger.Warn("direct subtitle download failed, falling back to yt-dlp",
+				zap.String("video_id", videoID), zap.Error(dlErr))
 			if fbErr := s.downloadSubtitlesWithRetry(ctx, job, res.SourceLang, cookieFile, fullVTT); fbErr != nil {
 				return "", fmt.Errorf("failed to download subtitles: %w", dlErr)
 			}
@@ -83,7 +82,11 @@ func (s *Service) subtitlesForClip(
 			videoTitle = meta.Title
 		}
 		s.reportStage(job, StageTranslate, res.TargetLang)
-		prov, terr := s.translateVTTFile(ctx, trimmedPath, res.TargetLang, res.SourceLang, videoTitle, job.Request.SubsNoLLM)
+		var onAttempt func(string)
+		if cbs := job.callbacks; cbs != nil {
+			onAttempt = cbs.OnTranslateAttempt
+		}
+		prov, terr := s.translateVTTFile(ctx, trimmedPath, res.TargetLang, res.SourceLang, videoTitle, job.Request.SubsNoLLM, onAttempt)
 		if terr == nil && prov != "" {
 			job.Translation = prov
 			if job.callbacks != nil && job.callbacks.OnTranslation != nil {
@@ -91,7 +94,10 @@ func (s *Service) subtitlesForClip(
 			}
 		}
 		if terr != nil {
-			slog.Warn("vtt translation failed", "target_lang", res.TargetLang, "error", terr)
+			s.logger.Warn("vtt translation failed",
+				zap.String("target_lang", res.TargetLang),
+				zap.String("video_id", videoID),
+				zap.Error(terr))
 			return "", fmt.Errorf("translation into %s failed (%w)", res.TargetLang, terr)
 		}
 	}
@@ -149,7 +155,7 @@ func downloadSubtitlesDirect(ctx context.Context, rawURL, cookieFile, outPath st
 	return nil
 }
 
-func (s *Service) translateVTTFile(ctx context.Context, vttPath, targetLang, sourceLang, videoTitle string, noLLM bool) (string, error) {
+func (s *Service) translateVTTFile(ctx context.Context, vttPath, targetLang, sourceLang, videoTitle string, noLLM bool, onAttempt func(string)) (string, error) {
 	data, err := os.ReadFile(vttPath)
 	if err != nil {
 		return "", err
@@ -204,7 +210,7 @@ func (s *Service) translateVTTFile(ctx context.Context, vttPath, targetLang, sou
 	if noLLM {
 		cfg.GoogleOnly = true
 	}
-	translated, provider, err := TranslateWithChain(ctx, texts, targetLang, sourceLang, cfg, videoTitle)
+	translated, provider, err := s.TranslateWithChain(ctx, texts, targetLang, sourceLang, cfg, videoTitle, onAttempt)
 	if err != nil {
 		return "", err
 	}
@@ -276,10 +282,10 @@ func (s *Service) downloadSubtitlesWithRetry(ctx context.Context, job *Job, lang
 			return nil
 		}
 		lastErr = fmt.Errorf("yt-dlp subtitle download failed: %w: %s", runErr, truncate(string(out), 2000))
-		slog.Warn("subtitle download attempt failed",
-			"video_id", job.VideoID, "lang", lang,
-			"attempt", attempt, "of", subtitleDownloadAttempts,
-			"error", truncate(string(out), 500))
+		s.logger.Warn("subtitle download attempt failed",
+			zap.String("video_id", job.VideoID), zap.String("lang", lang),
+			zap.Int("attempt", attempt), zap.Int("of", subtitleDownloadAttempts),
+			zap.String("error", truncate(string(out), 500)))
 
 		select {
 		case <-ctx.Done():
@@ -580,6 +586,7 @@ func htmlEscape(s string) string {
 func (s *Service) ExtractMetadata(ctx context.Context, url, videoID, cookieFile string) (*SourceMeta, error) {
 	metaPath := filepath.Join(s.workbenchDir(videoID), videoID+".info.json")
 	if _, err := os.Stat(metaPath); err == nil {
+		s.logger.Info("metadata cache hit", zap.String("video_id", videoID))
 		return readSourceMeta(metaPath)
 	}
 
@@ -587,6 +594,15 @@ func (s *Service) ExtractMetadata(ctx context.Context, url, videoID, cookieFile 
 	if err != nil {
 		return nil, err
 	}
+
+	s.logger.Info("metadata extraction starting", zap.String("url", url), zap.String("video_id", videoID))
+	start := time.Now()
+	defer func() {
+		s.logger.Info("metadata extraction finished",
+			zap.String("url", url),
+			zap.String("video_id", videoID),
+			zap.Duration("elapsed", time.Since(start)))
+	}()
 
 	dir := filepath.Dir(metaPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -952,11 +968,26 @@ func (s *Service) TranslateTextsWithFallback(ctx context.Context, texts []string
 	if len(videoTitle) > 0 {
 		vTitle = videoTitle[0]
 	}
-	return TranslateWithChain(ctx, texts, targetLang, "", s.ResolveTranslationConfig(ctx), vTitle)
+	return s.TranslateWithChain(ctx, texts, targetLang, "", s.ResolveTranslationConfig(ctx), vTitle, nil)
+}
+
+// fireTranslateAttempt reports the provider/model about to be tried.
+func fireTranslateAttempt(onAttempt func(string), provider, model string) {
+	if onAttempt != nil && model != "" {
+		onAttempt(provider + "/" + model)
+	}
+}
+
+// warnTranslateFailure logs a failed provider attempt before the chain moves on.
+func (s *Service) warnTranslateFailure(provider, model string, err error) {
+	s.logger.Warn("translation provider failed",
+		zap.String("provider", provider),
+		zap.String("model", modelOrEmpty(model)),
+		zap.Error(errIf(err)))
 }
 
 // TranslateWithChain walks providers in configured order; first validated output wins.
-func TranslateWithChain(ctx context.Context, texts []string, targetLang, sourceLang string, cfg TranslationConfig, videoTitle string) ([]string, string, error) {
+func (s *Service) TranslateWithChain(ctx context.Context, texts []string, targetLang, sourceLang string, cfg TranslationConfig, videoTitle string, onAttempt func(string)) ([]string, string, error) {
 	if len(texts) == 0 {
 		return nil, "", nil
 	}
@@ -971,46 +1002,51 @@ func TranslateWithChain(ctx context.Context, texts []string, targetLang, sourceL
 			if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
 				return preserveSpeakerTags(texts, translated), ProviderGoogle + "/web", nil
 			}
+			s.warnTranslateFailure(provider, "web", err)
 			lastErr = fmt.Errorf("google: %w", err)
 
 		case ProviderOpencode:
 			if cfg.OpencodeKey == "" {
 				continue
 			}
-			translated, model, err := TranslateWithOpencode(ctx, texts, targetLang, sourceLang, cfg.OpencodeKey, instr, videoTitle, cfg.OpencodeModels)
+			translated, model, err := TranslateWithOpencode(ctx, texts, targetLang, sourceLang, cfg.OpencodeKey, instr, videoTitle, onAttempt, cfg.OpencodeModels)
 			if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
 				return preserveSpeakerTags(texts, translated), ProviderOpencode + "/" + model, nil
 			}
+			s.warnTranslateFailure(provider, model, err)
 			lastErr = fmt.Errorf("opencode (%s): %w", modelOrEmpty(model), errIf(err))
 
 		case ProviderNvidia:
 			if cfg.NvidiaKey == "" {
 				continue
 			}
-			translated, model, err := TranslateWithNvidia(ctx, texts, targetLang, sourceLang, cfg.NvidiaKey, instr, videoTitle, cfg.NvidiaModels)
+			translated, model, err := TranslateWithNvidia(ctx, texts, targetLang, sourceLang, cfg.NvidiaKey, instr, videoTitle, onAttempt, cfg.NvidiaModels)
 			if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
 				return preserveSpeakerTags(texts, translated), ProviderNvidia + "/" + model, nil
 			}
+			s.warnTranslateFailure(provider, model, err)
 			lastErr = fmt.Errorf("nvidia (%s): %w", modelOrEmpty(model), errIf(err))
 
 		case ProviderGemini:
 			if cfg.GeminiKey == "" {
 				continue
 			}
-			translated, model, err := TranslateWithGemini(ctx, texts, targetLang, sourceLang, cfg.GeminiKey, instr, videoTitle, cfg.GeminiModels)
+			translated, model, err := TranslateWithGemini(ctx, texts, targetLang, sourceLang, cfg.GeminiKey, instr, videoTitle, onAttempt, cfg.GeminiModels)
 			if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
 				return preserveSpeakerTags(texts, translated), ProviderGemini + "/" + model, nil
 			}
+			s.warnTranslateFailure(provider, model, err)
 			lastErr = fmt.Errorf("gemini (%s): %w", modelOrEmpty(model), errIf(err))
 
 		case ProviderGroq:
 			if cfg.GroqKey == "" {
 				continue
 			}
-			translated, model, err := TranslateWithGroq(ctx, texts, targetLang, sourceLang, cfg.GroqKey, instr, videoTitle, cfg.GroqModels)
+			translated, model, err := TranslateWithGroq(ctx, texts, targetLang, sourceLang, cfg.GroqKey, instr, videoTitle, onAttempt, cfg.GroqModels)
 			if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
 				return preserveSpeakerTags(texts, translated), ProviderGroq + "/" + model, nil
 			}
+			s.warnTranslateFailure(provider, model, err)
 			lastErr = fmt.Errorf("groq (%s): %w", modelOrEmpty(model), errIf(err))
 		}
 	}
@@ -1310,7 +1346,7 @@ func alignTranslatedLines(lines []string, expectedLen int) []string {
 	return out
 }
 
-func TranslateWithGemini(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction string, videoTitle string, models ...[]string) ([]string, string, error) {
+func TranslateWithGemini(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction, videoTitle string, onAttempt func(string), models ...[]string) ([]string, string, error) {
 	geminiModels := firstModels(models, DefaultGeminiModels)
 	userMsg := buildTranslateUserMsg(texts, targetLang, sourceLang, videoTitle)
 
@@ -1327,6 +1363,7 @@ func TranslateWithGemini(ctx context.Context, texts []string, targetLang, source
 
 	var lastErr error
 	for _, model := range geminiModels {
+		fireTranslateAttempt(onAttempt, ProviderGemini, model)
 		withSafety, withThinking := true, true
 		for attempt := 0; attempt < 3; attempt++ {
 			config := &genai.GenerateContentConfig{
@@ -1409,18 +1446,18 @@ const (
 	nvidiaBaseURL   = "https://integrate.api.nvidia.com/v1"
 )
 
-func TranslateWithGroq(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction string, videoTitle string, models ...[]string) ([]string, string, error) {
-	return translateOpenAICompatible(ctx, ProviderGroq, groqBaseURL, apiKey, firstModels(models, DefaultGroqModels), texts, targetLang, sourceLang, systemInstruction, videoTitle)
+func TranslateWithGroq(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction, videoTitle string, onAttempt func(string), models ...[]string) ([]string, string, error) {
+	return translateOpenAICompatible(ctx, ProviderGroq, groqBaseURL, apiKey, firstModels(models, DefaultGroqModels), texts, targetLang, sourceLang, systemInstruction, videoTitle, onAttempt)
 }
 
 // TranslateWithOpencode calls OpenCode Zen (OpenAI-compatible) with the given free-model chain.
-func TranslateWithOpencode(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction string, videoTitle string, models ...[]string) ([]string, string, error) {
-	return translateOpenAICompatible(ctx, ProviderOpencode, opencodeBaseURL, apiKey, firstModels(models, DefaultOpencodeModels), texts, targetLang, sourceLang, systemInstruction, videoTitle)
+func TranslateWithOpencode(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction, videoTitle string, onAttempt func(string), models ...[]string) ([]string, string, error) {
+	return translateOpenAICompatible(ctx, ProviderOpencode, opencodeBaseURL, apiKey, firstModels(models, DefaultOpencodeModels), texts, targetLang, sourceLang, systemInstruction, videoTitle, onAttempt)
 }
 
 // TranslateWithNvidia calls NVIDIA NIM (OpenAI-compatible) with the given model chain.
-func TranslateWithNvidia(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction string, videoTitle string, models ...[]string) ([]string, string, error) {
-	return translateOpenAICompatible(ctx, ProviderNvidia, nvidiaBaseURL, apiKey, firstModels(models, DefaultNvidiaModels), texts, targetLang, sourceLang, systemInstruction, videoTitle)
+func TranslateWithNvidia(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction, videoTitle string, onAttempt func(string), models ...[]string) ([]string, string, error) {
+	return translateOpenAICompatible(ctx, ProviderNvidia, nvidiaBaseURL, apiKey, firstModels(models, DefaultNvidiaModels), texts, targetLang, sourceLang, systemInstruction, videoTitle, onAttempt)
 }
 
 // firstModels returns the caller-supplied model chain or the default one.
@@ -1432,7 +1469,7 @@ func firstModels(models []([]string), def []string) []string {
 }
 
 // translateOpenAICompatible walks an OpenAI-compatible model chain until one produces parseable output.
-func translateOpenAICompatible(ctx context.Context, provider, baseURL, apiKey string, models []string, texts []string, targetLang, sourceLang, systemInstruction, videoTitle string) ([]string, string, error) {
+func translateOpenAICompatible(ctx context.Context, provider, baseURL, apiKey string, models []string, texts []string, targetLang, sourceLang, systemInstruction, videoTitle string, onAttempt func(string)) ([]string, string, error) {
 	userMsg := buildTranslateUserMsg(texts, targetLang, sourceLang, videoTitle)
 
 	cfg := openai.DefaultConfig(apiKey)
@@ -1442,6 +1479,7 @@ func translateOpenAICompatible(ctx context.Context, provider, baseURL, apiKey st
 
 	var lastErr error
 	for _, model := range models {
+		fireTranslateAttempt(onAttempt, provider, model)
 		req := openai.ChatCompletionRequest{
 			Model: model,
 			Messages: []openai.ChatCompletionMessage{
