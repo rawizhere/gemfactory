@@ -33,6 +33,12 @@ RUN mkdir -p /usr/share/fonts/lato \
     && fc-cache -f >/dev/null \
     && addgroup -S app && adduser -S app -G app
 
+# bgutil POT plugin; YouTube gates subtitle tracks behind PO tokens now.
+ARG BGUTIL_POT_VERSION=1.3.2
+RUN mkdir -p /etc/yt-dlp/plugins \
+    && curl -fsSL -o /etc/yt-dlp/plugins/bgutil-ytdlp-pot-provider.zip \
+      "https://github.com/Brainicism/bgutil-ytdlp-pot-provider/releases/download/${BGUTIL_POT_VERSION}/bgutil-ytdlp-pot-provider.zip"
+
 WORKDIR /app
 
 COPY --from=builder --chown=app:app /app/gemfactory ./

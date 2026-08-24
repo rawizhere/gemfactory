@@ -89,6 +89,9 @@ func (s *Service) baseYTDLPArgs(ctx context.Context, cookieFile string) []string
 		"--progress-template", "download:[download] %(progress._percent_str)s of %(progress._total_bytes_estimate_str|progress._total_bytes_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s",
 	}
 	args = append(args, s.authArgs(ctx, cookieFile)...)
+	if potURL := os.Getenv("BGUTIL_POT_URL"); potURL != "" {
+		args = append(args, "--extractor-args", "youtubepot-bgutilhttp:base_url="+potURL)
+	}
 	return args
 }
 
