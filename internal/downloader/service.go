@@ -328,14 +328,14 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		if _, err := os.Stat(clipPath); os.IsNotExist(err) {
 			if _, err := os.Stat(rawMedia); os.IsNotExist(err) {
 				if hasSections {
-					if err := s.downloadSegment(ctx, job.Request, rawMedia, cookieFile, segStartMs, segEndMs, func(p ProgressUpdate) {
+					if err := s.downloadSegment(ctx, job.Request, rawMedia, cookieFile, segStartMs, segEndMs, meta.IsVertical(), func(p ProgressUpdate) {
 						s.reportProgress(job, p)
 					}); err != nil {
 						s.fail(job, "download failed: "+err.Error())
 						return
 					}
 				} else {
-					if err := s.downloadFullVideo(ctx, job.Request, rawMedia, cookieFile, func(p ProgressUpdate) {
+					if err := s.downloadFullVideo(ctx, job.Request, rawMedia, cookieFile, meta.IsVertical(), func(p ProgressUpdate) {
 						s.reportProgress(job, p)
 					}); err != nil {
 						s.fail(job, "download failed: "+err.Error())
@@ -361,7 +361,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 	case job.Request.Start == "" && job.Request.End == "":
 		s.reportStage(job, StageDownload, "")
 		if _, err := os.Stat(clipPath); os.IsNotExist(err) {
-			if err := s.downloadFullVideo(ctx, job.Request, clipPath, cookieFile, func(p ProgressUpdate) {
+			if err := s.downloadFullVideo(ctx, job.Request, clipPath, cookieFile, meta.IsVertical(), func(p ProgressUpdate) {
 				s.reportProgress(job, p)
 			}); err != nil {
 				s.fail(job, "download failed: "+err.Error())
@@ -391,7 +391,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		s.setStatus(job, StatusDownloading)
 		s.reportStage(job, StageDownload, "")
 		if _, err := os.Stat(clipPath); os.IsNotExist(err) {
-			if err := s.downloadSegment(ctx, job.Request, clipPath, cookieFile, startMs, endMs, func(p ProgressUpdate) {
+			if err := s.downloadSegment(ctx, job.Request, clipPath, cookieFile, startMs, endMs, meta.IsVertical(), func(p ProgressUpdate) {
 				s.reportProgress(job, p)
 			}); err != nil {
 				s.fail(job, "download failed: "+err.Error())

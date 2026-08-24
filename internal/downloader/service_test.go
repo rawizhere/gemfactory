@@ -149,3 +149,14 @@ func TestOutputPathFor(t *testing.T) {
 	}
 	require.Equal(t, "/tmp/workbench/abc123XYZ/abc123XYZ_000010-000-000030-000.mp4", svc.outputPathFor(clipJob))
 }
+
+func TestFormatSelectorVertical(t *testing.T) {
+	horizontal := formatSelector(1080, false, false, false, false)
+	require.Equal(t, "bestvideo[height<=1080]+bestaudio/best[height<=1080]", horizontal)
+
+	vertical := formatSelector(1080, false, false, false, true)
+	require.Equal(t, "bestvideo[width<=1080]+bestaudio/best[width<=1080]", vertical)
+
+	verticalHQ := formatSelector(1080, true, false, false, true)
+	require.Equal(t, "bestvideo[width<=1440]+bestaudio/best[width<=1440]", verticalHQ)
+}

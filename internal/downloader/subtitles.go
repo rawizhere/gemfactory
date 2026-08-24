@@ -496,8 +496,15 @@ type SourceMeta struct {
 	Tags              []string                   `json:"tags"`
 	Language          string                     `json:"language"`
 	Duration          float64                    `json:"duration"`
+	Width             int                        `json:"width"`
+	Height            int                        `json:"height"`
 	Subtitles         map[string][]SubtitleTrack `json:"subtitles"`
 	AutomaticCaptions map[string][]SubtitleTrack `json:"automatic_captions"`
+}
+
+// IsVertical reports whether the source video is taller than wide.
+func (m *SourceMeta) IsVertical() bool {
+	return m != nil && m.Height > 0 && m.Height > m.Width
 }
 
 // displayTitleParts returns the cleaned base title and the alt (English) title.

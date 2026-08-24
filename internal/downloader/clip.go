@@ -58,20 +58,25 @@ func FormatHumanSize(raw string) string {
 }
 
 // formatSelector picks the yt-dlp -f expression for the given quality tier.
-func formatSelector(maxHeight int, hq, shorts, audioOnly bool) string {
+// Vertical videos are capped by width so their full height fits the tier.
+func formatSelector(maxHeight int, hq, shorts, audioOnly, vertical bool) string {
 	if audioOnly {
 		return "bestaudio/best"
+	}
+	dim := "height"
+	if vertical {
+		dim = "width"
 	}
 	switch {
 	case shorts:
 		return "bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
 	case hq:
-		return "bestvideo[height<=1440]+bestaudio/best[height<=1440]"
+		return fmt.Sprintf("bestvideo[%s<=1440]+bestaudio/best[%s<=1440]", dim, dim)
 	default:
 		if maxHeight <= 0 {
 			maxHeight = 1080
 		}
-		return fmt.Sprintf("bestvideo[height<=%d]+bestaudio/best[height<=%d]", maxHeight, maxHeight)
+		return fmt.Sprintf("bestvideo[%s<=%d]+bestaudio/best[%s<=%d]", dim, maxHeight, dim, maxHeight)
 	}
 }
 
@@ -86,6 +91,8 @@ func (s *Service) baseYTDLPArgs(ctx context.Context, cookieFile string) []string
 		"-N", "4",
 		"--add-header", "Accept-Language:en-US,en;q=0.9",
 		"--extractor-args", "youtube:lang=en",
+		// mweb keeps DASH alive now that web is SABR'd; web_safari adds an HLS fallback.
+		"--extractor-args", "youtube:player_client=default,mweb,web_safari",
 		"--progress-template", "download:[download] %(progress._percent_str)s of %(progress._total_bytes_estimate_str|progress._total_bytes_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s",
 	}
 	args = append(args, s.authArgs(ctx, cookieFile)...)
@@ -96,17 +103,17 @@ func (s *Service) baseYTDLPArgs(ctx context.Context, cookieFile string) []string
 }
 
 // downloadFullVideo downloads an entire video (shorts / tiktok) at best quality.
-func (s *Service) downloadFullVideo(ctx context.Context, req ClipRequest, outPath, cookieFile string, onProgress func(ProgressUpdate)) error {
-	return s.download(ctx, req, outPath, cookieFile, false, 0, 0, onProgress)
+func (s *Service) downloadFullVideo(ctx context.Context, req ClipRequest, outPath, cookieFile string, vertical bool, onProgress func(ProgressUpdate)) error {
+	return s.download(ctx, req, outPath, cookieFile, false, 0, 0, vertical, onProgress)
 }
 
 // downloadSegment downloads a video section via yt-dlp --download-sections and merges it to mp4.
-func (s *Service) downloadSegment(ctx context.Context, req ClipRequest, outPath, cookieFile string, startMs, endMs float64, onProgress func(ProgressUpdate)) error {
-	return s.download(ctx, req, outPath, cookieFile, true, startMs, endMs, onProgress)
+func (s *Service) downloadSegment(ctx context.Context, req ClipRequest, outPath, cookieFile string, startMs, endMs float64, vertical bool, onProgress func(ProgressUpdate)) error {
+	return s.download(ctx, req, outPath, cookieFile, true, startMs, endMs, vertical, onProgress)
 }
 
 // download runs the yt-dlp download; withSections cuts [startMs, endMs) via --download-sections.
-func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookieFile string, withSections bool, startMs, endMs float64, onProgress func(ProgressUpdate)) error {
+func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookieFile string, withSections bool, startMs, endMs float64, vertical bool, onProgress func(ProgressUpdate)) error {
 	bin, err := YTDLPBinary()
 	if err != nil {
 		return err
@@ -120,7 +127,7 @@ func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookie
 		expectedDurationMS = endMs - startMs
 	}
 
-	format := formatSelector(req.Quality, req.HQ, req.Shorts, req.AudioOnly)
+	format := formatSelector(req.Quality, req.HQ, req.Shorts, req.AudioOnly, vertical)
 
 	args := append(s.baseYTDLPArgs(ctx, cookieFile),
 		"-f", format,

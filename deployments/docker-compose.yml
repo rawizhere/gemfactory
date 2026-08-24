@@ -40,7 +40,7 @@ services:
       WEB_PORT: 9090
       LOG_LEVEL: ${LOG_LEVEL:-info}
       SCRAPER_REQUEST_DELAY: ${SCRAPER_REQUEST_DELAY:-2s}
-      # PO token provider for yt-dlp subtitle tracks
+      # PO token provider for yt-dlp
       BGUTIL_POT_URL: http://bgutil-pot:4416
     ports:
       - "8080:8080"
@@ -61,7 +61,7 @@ services:
     networks:
       - gemfactory
 
-  # Generates YouTube PO tokens for yt-dlp subtitle access
+  # YouTube PO token provider for yt-dlp
   bgutil-pot:
     image: brainicism/bgutil-ytdlp-pot-provider:1.3.2-node
     container_name: gemfactory-bgutil
