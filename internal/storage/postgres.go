@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
@@ -15,70 +16,75 @@ import (
 
 type Postgres struct {
 	db     *bun.DB
+	sqldb  *sql.DB
 	logger *zap.Logger
 }
 
 func NewPostgres(ctx context.Context, databaseURL string, logger *zap.Logger) (*Postgres, error) {
 	const maxRetries = 10
-	const retryDelay = 5 * time.Second
 
-	for attempt := 1; attempt <= maxRetries; attempt++ {
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("connection cancelled: %w", ctx.Err())
-		default:
-		}
+	var db *bun.DB
+	var sqldb *sql.DB
+	err := retry.Do(
+		func() error {
+			sqldb = sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(databaseURL)))
+			sqldb.SetMaxOpenConns(25)
+			sqldb.SetMaxIdleConns(10)
+			sqldb.SetConnMaxLifetime(5 * time.Minute)
+			sqldb.SetConnMaxIdleTime(1 * time.Minute)
 
-		sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(databaseURL)))
-		sqldb.SetMaxOpenConns(25)
-		sqldb.SetMaxIdleConns(10)
-		sqldb.SetConnMaxLifetime(5 * time.Minute)
-		sqldb.SetConnMaxIdleTime(1 * time.Minute)
+			candidate := bun.NewDB(sqldb, pgdialect.New())
 
-		db := bun.NewDB(sqldb, pgdialect.New())
-
-		initCtx, initCancel := context.WithTimeout(ctx, 5*time.Second)
-		_, err := db.ExecContext(initCtx, "SET search_path TO gemfactory, public")
-		initCancel()
-		if err != nil {
-			logger.Warn("Failed to set search_path", zap.Error(err))
-		}
-
-		if logger.Core().Enabled(zap.DebugLevel) {
-			db.AddQueryHook(bundebug.NewQueryHook(
-				bundebug.WithVerbose(true),
-				bundebug.FromEnv("BUNDEBUG"),
-			))
-		}
-
-		pingCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
-		pingErr := db.PingContext(pingCtx)
-		pingCancel()
-
-		if pingErr != nil {
-			logger.Warn("Failed to connect to database", zap.Int("attempt", attempt), zap.Error(pingErr))
-			_ = db.Close()
-
-			if attempt == maxRetries {
-				return nil, fmt.Errorf("failed to connect to database after %d attempts: %w", maxRetries, pingErr)
+			initCtx, initCancel := context.WithTimeout(ctx, 5*time.Second)
+			_, err := candidate.ExecContext(initCtx, "SET search_path TO gemfactory, public")
+			initCancel()
+			if err != nil {
+				logger.Warn("Failed to set search_path", zap.Error(err))
 			}
 
-			select {
-			case <-time.After(retryDelay):
-				continue
-			case <-ctx.Done():
-				return nil, fmt.Errorf("interrupted during retry delay: %w", ctx.Err())
+			if logger.Core().Enabled(zap.DebugLevel) {
+				candidate.AddQueryHook(bundebug.NewQueryHook(
+					bundebug.WithVerbose(true),
+					bundebug.FromEnv("BUNDEBUG"),
+				))
 			}
-		}
 
-		logger.Info("Connected to PostgreSQL database with Bun ORM")
-		return &Postgres{
-			db:     db,
-			logger: logger,
-		}, nil
+			pingCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
+			pingErr := candidate.PingContext(pingCtx)
+			pingCancel()
+
+			if pingErr != nil {
+				_ = candidate.Close()
+				return pingErr
+			}
+
+			db = candidate
+			return nil
+		},
+		retry.Context(ctx),
+		retry.Attempts(maxRetries),
+		retry.Delay(5*time.Second),
+		retry.LastErrorOnly(true),
+		retry.OnRetry(func(n uint, err error) {
+			logger.Warn("Failed to connect to database", zap.Uint("attempt", n+1), zap.Error(err))
+		}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	return nil, fmt.Errorf("unexpected error: max retries exceeded")
+	logger.Info("Connected to PostgreSQL database with Bun ORM")
+
+	if err := Migrate(ctx, sqldb, logger); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+
+	return &Postgres{
+		db:     db,
+		sqldb:  sqldb,
+		logger: logger,
+	}, nil
 }
 
 func (p *Postgres) Close() error {

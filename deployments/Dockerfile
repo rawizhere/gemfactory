@@ -34,7 +34,6 @@ RUN mkdir -p /usr/share/fonts/lato \
 WORKDIR /app
 
 COPY --from=builder /app/gemfactory ./
-COPY --from=builder /app/migrations ./migrations
 COPY deployments/start.sh ./start.sh
 
 RUN mkdir -p /app/data /app/logs && \

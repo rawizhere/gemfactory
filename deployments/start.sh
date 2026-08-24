@@ -10,14 +10,7 @@ until pg_isready -d "$DB_DSN"; do
   sleep 2
 done
 
-# Apply migrations
-echo "Applying migrations..."
-for f in /app/migrations/*.up.sql; do
-  if [ -f "$f" ]; then
-    echo "Applying migration $f..."
-    psql -d "$DB_DSN" -f "$f" || echo "Warning: error applying $f (might already exist)"
-  fi
-done
+# Migrations are applied by the application itself (embedded goose) on startup.
 
 # Ensure app directories exist
 mkdir -p /app/data /app/logs
