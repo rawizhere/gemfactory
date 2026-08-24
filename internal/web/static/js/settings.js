@@ -209,6 +209,10 @@ export async function loadTranslationConfig() {
       if (retentionInput && data.retention_hours) {
         retentionInput.value = data.retention_hours;
       }
+      const timeoutInput = $('#translation-timeout-input');
+      if (timeoutInput && data.translation_timeout) {
+        timeoutInput.value = data.translation_timeout;
+      }
       updateFallbackBadge(data.chain);
     }
   } catch (err) {
@@ -250,6 +254,16 @@ export async function saveTranslationConfig() {
     fallback_order: fallbackOrderInput ? fallbackOrderInput.value : undefined,
     prompt: promptArea ? promptArea.value : undefined,
   };
+
+  const timeoutInput = $('#translation-timeout-input');
+  if (timeoutInput && timeoutInput.value.trim()) {
+    const val = parseInt(timeoutInput.value, 10);
+    if (isNaN(val) || val < 10 || val > 600) {
+      alert('Translation timeout must be between 10 and 600 seconds');
+      return;
+    }
+    payload.translation_timeout = val;
+  }
 
   try {
     if (btn) {

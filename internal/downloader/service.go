@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"go.uber.org/zap"
 
@@ -304,14 +303,6 @@ func (s *Service) run(ctx context.Context, job *Job) {
 	if err != nil {
 		s.fail(job, "metadata extraction failed: "+err.Error())
 		return
-	}
-	if meta.AltTitle == "" && hasNonLatin(meta.Title) {
-		if trs, _, trErr := s.TranslateTextsWithFallback(ctx, []string{meta.Title}, "en"); trErr == nil && len(trs) > 0 {
-			enTitle := strings.TrimSpace(trs[0])
-			if enTitle != "" && !strings.EqualFold(enTitle, meta.Title) {
-				meta.AltTitle = enTitle
-			}
-		}
 	}
 	s.reportStage(job, StageMetadata, DisplayTitle(meta))
 	if cbs := job.callbacks; cbs != nil && cbs.OnHashtags != nil {
@@ -819,13 +810,4 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "...(truncated)"
-}
-
-func hasNonLatin(s string) bool {
-	for _, r := range s {
-		if r > 0x024F && !unicode.IsPunct(r) && !unicode.IsSymbol(r) && !unicode.IsSpace(r) && !unicode.IsDigit(r) {
-			return true
-		}
-	}
-	return false
 }

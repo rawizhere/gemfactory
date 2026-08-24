@@ -15,11 +15,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 
-	"github.com/avast/retry-go/v4"
 	"github.com/MercuryEngineering/CookieMonster"
+	"github.com/avast/retry-go/v4"
 	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
 	"google.golang.org/genai"
@@ -960,17 +961,6 @@ func BuildFallbackChain(cfg TranslationConfig) []string {
 	return []string{ProviderGemini, ProviderNvidia, ProviderGroq, ProviderOpencode}
 }
 
-func (s *Service) TranslateTextsWithFallback(ctx context.Context, texts []string, targetLang string, videoTitle ...string) ([]string, string, error) {
-	if len(texts) == 0 {
-		return nil, "", nil
-	}
-	vTitle := ""
-	if len(videoTitle) > 0 {
-		vTitle = videoTitle[0]
-	}
-	return s.TranslateWithChain(ctx, texts, targetLang, "", s.ResolveTranslationConfig(ctx), vTitle, nil)
-}
-
 // fireTranslateAttempt reports the provider/model about to be tried.
 func fireTranslateAttempt(onAttempt func(string), provider, model string) {
 	if onAttempt != nil && model != "" {
@@ -1203,8 +1193,25 @@ func maxOutputTokens(lines int, model string) int {
 	return tokens
 }
 
+// customLLMTimeoutSeconds holds a runtime override applied from the web panel.
+var customLLMTimeout atomic.Int64
+
+// SetTranslationTimeoutSeconds applies a configured LLM timeout at runtime.
+func SetTranslationTimeoutSeconds(sec int64) {
+	if sec > 0 {
+		customLLMTimeout.Store(sec)
+	}
+}
+
+func TranslationTimeoutSeconds() int64 {
+	return int64(llmTimeout() / time.Second)
+}
+
 // llmTimeout bounds a single LLM request; a whole subtitle file goes out in one call.
 func llmTimeout() time.Duration {
+	if v := customLLMTimeout.Load(); v > 0 {
+		return time.Duration(v) * time.Second
+	}
 	if v, err := time.ParseDuration(os.Getenv("TRANSLATION_TIMEOUT")); err == nil && v > 0 {
 		return v
 	}

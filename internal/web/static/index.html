@@ -293,6 +293,11 @@
             <span class="hint">Preferred source languages for RU translation (e.g. en,ko)</span>
             <input type="text" id="source-pref-ru-input" placeholder="en,ko" style="font-family:monospace; font-size:0.8rem;">
           </div>
+          <div class="settings-field">
+            <label for="translation-timeout-input">LLM Request Timeout (sec)</label>
+            <span class="hint">Per-provider timeout before falling back (10–600)</span>
+            <input type="number" id="translation-timeout-input" min="10" max="600" value="180">
+          </div>
         </div>
 
         <hr class="settings-divider">

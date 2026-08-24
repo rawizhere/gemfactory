@@ -40,6 +40,7 @@ type translationConfigResponse struct {
 	ClipAudioBitrate      string `json:"clip_audio_bitrate"`
 	ClipDeleteStatus      bool   `json:"clip_delete_status"`
 	RetentionHours        int    `json:"retention_hours"`
+	TranslationTimeout    int    `json:"translation_timeout"`
 }
 
 func (s *Server) translationConfig() downloader.TranslationConfig {
@@ -61,7 +62,7 @@ func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
 	clipAudioBitrate := cfg.Value(ctx, "CLIP_AUDIO_BITRATE", "192k")
 	clipDeleteStatus := cfg.Bool(ctx, "CLIP_DELETE_STATUS", false)
 	retentionHours := cfg.Int(ctx, "DOWNLOAD_RETENTION_HOURS", 24)
-
+	translationTimeout := int(downloader.TranslationTimeoutSeconds())
 	resp := translationConfigResponse{
 		Chain:                 chainLabel(tc),
 		FallbackOrder:         strings.Join(tc.FallbackOrder, ", "),
@@ -87,6 +88,7 @@ func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
 		ClipAudioBitrate:      clipAudioBitrate,
 		ClipDeleteStatus:      clipDeleteStatus,
 		RetentionHours:        retentionHours,
+		TranslationTimeout:    translationTimeout,
 	}
 	writeJSON(w, resp)
 }
@@ -122,24 +124,25 @@ func validCRF(s string) bool {
 
 func (s *Server) updateTranslationConfig(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		GeminiKey        *string `json:"gemini_api_key"`
-		GroqKey          *string `json:"groq_api_key"`
-		OpencodeKey      *string `json:"opencode_api_key"`
-		NvidiaKey        *string `json:"nvidia_api_key"`
-		GeminiModels     *string `json:"gemini_models"`
-		GroqModels       *string `json:"groq_models"`
-		OpencodeModels   *string `json:"opencode_models"`
-		NvidiaModels     *string `json:"nvidia_models"`
-		FallbackOrder    *string `json:"fallback_order"`
-		SourcePrefRU     *string `json:"source_pref_ru"`
-		Prompt           *string `json:"prompt"`
-		Concurrency      *int    `json:"concurrency"`
-		ClipCRF          *string `json:"clip_crf"`
-		SubsCRF          *string `json:"subs_crf"`
-		ClipPreset       *string `json:"clip_preset"`
-		ClipAudioBitrate *string `json:"clip_audio_bitrate"`
-		ClipDeleteStatus *bool   `json:"clip_delete_status"`
-		RetentionHours   *int    `json:"retention_hours"`
+		GeminiKey          *string `json:"gemini_api_key"`
+		GroqKey            *string `json:"groq_api_key"`
+		OpencodeKey        *string `json:"opencode_api_key"`
+		NvidiaKey          *string `json:"nvidia_api_key"`
+		GeminiModels       *string `json:"gemini_models"`
+		GroqModels         *string `json:"groq_models"`
+		OpencodeModels     *string `json:"opencode_models"`
+		NvidiaModels       *string `json:"nvidia_models"`
+		FallbackOrder      *string `json:"fallback_order"`
+		SourcePrefRU       *string `json:"source_pref_ru"`
+		Prompt             *string `json:"prompt"`
+		Concurrency        *int    `json:"concurrency"`
+		ClipCRF            *string `json:"clip_crf"`
+		SubsCRF            *string `json:"subs_crf"`
+		ClipPreset         *string `json:"clip_preset"`
+		ClipAudioBitrate   *string `json:"clip_audio_bitrate"`
+		ClipDeleteStatus   *bool   `json:"clip_delete_status"`
+		RetentionHours     *int    `json:"retention_hours"`
+		TranslationTimeout *int    `json:"translation_timeout"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -269,6 +272,18 @@ func (s *Server) updateTranslationConfig(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		if !set("DOWNLOAD_RETENTION_HOURS", strconv.Itoa(h)) {
+			return
+		}
+	}
+
+	if req.TranslationTimeout != nil {
+		sec := *req.TranslationTimeout
+		if sec < 10 || sec > 600 {
+			http.Error(w, "translation timeout must be between 10 and 600 seconds", http.StatusBadRequest)
+			return
+		}
+		downloader.SetTranslationTimeoutSeconds(int64(sec))
+		if !set("TRANSLATION_TIMEOUT", strconv.Itoa(sec)) {
 			return
 		}
 	}
