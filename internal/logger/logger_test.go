@@ -12,12 +12,6 @@ func TestNewLogger(t *testing.T) {
 	l, err := New()
 	require.NoError(t, err, "failed to create logger")
 	require.Equal(t, zapcore.DebugLevel, l.Level.Level())
-
-	l.SetLevel("warn")
-	require.Equal(t, zapcore.WarnLevel, l.Level.Level())
-
-	l.SetLevel("invalid_level")
-	require.Equal(t, zapcore.WarnLevel, l.Level.Level(), "expected level to remain unchanged on invalid input")
 }
 
 func TestGetLogLevel(t *testing.T) {

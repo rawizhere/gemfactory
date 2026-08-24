@@ -368,3 +368,27 @@ func TestSplitDialogueLines(t *testing.T) {
 		require.Equal(t, want, splitDialogueLines(in), "splitDialogueLines(%q)", in)
 	}
 }
+
+func TestContextOnlyCaption(t *testing.T) {
+	cases := map[string]bool{
+		"[신기]":             true,
+		"[작고 소중한 비눗방울 전달]": true,
+		"Wow!":             true,
+		"-What?!":          true,
+		"...":              true,
+		"":                 true,
+		"우와!":              false,
+		"Обычная реплика":  false,
+		"Give me, give me": false,
+		"[설명] обычный текст в скобках": false,
+	}
+	for in, want := range cases {
+		require.Equal(t, want, contextOnlyCaption(in), "contextOnlyCaption(%q)", in)
+	}
+}
+
+func TestLinePassesTargetContextCues(t *testing.T) {
+	require.True(t, linePassesTarget("[작고 소중한 비눗방울 전달]", "[작고 소중한 비눗방울 전달]", "ru"), "bracketed caption kept as-is must pass")
+	require.True(t, linePassesTarget("우와!", "Wow!", "ru"), "interjection may stay Latin")
+	require.False(t, linePassesTarget("안녕하세요", "안녕하세요", "ru"), "regular untranslated line must fail")
+}

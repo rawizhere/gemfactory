@@ -35,6 +35,12 @@ var inlineWordTimestampRe = regexp.MustCompile(`<\d{2}:\d{2}:\d{2}\.\d{3}>`)
 // thinkTagRe strips reasoning/thinking tags emitted by models like Qwen.
 var thinkTagRe = regexp.MustCompile(`(?s)<think>.*?</think>`)
 
+// bracketGroupRe matches [description] blocks used for sound-effect captions.
+var bracketGroupRe = regexp.MustCompile(`\[[^]]*\]`)
+
+// interjectionRe matches short standalone exclamations like "- Wow!".
+var interjectionRe = regexp.MustCompile(`^[-–—!?.\s]*[A-Za-z]{1,5}[-–—!?.\s]*$`)
+
 func (s *Service) subtitlesForClip(
 	ctx context.Context,
 	meta *SourceMeta,
@@ -968,12 +974,44 @@ func fireTranslateAttempt(onAttempt func(string), provider, model string) {
 	}
 }
 
-// warnTranslateFailure logs a failed provider attempt before the chain moves on.
-func (s *Service) warnTranslateFailure(provider, model string, err error) {
+// warnTranslateFailure logs a failed provider attempt; nil err means the output was rejected by validation.
+func (s *Service) warnTranslateFailure(provider, model string, err error, src, res []string, targetLang string) {
+	if err == nil {
+		total, bad, samples := scoreValidation(src, res, targetLang)
+		s.logger.Debug("translation output rejected by language validation",
+			zap.String("provider", provider),
+			zap.String("model", modelOrEmpty(model)),
+			zap.String("target_lang", targetLang),
+			zap.Int("lines_total", total),
+			zap.Int("lines_bad", bad),
+			zap.Int("bad_threshold", total/4+1),
+			zap.Strings("rejected_samples", samples),
+			zap.String("full_output", truncate(strings.Join(res, "\n"), 8000)))
+	}
 	s.logger.Warn("translation provider failed",
 		zap.String("provider", provider),
 		zap.String("model", modelOrEmpty(model)),
 		zap.Error(errIf(err)))
+}
+
+// scoreValidation counts lines failing language validation and samples bad pairs for debug logs.
+func scoreValidation(src, res []string, targetLang string) (total, bad int, samples []string) {
+	const maxRejectedSamples = 5
+	for i, out := range res {
+		srcLine := ""
+		if i < len(src) {
+			srcLine = src[i]
+		}
+		if linePassesTarget(srcLine, out, targetLang) {
+			continue
+		}
+		bad++
+		if len(samples) < maxRejectedSamples {
+			samples = append(samples,
+				fmt.Sprintf("%d| %s -> %s", i+1, truncate(strings.TrimSpace(srcLine), 80), truncate(strings.TrimSpace(out), 120)))
+		}
+	}
+	return len(res), bad, samples
 }
 
 // TranslateWithChain walks providers in configured order; first validated output wins.
@@ -992,7 +1030,7 @@ func (s *Service) TranslateWithChain(ctx context.Context, texts []string, target
 			if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
 				return preserveSpeakerTags(texts, translated), ProviderGoogle + "/web", nil
 			}
-			s.warnTranslateFailure(provider, "web", err)
+			s.warnTranslateFailure(provider, "web", err, texts, translated, targetLang)
 			lastErr = fmt.Errorf("google: %w", err)
 
 		case ProviderOpencode:
@@ -1003,7 +1041,7 @@ func (s *Service) TranslateWithChain(ctx context.Context, texts []string, target
 			if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
 				return preserveSpeakerTags(texts, translated), ProviderOpencode + "/" + model, nil
 			}
-			s.warnTranslateFailure(provider, model, err)
+			s.warnTranslateFailure(provider, model, err, texts, translated, targetLang)
 			lastErr = fmt.Errorf("opencode (%s): %w", modelOrEmpty(model), errIf(err))
 
 		case ProviderNvidia:
@@ -1014,7 +1052,7 @@ func (s *Service) TranslateWithChain(ctx context.Context, texts []string, target
 			if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
 				return preserveSpeakerTags(texts, translated), ProviderNvidia + "/" + model, nil
 			}
-			s.warnTranslateFailure(provider, model, err)
+			s.warnTranslateFailure(provider, model, err, texts, translated, targetLang)
 			lastErr = fmt.Errorf("nvidia (%s): %w", modelOrEmpty(model), errIf(err))
 
 		case ProviderGemini:
@@ -1025,7 +1063,7 @@ func (s *Service) TranslateWithChain(ctx context.Context, texts []string, target
 			if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
 				return preserveSpeakerTags(texts, translated), ProviderGemini + "/" + model, nil
 			}
-			s.warnTranslateFailure(provider, model, err)
+			s.warnTranslateFailure(provider, model, err, texts, translated, targetLang)
 			lastErr = fmt.Errorf("gemini (%s): %w", modelOrEmpty(model), errIf(err))
 
 		case ProviderGroq:
@@ -1036,12 +1074,21 @@ func (s *Service) TranslateWithChain(ctx context.Context, texts []string, target
 			if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
 				return preserveSpeakerTags(texts, translated), ProviderGroq + "/" + model, nil
 			}
-			s.warnTranslateFailure(provider, model, err)
+			s.warnTranslateFailure(provider, model, err, texts, translated, targetLang)
 			lastErr = fmt.Errorf("groq (%s): %w", modelOrEmpty(model), errIf(err))
 		}
 	}
 
 	if lastErr != nil {
+		// Last-resort Google web translate before failing the job.
+		if !cfg.GoogleOnly {
+			translated, gerr := TranslateWithGoogle(ctx, texts, targetLang)
+			if gerr == nil && TranslationLooksTarget(texts, translated, targetLang) {
+				s.logger.Info("translation chain failed, google web fallback succeeded")
+				return preserveSpeakerTags(texts, translated), ProviderGoogle + "/web-fallback", nil
+			}
+			s.warnTranslateFailure(ProviderGoogle, "web-fallback", gerr, texts, translated, targetLang)
+		}
 		return nil, "", lastErr
 	}
 	return nil, "", fmt.Errorf("all translation providers failed or unconfigured")
@@ -1066,39 +1113,55 @@ func TranslationLooksTarget(src, res []string, targetLang string) bool {
 	if len(res) == 0 || len(src) == 0 {
 		return false
 	}
-	wantCyrillic := targetLang == "ru"
 	bad := 0
 	for i, line := range res {
 		srcLine := ""
 		if i < len(src) {
-			srcLine = speakerTagRe.ReplaceAllString(strings.TrimSpace(src[i]), "")
+			srcLine = src[i]
 		}
-		body := speakerTagRe.ReplaceAllString(strings.TrimSpace(line), "")
-
-		if wantCyrillic {
-			cyr := 0
-			for _, r := range body {
-				if unicode.Is(unicode.Cyrillic, r) {
-					cyr++
-				}
-			}
-			if cyr == 0 || looksLikePassthrough(srcLine, body) {
-				bad++
-			}
-			continue
-		}
-		lat := false
-		for _, r := range body {
-			if r < 128 && unicode.IsLetter(r) {
-				lat = true
-				break
-			}
-		}
-		if !lat || looksLikePassthrough(srcLine, body) {
+		if !linePassesTarget(srcLine, line, targetLang) {
 			bad++
 		}
 	}
 	return bad*4 <= len(res)
+}
+
+// linePassesTarget checks one cue against target-language rules: Cyrillic for ru, no passthrough of the source line.
+func linePassesTarget(srcLine, line, targetLang string) bool {
+	srcLine = speakerTagRe.ReplaceAllString(strings.TrimSpace(srcLine), "")
+	body := speakerTagRe.ReplaceAllString(strings.TrimSpace(line), "")
+
+	if contextOnlyCaption(body) {
+		return true
+	}
+
+	if targetLang == "ru" {
+		cyr := 0
+		for _, r := range body {
+			if unicode.Is(unicode.Cyrillic, r) {
+				cyr++
+			}
+		}
+		return cyr > 0 && !looksLikePassthrough(srcLine, body)
+	}
+
+	lat := false
+	for _, r := range body {
+		if r < 128 && unicode.IsLetter(r) {
+			lat = true
+			break
+		}
+	}
+	return lat && !looksLikePassthrough(srcLine, body)
+}
+
+// contextOnlyCaption passes sound-effect and description cues like "[신기]" or "Wow!" that translation cannot improve.
+func contextOnlyCaption(body string) bool {
+	rest := strings.TrimSpace(bracketGroupRe.ReplaceAllString(body, ""))
+	if rest == "" || !strings.ContainsFunc(rest, unicode.IsLetter) {
+		return true
+	}
+	return interjectionRe.MatchString(rest)
 }
 
 func looksLikePassthrough(srcLine, out string) bool {
