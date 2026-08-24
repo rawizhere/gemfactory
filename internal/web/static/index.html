@@ -220,6 +220,11 @@
             <input type="number" id="downloader-concurrency-input" min="1" max="20" value="4">
           </div>
           <div class="settings-field">
+            <label for="retention-hours-input">Auto-Cleanup Retention (hours)</label>
+            <span class="hint">Downloaded files older than this are removed hourly (1–8760)</span>
+            <input type="number" id="retention-hours-input" min="1" max="8760" value="24">
+          </div>
+          <div class="settings-field">
             <label for="clip-crf-input">Clip Video Quality (CRF)</label>
             <span class="hint">H.264 CRF: lower = better quality (18–28)</span>
             <input type="number" id="clip-crf-input" min="15" max="35" value="20">

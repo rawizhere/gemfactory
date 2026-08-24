@@ -205,6 +205,10 @@ export async function loadTranslationConfig() {
       if (clipDeleteStatusSelect && typeof data.clip_delete_status === 'boolean') {
         clipDeleteStatusSelect.value = data.clip_delete_status ? 'true' : 'false';
       }
+      const retentionInput = $('#retention-hours-input');
+      if (retentionInput && data.retention_hours) {
+        retentionInput.value = data.retention_hours;
+      }
       updateFallbackBadge(data.chain);
     }
   } catch (err) {
@@ -401,6 +405,7 @@ export async function saveDownloaderSettings() {
   const clipPresetSelect = $('#clip-preset-select');
   const clipAudioBitrateSelect = $('#clip-audio-bitrate-select');
   const clipDeleteStatusSelect = $('#clip-delete-status-select');
+  const retentionInput = $('#retention-hours-input');
 
   const payload = {};
   if (input) {
@@ -410,6 +415,14 @@ export async function saveDownloaderSettings() {
       return;
     }
     payload.concurrency = val;
+  }
+  if (retentionInput && retentionInput.value.trim()) {
+    const val = parseInt(retentionInput.value, 10);
+    if (isNaN(val) || val < 1 || val > 8760) {
+      alert('Retention must be between 1 and 8760 hours');
+      return;
+    }
+    payload.retention_hours = val;
   }
   if (clipCRFInput && clipCRFInput.value.trim()) {
     payload.clip_crf = clipCRFInput.value.trim();

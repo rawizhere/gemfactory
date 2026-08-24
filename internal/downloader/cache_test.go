@@ -74,7 +74,7 @@ func TestCleanupOnceRemovesOldArtifactsOnly(t *testing.T) {
 	require.NoError(t, os.Chtimes(oldFile, past, past))
 	require.NoError(t, os.WriteFile(newFile, []byte("x"), 0644))
 
-	removed, _ := s.CleanupOnce()
+	removed, _ := s.CleanupOnce(context.Background())
 
 	require.Equal(t, 1, removed, "want 1 removed file")
 	require.NoError(t, isMissing(newFile), "fresh artifact must survive cleanup")

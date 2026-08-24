@@ -6,11 +6,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
+
+	"gemfactory/internal/settings"
 )
 
 // cacheMarker marks a finished clip so repeats survive restarts.
@@ -57,28 +58,45 @@ func writeCacheMarker(outputPath string, m cacheMarker) {
 	}
 }
 
-// StartCleanupLoop removes downloaded files once per day until ctx is done.
+// StartCleanupLoop removes stale download artifacts at startup and then once per hour until ctx is done.
 func (s *Service) StartCleanupLoop(ctx context.Context) {
 	go func() {
-		ticker := time.NewTicker(24 * time.Hour)
+		s.runCleanup(ctx)
+		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				n, bytes := s.CleanupOnce()
-				s.logger.Info("downloads cleanup finished",
-					zap.Int("files_removed", n), zap.Int64("bytes_freed", bytes))
+				s.runCleanup(ctx)
 			}
 		}
 	}()
 }
 
-// CleanupOnce deletes download artifacts older than DOWNLOAD_RETENTION_HOURS (default 24h).
-func (s *Service) CleanupOnce() (int, int64) {
-	retention := retentionPeriod()
+func (s *Service) runCleanup(ctx context.Context) {
+	n, bytes := s.CleanupOnce(ctx)
+	s.logger.Info("downloads cleanup finished",
+		zap.Int("files_removed", n), zap.Int64("bytes_freed", bytes))
+}
+
+// CleanupOnce deletes download artifacts older than DOWNLOAD_RETENTION_HOURS
+// (DB config overrides env, default 24h). Artifacts of active jobs are never touched.
+func (s *Service) CleanupOnce(ctx context.Context) (int, int64) {
+	retention := s.retentionPeriod(ctx)
 	cutoff := time.Now().Add(-retention)
+
+	protected := make(map[string]bool)
+	s.mu.Lock()
+	for _, j := range s.jobs {
+		if j.Status == StatusPending || j.Status == StatusDownloading || j.Status == StatusProcessing {
+			if j.VideoID != "" {
+				protected[j.VideoID] = true
+			}
+		}
+	}
+	s.mu.Unlock()
 
 	var removed int
 	var freed int64
@@ -88,6 +106,9 @@ func (s *Service) CleanupOnce() (int, int64) {
 			return nil // skip unreadable entries
 		}
 		if d.IsDir() {
+			if path != s.dataDir && protected[d.Name()] {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		info, statErr := d.Info()
@@ -162,12 +183,8 @@ func pruneEmptyDirs(root string) {
 	}
 }
 
-func retentionPeriod() time.Duration {
-	raw := os.Getenv("DOWNLOAD_RETENTION_HOURS")
-	if raw != "" {
-		if h, err := strconv.Atoi(raw); err == nil && h > 0 {
-			return time.Duration(h) * time.Hour
-		}
-	}
-	return 24 * time.Hour
+// retentionPeriod resolves DOWNLOAD_RETENTION_HOURS with DB → env → default (24h) precedence.
+func (s *Service) retentionPeriod(ctx context.Context) time.Duration {
+	h := settings.New(s.configs).Int(ctx, "DOWNLOAD_RETENTION_HOURS", 24)
+	return time.Duration(h) * time.Hour
 }

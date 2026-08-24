@@ -39,6 +39,7 @@ type translationConfigResponse struct {
 	ClipPreset            string `json:"clip_preset"`
 	ClipAudioBitrate      string `json:"clip_audio_bitrate"`
 	ClipDeleteStatus      bool   `json:"clip_delete_status"`
+	RetentionHours        int    `json:"retention_hours"`
 }
 
 func (s *Server) translationConfig() downloader.TranslationConfig {
@@ -59,6 +60,8 @@ func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
 	clipPreset := cfg.Value(ctx, "CLIP_PRESET", "fast")
 	clipAudioBitrate := cfg.Value(ctx, "CLIP_AUDIO_BITRATE", "192k")
 	clipDeleteStatus := cfg.Bool(ctx, "CLIP_DELETE_STATUS", false)
+	retentionHours := cfg.Int(ctx, "DOWNLOAD_RETENTION_HOURS", 24)
+
 	resp := translationConfigResponse{
 		Chain:                 chainLabel(tc),
 		FallbackOrder:         strings.Join(tc.FallbackOrder, ", "),
@@ -83,6 +86,7 @@ func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
 		ClipPreset:            clipPreset,
 		ClipAudioBitrate:      clipAudioBitrate,
 		ClipDeleteStatus:      clipDeleteStatus,
+		RetentionHours:        retentionHours,
 	}
 	writeJSON(w, resp)
 }
@@ -135,6 +139,7 @@ func (s *Server) updateTranslationConfig(w http.ResponseWriter, r *http.Request)
 		ClipPreset       *string `json:"clip_preset"`
 		ClipAudioBitrate *string `json:"clip_audio_bitrate"`
 		ClipDeleteStatus *bool   `json:"clip_delete_status"`
+		RetentionHours   *int    `json:"retention_hours"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -253,6 +258,17 @@ func (s *Server) updateTranslationConfig(w http.ResponseWriter, r *http.Request)
 			val = "true"
 		}
 		if !set("CLIP_DELETE_STATUS", val) {
+			return
+		}
+	}
+
+	if req.RetentionHours != nil {
+		h := *req.RetentionHours
+		if h < 1 || h > 8760 {
+			http.Error(w, "retention must be between 1 and 8760 hours", http.StatusBadRequest)
+			return
+		}
+		if !set("DOWNLOAD_RETENTION_HOURS", strconv.Itoa(h)) {
 			return
 		}
 	}
