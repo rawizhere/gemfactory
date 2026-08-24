@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"gemfactory/internal/model"
 	"time"
@@ -32,7 +34,7 @@ func (r *ReleaseRepository) GetByID(ctx context.Context, id int) (*model.Release
 		Scan(ctx)
 
 	if err != nil {
-		if err.Error() == "sql: no rows in result set" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to query release by ID: %w", err)
@@ -132,7 +134,7 @@ func (r *ReleaseRepository) GetByArtistAndTitle(ctx context.Context, artistID in
 		Scan(ctx)
 
 	if err != nil {
-		if err.Error() == "sql: no rows in result set" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to query release by artist and title: %w", err)
@@ -148,7 +150,7 @@ func (r *ReleaseRepository) GetByArtistDateAndTrack(ctx context.Context, artistI
 		Scan(ctx)
 
 	if err != nil {
-		if err.Error() == "sql: no rows in result set" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to query release by artist, date and track: %w", err)
@@ -164,7 +166,7 @@ func (r *ReleaseRepository) GetByArtistDateAndSource(ctx context.Context, artist
 		Scan(ctx)
 
 	if err != nil {
-		if err.Error() == "sql: no rows in result set" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to query release by artist, date and source: %w", err)

@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"gemfactory/internal/model"
 	"strings"
@@ -26,7 +28,7 @@ func (r *CookieRepository) GetByDomain(ctx context.Context, domain string) (*mod
 		Where("domain = ?", domain).
 		Scan(ctx)
 	if err != nil {
-		if err.Error() == "sql: no rows in result set" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to query cookie by domain: %w", err)

@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"gemfactory/internal/model"
 
@@ -30,7 +32,7 @@ func (r *ConfigRepository) Get(ctx context.Context, key string) (*model.Config, 
 		Scan(ctx)
 
 	if err != nil {
-		if err.Error() == "sql: no rows in result set" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to scan config: %w", err)

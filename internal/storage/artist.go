@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"gemfactory/internal/model"
 
@@ -30,7 +32,7 @@ func (r *ArtistRepository) GetByID(ctx context.Context, id int) (*model.Artist, 
 		Scan(ctx)
 
 	if err != nil {
-		if err.Error() == "sql: no rows in result set" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to query artist by ID: %w", err)
@@ -73,7 +75,7 @@ func (r *ArtistRepository) GetByName(ctx context.Context, name string) (*model.A
 		Scan(ctx)
 
 	if err != nil {
-		if err.Error() == "sql: no rows in result set" {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to query artist by name: %w", err)
