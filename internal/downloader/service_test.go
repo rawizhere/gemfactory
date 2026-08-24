@@ -6,59 +6,42 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestMaxSegmentDuration(t *testing.T) {
 	svc := &Service{}
 
-	if dur := svc.MaxSegmentDurationSeconds(true); dur != 30 {
-		t.Errorf("want 30s HQ limit, got %v", dur)
-	}
-	if dur := svc.MaxSegmentDurationSeconds(false); dur != 300 {
-		t.Errorf("want 300s standard limit, got %v", dur)
-	}
+	require.Equal(t, float64(30), svc.MaxSegmentDurationSeconds(true), "want 30s HQ limit")
+	require.Equal(t, float64(300), svc.MaxSegmentDurationSeconds(false), "want 300s standard limit")
 
 	t.Setenv("CLIP_MAX_DURATION_HQ_SECONDS", "45")
 	t.Setenv("CLIP_MAX_DURATION_SECONDS", "600")
 
-	if dur := svc.MaxSegmentDurationSeconds(true); dur != 45 {
-		t.Errorf("want 45s HQ limit from env, got %v", dur)
-	}
-	if dur := svc.MaxSegmentDurationSeconds(false); dur != 600 {
-		t.Errorf("want 600s standard limit from env, got %v", dur)
-	}
+	require.Equal(t, float64(45), svc.MaxSegmentDurationSeconds(true), "want 45s HQ limit from env")
+	require.Equal(t, float64(600), svc.MaxSegmentDurationSeconds(false), "want 600s standard limit from env")
 }
 
 func TestCheckFileSize(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "sample.mp4")
 
-	if err := checkFileSize(filePath); err == nil {
-		t.Error("expected error for non-existent file")
-	}
+	require.Error(t, checkFileSize(filePath), "expected error for non-existent file")
 
-	if err := os.WriteFile(filePath, make([]byte, 1024), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := checkFileSize(filePath); err != nil {
-		t.Errorf("unexpected error for small file: %v", err)
-	}
+	require.NoError(t, os.WriteFile(filePath, make([]byte, 1024), 0644))
+	require.NoError(t, checkFileSize(filePath), "unexpected error for small file")
 
 	t.Setenv("TG_FILE_LIMIT_MB", "1")
 	largePath := filepath.Join(tmpDir, "large.mp4")
-	if err := os.WriteFile(largePath, make([]byte, 2*1024*1024), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := checkFileSize(largePath); err == nil {
-		t.Error("expected error for file exceeding size limit")
-	}
+	require.NoError(t, os.WriteFile(largePath, make([]byte, 2*1024*1024), 0644))
+	require.Error(t, checkFileSize(largePath), "expected error for file exceeding size limit")
 }
 
 func TestMustParsePair(t *testing.T) {
 	s, e := mustParsePair("00:10", "00:25.500")
-	if s != 10000 || e != 25500 {
-		t.Errorf("want (10000, 25500), got (%v, %v)", s, e)
-	}
+	require.Equal(t, float64(10000), s)
+	require.Equal(t, float64(25500), e)
 }
 
 func TestFriendlyError(t *testing.T) {
@@ -90,9 +73,7 @@ func TestFriendlyError(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := FriendlyError(c.raw); got != c.want {
-				t.Errorf("FriendlyError() mismatch:\n got %q\nwant %q", got, c.want)
-			}
+			require.Equal(t, c.want, FriendlyError(c.raw))
 		})
 	}
 }
@@ -102,14 +83,10 @@ func TestGetEncodeOptions(t *testing.T) {
 
 	// Default fallback values
 	optsClip := svc.GetEncodeOptions(context.Background(), false)
-	if optsClip.CRF != "20" || optsClip.Preset != "fast" || optsClip.AudioBitrate != "192k" {
-		t.Errorf("unexpected default clip options: %+v", optsClip)
-	}
+	require.Equal(t, EncodeOptions{CRF: "20", Preset: "fast", AudioBitrate: "192k"}, optsClip, "unexpected default clip options")
 
 	optsSubs := svc.GetEncodeOptions(context.Background(), true)
-	if optsSubs.CRF != "20" || optsSubs.Preset != "fast" || optsSubs.AudioBitrate != "192k" {
-		t.Errorf("unexpected default subs options: %+v", optsSubs)
-	}
+	require.Equal(t, EncodeOptions{CRF: "20", Preset: "fast", AudioBitrate: "192k"}, optsSubs, "unexpected default subs options")
 
 	// Environment variable overrides
 	t.Setenv("CLIP_CRF", "23")
@@ -118,14 +95,10 @@ func TestGetEncodeOptions(t *testing.T) {
 	t.Setenv("CLIP_AUDIO_BITRATE", "128k")
 
 	optsClipEnv := svc.GetEncodeOptions(context.Background(), false)
-	if optsClipEnv.CRF != "23" || optsClipEnv.Preset != "veryfast" || optsClipEnv.AudioBitrate != "128k" {
-		t.Errorf("unexpected env clip options: %+v", optsClipEnv)
-	}
+	require.Equal(t, EncodeOptions{CRF: "23", Preset: "veryfast", AudioBitrate: "128k"}, optsClipEnv, "unexpected env clip options")
 
 	optsSubsEnv := svc.GetEncodeOptions(context.Background(), true)
-	if optsSubsEnv.CRF != "18" || optsSubsEnv.Preset != "veryfast" || optsSubsEnv.AudioBitrate != "128k" {
-		t.Errorf("unexpected env subs options: %+v", optsSubsEnv)
-	}
+	require.Equal(t, EncodeOptions{CRF: "18", Preset: "veryfast", AudioBitrate: "128k"}, optsSubsEnv, "unexpected env subs options")
 }
 
 func TestOutputPathFor(t *testing.T) {
@@ -140,9 +113,7 @@ func TestOutputPathFor(t *testing.T) {
 			Shorts: true,
 		},
 	}
-	if got := svc.outputPathFor(fullJob); got != "/tmp/workbench/abc123XYZ/abc123XYZ_full.mp4" {
-		t.Errorf("want full path, got %q", got)
-	}
+	require.Equal(t, "/tmp/workbench/abc123XYZ/abc123XYZ_full.mp4", svc.outputPathFor(fullJob))
 
 	clipJob := &Job{
 		VideoID: "abc123XYZ",
@@ -152,7 +123,5 @@ func TestOutputPathFor(t *testing.T) {
 			End:   "0:30",
 		},
 	}
-	if got := svc.outputPathFor(clipJob); got != "/tmp/workbench/abc123XYZ/abc123XYZ_000010-000-000030-000.mp4" {
-		t.Errorf("want clip path, got %q", got)
-	}
+	require.Equal(t, "/tmp/workbench/abc123XYZ/abc123XYZ_000010-000-000030-000.mp4", svc.outputPathFor(clipJob))
 }

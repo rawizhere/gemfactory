@@ -3,28 +3,21 @@ package logger
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zapcore"
 )
 
 func TestNewLogger(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "debug")
 	l, err := New()
-	if err != nil {
-		t.Fatalf("failed to create logger: %v", err)
-	}
-	if l.Level.Level() != zapcore.DebugLevel {
-		t.Errorf("want DebugLevel, got %v", l.Level.Level())
-	}
+	require.NoError(t, err, "failed to create logger")
+	require.Equal(t, zapcore.DebugLevel, l.Level.Level())
 
 	l.SetLevel("warn")
-	if l.Level.Level() != zapcore.WarnLevel {
-		t.Errorf("want WarnLevel, got %v", l.Level.Level())
-	}
+	require.Equal(t, zapcore.WarnLevel, l.Level.Level())
 
 	l.SetLevel("invalid_level")
-	if l.Level.Level() != zapcore.WarnLevel {
-		t.Errorf("expected level to remain unchanged on invalid input, got %v", l.Level.Level())
-	}
+	require.Equal(t, zapcore.WarnLevel, l.Level.Level(), "expected level to remain unchanged on invalid input")
 }
 
 func TestGetLogLevel(t *testing.T) {
@@ -42,8 +35,6 @@ func TestGetLogLevel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Setenv("LOG_LEVEL", tt.env)
-		if got := getLogLevel(); got != tt.want {
-			t.Errorf("getLogLevel() for %q = %v, want %v", tt.env, got, tt.want)
-		}
+		require.Equal(t, tt.want, getLogLevel(), "getLogLevel() for %q", tt.env)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"gemfactory/internal/model"
@@ -65,9 +66,7 @@ func TestUpsertCookieValidation(t *testing.T) {
 
 			s.upsertCookie(rec, req)
 
-			if rec.Code != c.want {
-				t.Errorf("got %d, want %d (body: %s)", rec.Code, c.want, rec.Body.String())
-			}
+			require.Equal(t, c.want, rec.Code, "body: %s", rec.Body.String())
 		})
 	}
 }
@@ -89,18 +88,10 @@ func TestUpsertCookieAutoDetect(t *testing.T) {
 
 	s.upsertCookie(rec, req)
 
-	if rec.Code != 200 {
-		t.Fatalf("got %d, want 200: %s", rec.Code, rec.Body.String())
-	}
-	if _, ok := stub.domains["youtube.com"]; !ok {
-		t.Errorf("youtube.com not stored; have %v", keys(stub.domains))
-	}
-	if _, ok := stub.domains["google.com"]; !ok {
-		t.Errorf("google.com not stored; have %v", keys(stub.domains))
-	}
-	if len(stub.domains) != 2 {
-		t.Errorf("expected dedup to 2 domains, got %v", keys(stub.domains))
-	}
+	require.Equal(t, 200, rec.Code, "body: %s", rec.Body.String())
+	require.Contains(t, stub.domains, "youtube.com", "have %v", keys(stub.domains))
+	require.Contains(t, stub.domains, "google.com", "have %v", keys(stub.domains))
+	require.Len(t, stub.domains, 2, "expected dedup to 2 domains, got %v", keys(stub.domains))
 }
 
 func keys(m map[string]string) []string {

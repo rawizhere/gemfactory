@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"gemfactory/internal/config"
 	"gemfactory/internal/downloader"
 	"gemfactory/internal/keyboard"
@@ -29,13 +28,6 @@ func New(services *service.Services, config *config.Config, keyboard *keyboard.M
 		User:  user,
 		Admin: admin,
 		Clip:  clip,
-	}
-}
-
-func (h *Handlers) HandleCallbackQuery(ctx context.Context, query *telego.CallbackQuery) {
-	err := h.User.Keyboard.HandleCallbackQuery(ctx, query)
-	if err != nil {
-		h.User.Logger.Error("Failed to handle callback query", zap.Error(err), zap.String("data", query.Data))
 	}
 }
 

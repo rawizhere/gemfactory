@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
@@ -16,10 +17,6 @@ func TestHealthHandler(t *testing.T) {
 
 	server.healthHandler(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("want status 200, got %d", w.Code)
-	}
-	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
-		t.Errorf("want application/json, got %q", ct)
-	}
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, "application/json", w.Header().Get("Content-Type"))
 }

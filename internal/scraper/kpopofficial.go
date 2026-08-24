@@ -11,6 +11,8 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"go.uber.org/zap"
+
+	"gemfactory/internal/model"
 )
 
 var dateRegex = regexp.MustCompile(`(?i)(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})`)
@@ -270,13 +272,7 @@ func releaseInYear(d time.Time, year string) bool {
 }
 
 func monthNumber(name string) int {
-	months := []string{"january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"}
-	for i, m := range months {
-		if strings.ToLower(strings.TrimSpace(name)) == m {
-			return i + 1
-		}
-	}
-	return 0
+	return model.MonthNumber(name)
 }
 
 func normalizeURL(u string) string {

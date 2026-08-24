@@ -3,9 +3,10 @@ package downloader
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 const sampleVTT = `WEBVTT
@@ -40,44 +41,25 @@ func TestTrimVTTFileOverlapAndShift(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "trimmed.vtt")
 
 	n, err := TrimVTTFile(in, 4000, 10000, out)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	data, err := os.ReadFile(out)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	got := string(data)
 
 	// First cue (0.5-3.0s) ends exactly at... no, ends before start -> excluded.
-	if strings.Contains(got, "Hello world") {
-		t.Error("cue fully before clip start must be excluded")
-	}
+	require.NotContains(t, got, "Hello world", "cue fully before clip start must be excluded")
 	// Second cue overlaps start; shifted to 0.
-	if !strings.Contains(got, "00:00:00.000 --> 00:00:02.000") || !strings.Contains(got, "Second line text") {
-		t.Errorf("overlapping cue not shifted correctly:\n%s", got)
-	}
+	require.Contains(t, got, "00:00:00.000 --> 00:00:02.000", "overlapping cue not shifted correctly:\n%s", got)
+	require.Contains(t, got, "Second line text", "overlapping cue not shifted correctly:\n%s", got)
 	// Third cue fully inside; shifted by 4s; tag stripped; cue settings dropped.
-	if !strings.Contains(got, "00:00:05.900 --> 00:00:08.500") {
-		t.Errorf("inside cue not shifted correctly:\n%s", got)
-	}
-	if strings.Contains(got, "<c>") {
-		t.Error("<c> tags must be removed")
-	}
-	if strings.Contains(got, "align:start") {
-		t.Error("cue settings must be dropped")
-	}
+	require.Contains(t, got, "00:00:05.900 --> 00:00:08.500", "inside cue not shifted correctly:\n%s", got)
+	require.NotContains(t, got, "<c>", "<c> tags must be removed")
+	require.NotContains(t, got, "align:start", "cue settings must be dropped")
 	// Cue starting at clip end excluded.
-	if strings.Contains(got, "Outside window") {
-		t.Error("cue outside the clip window must be excluded")
-	}
-	if n != 2 {
-		t.Errorf("expected 2 cues kept, got %d", n)
-	}
-	if !strings.HasPrefix(got, "WEBVTT\nKind: captions\nLanguage: en\n") {
-		t.Errorf("missing canonical header:\n%s", got)
-	}
+	require.NotContains(t, got, "Outside window", "cue outside the clip window must be excluded")
+	require.Equal(t, 2, n, "expected 2 cues kept")
+	require.True(t, strings.HasPrefix(got, "WEBVTT\nKind: captions\nLanguage: en\n"), "missing canonical header:\n%s", got)
 }
 
 func TestTrimVTTFileCueEndingAtStartExcluded(t *testing.T) {
@@ -88,17 +70,12 @@ func TestTrimVTTFileCueEndingAtStartExcluded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, _ := os.ReadFile(out)
+	data, err := os.ReadFile(out)
+	require.NoError(t, err)
 	got := string(data)
-	if strings.Contains(got, "ends at start") {
-		t.Error("cue ending exactly at clip start must be excluded")
-	}
-	if !strings.Contains(got, "starts at start") {
-		t.Error("cue starting exactly at clip start must be included")
-	}
-	if n != 1 {
-		t.Errorf("want 1 cue, got %d", n)
-	}
+	require.NotContains(t, got, "ends at start", "cue ending exactly at clip start must be excluded")
+	require.Contains(t, got, "starts at start", "cue starting exactly at clip start must be included")
+	require.Equal(t, 1, n)
 }
 
 func TestTrimVTTFileEmptyResult(t *testing.T) {
@@ -141,26 +118,20 @@ Inside <00:00:24.000><c>limits </c>
 	out := filepath.Join(t.TempDir(), "trimmed.vtt")
 
 	n, err := TrimVTTFile(in, 23000, 27000, out)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, _ := os.ReadFile(out)
+	require.NoError(t, err)
+	data, err := os.ReadFile(out)
+	require.NoError(t, err)
 	got := string(data)
 
-	if n != 1 {
-		t.Errorf("want 1 cue, got %d:\n%s", n, got)
-	}
+	require.Equal(t, 1, n, "want 1 cue:\n%s", got)
 	// Text of cues outside the window must not leak in as timing-less blocks.
-	if strings.Contains(got, "Will") || strings.Contains(got, "window") || strings.Contains(got, "To") {
-		t.Errorf("text from skipped cues leaked into output:\n%s", got)
-	}
+	require.NotContains(t, got, "Will", "text from skipped cues leaked:\n%s", got)
+	require.NotContains(t, got, "window", "text from skipped cues leaked:\n%s", got)
+	require.NotContains(t, got, "To", "text from skipped cues leaked:\n%s", got)
 	// Every kept block must carry a timing line; inline tags stripped.
-	if !strings.Contains(got, "00:00:00.500 --> 00:00:03.000\nInside limits") {
-		t.Errorf("kept cue missing or malformed:\n%s", got)
-	}
-	if strings.Contains(got, "<c>") || strings.Contains(got, "<00:00:") {
-		t.Errorf("inline tags must be stripped:\n%s", got)
-	}
+	require.Contains(t, got, "00:00:00.500 --> 00:00:03.000\nInside limits", "kept cue missing or malformed:\n%s", got)
+	require.NotContains(t, got, "<c>", "inline tags must be stripped:\n%s", got)
+	require.NotContains(t, got, "<00:00:", "inline tags must be stripped:\n%s", got)
 }
 
 func TestVideoIDFromURL(t *testing.T) {
@@ -175,20 +146,16 @@ func TestVideoIDFromURL(t *testing.T) {
 	}
 	for raw, want := range cases {
 		got, err := videoIDFromURL(raw)
-		if err != nil || got != want {
-			t.Errorf("videoIDFromURL(%q) = (%q, %v), want %q", raw, got, err, want)
-		}
+		require.NoError(t, err, "videoIDFromURL(%q)", raw)
+		require.Equal(t, want, got, "videoIDFromURL(%q)", raw)
 	}
-	if _, err := videoIDFromURL("https://example.com/video"); err == nil {
-		t.Error("expected error for unsupported URL")
-	}
+	_, err := videoIDFromURL("https://example.com/video")
+	require.Error(t, err, "expected error for unsupported URL")
 
-	if !IsTikTokURL("https://www.tiktok.com/@user/video/123") || !IsShortsURL("https://youtube.com/shorts/abc") || !IsDirectDownloadURL("https://vm.tiktok.com/123") {
-		t.Error("expected true for direct download helpers")
-	}
-	if first := ExtractFirstURL("Check this: https://youtu.be/dQw4w9WgXcQ!"); first != "https://youtu.be/dQw4w9WgXcQ" {
-		t.Errorf("ExtractFirstURL = %q, want %q", first, "https://youtu.be/dQw4w9WgXcQ")
-	}
+	require.True(t, IsTikTokURL("https://www.tiktok.com/@user/video/123"))
+	require.True(t, IsShortsURL("https://youtube.com/shorts/abc"))
+	require.True(t, IsDirectDownloadURL("https://vm.tiktok.com/123"), "expected true for direct download helpers")
+	require.Equal(t, "https://youtu.be/dQw4w9WgXcQ", ExtractFirstURL("Check this: https://youtu.be/dQw4w9WgXcQ!"))
 }
 
 func TestResolveSubtitleTrack(t *testing.T) {
@@ -204,38 +171,36 @@ func TestResolveSubtitleTrack(t *testing.T) {
 	}
 
 	koRes, err := ResolveSubtitleTrack(meta, "ko", nil)
-	if err != nil || koRes.FinalLang != "ko" || koRes.TargetLang != "" {
-		t.Errorf("ResolveSubtitleTrack(ko) = (%+v, %v), want ko direct", koRes, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "ko", koRes.FinalLang, "want ko direct: %+v", koRes)
+	require.Empty(t, koRes.TargetLang, "want ko direct: %+v", koRes)
 
 	enUSRes, err := ResolveSubtitleTrack(meta, "en-US", nil)
-	if err != nil || enUSRes.FinalLang != "en" || enUSRes.TargetLang != "" {
-		t.Errorf("ResolveSubtitleTrack(en-US) = (%+v, %v), want en direct", enUSRes, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "en", enUSRes.FinalLang, "want en direct: %+v", enUSRes)
+	require.Empty(t, enUSRes.TargetLang, "want en direct: %+v", enUSRes)
 
 	ruRes, err := ResolveSubtitleTrack(meta, "ru", nil)
-	if err != nil || ruRes.FinalLang != "ru" || ruRes.TargetLang != "ru" || ruRes.SourceLang != "ko" {
-		t.Errorf("ResolveSubtitleTrack(ru) = (%+v, %v), want translated from ko to ru", ruRes, err)
-	}
+	require.NoError(t, err)
+	require.Equal(t, "ru", ruRes.FinalLang)
+	require.Equal(t, "ru", ruRes.TargetLang, "want translated from ko to ru: %+v", ruRes)
+	require.Equal(t, "ko", ruRes.SourceLang, "want translated from ko to ru: %+v", ruRes)
 
 	autoFr := &SourceMeta{
 		AutomaticCaptions: map[string][]SubtitleTrack{"fr": {{Ext: "vtt", URL: "https://example.com/auto-fr"}}},
 	}
-	if _, err := ResolveSubtitleTrack(autoFr, "fr", nil); err == nil {
-		t.Error("expected error when only auto captions exist")
-	}
+	_, err = ResolveSubtitleTrack(autoFr, "fr", nil)
+	require.Error(t, err, "expected error when only auto captions exist")
 
 	autoOnly := &SourceMeta{
 		AutomaticCaptions: map[string][]SubtitleTrack{"ko": {{Ext: "vtt", URL: "https://example.com/auto-ko"}}},
 	}
-	if _, err := ResolveSubtitleTrack(autoOnly, "en", nil); err == nil {
-		t.Error("expected error when only auto captions exist")
-	}
+	_, err = ResolveSubtitleTrack(autoOnly, "en", nil)
+	require.Error(t, err, "expected error when only auto captions exist")
 
 	emptyMeta := &SourceMeta{}
-	if _, err := ResolveSubtitleTrack(emptyMeta, "en", nil); err == nil {
-		t.Error("expected error when no subtitles exist")
-	}
+	_, err = ResolveSubtitleTrack(emptyMeta, "en", nil)
+	require.Error(t, err, "expected error when no subtitles exist")
 }
 
 func TestFormatCaption(t *testing.T) {
@@ -246,12 +211,8 @@ func TestFormatCaption(t *testing.T) {
 		Tags:        []string{"theburntpeanut", "fyp", "funny"},
 	}
 	gotTikTok := FormatCaption(tiktokMeta)
-	if strings.Count(gotTikTok, "Theburntpeanut") > 1 {
-		t.Errorf("expected no duplicate header for tiktok, got: %s", gotTikTok)
-	}
-	if !strings.Contains(gotTikTok, "#funny") {
-		t.Errorf("expected missing tag #funny to be added, got: %s", gotTikTok)
-	}
+	require.LessOrEqual(t, strings.Count(gotTikTok, "Theburntpeanut"), 1, "expected no duplicate header for tiktok, got: %s", gotTikTok)
+	require.Contains(t, gotTikTok, "#funny", "expected missing tag #funny to be added, got: %s", gotTikTok)
 
 	// YouTube case: separate distinct title and description.
 	ytMeta := &SourceMeta{
@@ -260,15 +221,9 @@ func TestFormatCaption(t *testing.T) {
 		Tags:        []string{"Kep1er", "WADADA", "Kpop"},
 	}
 	gotYT := FormatCaption(ytMeta)
-	if !strings.Contains(gotYT, "<b>Kep1er WA DA DA</b>") {
-		t.Errorf("expected title in bold, got: %s", gotYT)
-	}
-	if strings.Contains(gotYT, "Official Dance Practice Video") {
-		t.Errorf("expected no description body in minimalist mode, got: %s", gotYT)
-	}
-	if !strings.Contains(gotYT, "#Kep1er #WADADA #Kpop") {
-		t.Errorf("expected tags in caption, got: %s", gotYT)
-	}
+	require.Contains(t, gotYT, "<b>Kep1er WA DA DA</b>", "expected title in bold, got: %s", gotYT)
+	require.NotContains(t, gotYT, "Official Dance Practice Video", "expected no description body in minimalist mode, got: %s", gotYT)
+	require.Contains(t, gotYT, "#Kep1er #WADADA #Kpop", "expected tags in caption, got: %s", gotYT)
 }
 
 func TestDisplayTitle(t *testing.T) {
@@ -276,24 +231,18 @@ func TestDisplayTitle(t *testing.T) {
 		Title:    "아이돌이 결정사를 간다면",
 		AltTitle: "If an Idol Goes to a Matchmaking Agency",
 	}
-	if got := DisplayTitle(metaWithAlt); got != "If an Idol Goes to a Matchmaking Agency" {
-		t.Errorf("expected alt title when present, got: %s", got)
-	}
+	require.Equal(t, "If an Idol Goes to a Matchmaking Agency", DisplayTitle(metaWithAlt), "expected alt title when present")
 
 	metaSame := &SourceMeta{
 		Title:    "Hello World",
 		AltTitle: "hello world",
 	}
-	if got := DisplayTitle(metaSame); got != "hello world" {
-		t.Errorf("expected alt title, got: %s", got)
-	}
+	require.Equal(t, "hello world", DisplayTitle(metaSame), "expected alt title")
 
 	metaNoAlt := &SourceMeta{
 		Title: "Hello World",
 	}
-	if got := DisplayTitle(metaNoAlt); got != "Hello World" {
-		t.Errorf("expected original title when no alt, got: %s", got)
-	}
+	require.Equal(t, "Hello World", DisplayTitle(metaNoAlt), "expected original title when no alt")
 }
 
 func TestBuildFallbackChain(t *testing.T) {
@@ -308,10 +257,7 @@ func TestBuildFallbackChain(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := BuildFallbackChain(tt.cfg)
-		if !reflect.DeepEqual(got, tt.want) {
-			t.Errorf("BuildFallbackChain(%+v) = %v, want %v", tt.cfg, got, tt.want)
-		}
+		require.Equal(t, tt.want, BuildFallbackChain(tt.cfg), "BuildFallbackChain(%+v)", tt.cfg)
 	}
 }
 
@@ -321,21 +267,11 @@ func TestParseNumberedLines(t *testing.T) {
 3. Unnie, you look absolutely gorgeous!`
 
 	res, err := parseNumberedLines(raw, 3)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(res) != 3 {
-		t.Fatalf("expected 3 lines, got %d", len(res))
-	}
-	if res[0] != "Wow! Today's performance was legendary!" {
-		t.Errorf("line 1 mismatch: %q", res[0])
-	}
-	if res[1] != "So sweet! My heart skipped a beat." {
-		t.Errorf("line 2 mismatch: %q", res[1])
-	}
-	if res[2] != "Unnie, you look absolutely gorgeous!" {
-		t.Errorf("line 3 mismatch: %q", res[2])
-	}
+	require.NoError(t, err)
+	require.Len(t, res, 3)
+	require.Equal(t, "Wow! Today's performance was legendary!", res[0], "line 1 mismatch")
+	require.Equal(t, "So sweet! My heart skipped a beat.", res[1], "line 2 mismatch")
+	require.Equal(t, "Unnie, you look absolutely gorgeous!", res[2], "line 3 mismatch")
 }
 
 func TestParseNumberedLinesWithMarkdownAndParens(t *testing.T) {
@@ -344,21 +280,11 @@ func TestParseNumberedLinesWithMarkdownAndParens(t *testing.T) {
 3. Unnie, you are beautiful!`
 
 	res, err := parseNumberedLines(raw, 3)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(res) != 3 {
-		t.Fatalf("expected 3 lines, got %d", len(res))
-	}
-	if res[0] != "Wow! Today's performance was legendary!" {
-		t.Errorf("line 1 mismatch: %q", res[0])
-	}
-	if res[1] != "So sweet!" {
-		t.Errorf("line 2 mismatch: %q", res[1])
-	}
-	if res[2] != "Unnie, you are beautiful!" {
-		t.Errorf("line 3 mismatch: %q", res[2])
-	}
+	require.NoError(t, err)
+	require.Len(t, res, 3)
+	require.Equal(t, "Wow! Today's performance was legendary!", res[0], "line 1 mismatch")
+	require.Equal(t, "So sweet!", res[1], "line 2 mismatch")
+	require.Equal(t, "Unnie, you are beautiful!", res[2], "line 3 mismatch")
 }
 
 func TestPreserveSpeakerTags(t *testing.T) {
@@ -380,87 +306,54 @@ func TestPreserveSpeakerTags(t *testing.T) {
 
 	got := preserveSpeakerTags(orig, trans)
 
-	if got[0] != "[SUI] Pop off, pop off" {
-		t.Errorf("expected [SUI] preserved, got: %q", got[0])
-	}
-	if got[1] != "(CHORUS) Yeah, we are flying high" {
-		t.Errorf("expected (CHORUS) preserved, got: %q", got[1])
-	}
-	if got[2] != "Regular line without speaker" {
-		t.Errorf("expected no tag added, got: %q", got[2])
-	}
-	if got[3] != "[수이] Hello" {
-		t.Errorf("expected [수이] preserved, got: %q", got[3])
-	}
-	if got[4] != "KiiiKiii: Let's dance" {
-		t.Errorf("expected KiiiKiii: preserved, got: %q", got[4])
-	}
+	require.Equal(t, "[SUI] Pop off, pop off", got[0], "expected [SUI] preserved")
+	require.Equal(t, "(CHORUS) Yeah, we are flying high", got[1], "expected (CHORUS) preserved")
+	require.Equal(t, "Regular line without speaker", got[2], "expected no tag added")
+	require.Equal(t, "[수이] Hello", got[3], "expected [수이] preserved")
+	require.Equal(t, "KiiiKiii: Let's dance", got[4], "expected KiiiKiii: preserved")
 
 	// If translation already preserved it, don't duplicate
 	alreadyPreserved := []string{"[SUI] Pop off, pop off"}
 	origSingle := []string{"[SUI] Pop off"}
 	gotSingle := preserveSpeakerTags(origSingle, alreadyPreserved)
-	if gotSingle[0] != "[SUI] Pop off, pop off" {
-		t.Errorf("expected no duplicate [SUI], got: %q", gotSingle[0])
-	}
+	require.Equal(t, "[SUI] Pop off, pop off", gotSingle[0], "expected no duplicate [SUI]")
 }
 
 func TestSanitizeSubtitleTypography(t *testing.T) {
 	in := "Кэнди\u2011пинк магический флип\u2011фон \u00A0 \u200B тест\u2013слово ‘кавычки’ “двойные”"
 	want := "Кэнди-пинк магический флип-фон    тест-слово 'кавычки' \"двойные\""
-	got := sanitizeSubtitleTypography(in)
-	if got != want {
-		t.Errorf("sanitizeSubtitleTypography(%q) = %q, want %q", in, got, want)
-	}
+	require.Equal(t, want, sanitizeSubtitleTypography(in), "sanitizeSubtitleTypography(%q)", in)
 }
 
 func TestMaxOutputTokens(t *testing.T) {
-	if got := maxOutputTokens(10, "gemini-flash"); got != 1024 {
-		t.Errorf("small batch floor = %d, want 1024", got)
-	}
-	if got := maxOutputTokens(400, "gemini-flash"); got != 400*60+256 {
-		t.Errorf("scaled budget = %d, want %d", got, 400*60+256)
-	}
-	if got := maxOutputTokens(10, "openai/gpt-oss-120b"); got != 10*60+256+2048 {
-		t.Errorf("reasoning budget = %d, want %d", got, 10*60+256+2048)
-	}
+	require.Equal(t, 1024, maxOutputTokens(10, "gemini-flash"), "small batch floor")
+	require.Equal(t, 400*60+256, maxOutputTokens(400, "gemini-flash"), "scaled budget")
+	require.Equal(t, 10*60+256+2048, maxOutputTokens(10, "openai/gpt-oss-120b"), "reasoning budget")
 }
 
 func TestIsReasoningModel(t *testing.T) {
 	for _, m := range []string{"openai/gpt-oss-120b", "big-pickle", "minimaxai/minimax-m3"} {
-		if !isReasoningModel(m) {
-			t.Errorf("isReasoningModel(%q) = false, want true", m)
-		}
+		require.True(t, isReasoningModel(m), "isReasoningModel(%q) must be true", m)
 	}
-	if isReasoningModel("gemini-3.7-flash") {
-		t.Error("gemini must not be treated as a reasoning model")
-	}
+	require.False(t, isReasoningModel("gemini-3.7-flash"), "gemini must not be treated as a reasoning model")
 }
 
 func TestStripMarkdownBold(t *testing.T) {
-	if got := stripMarkdownBold("**Да.** - Ой!"); got != "Да. - Ой!" {
-		t.Errorf("stripMarkdownBold = %q", got)
-	}
-	if got := stripMarkdownBold("a * b ** c"); got != "a * b ** c" {
-		t.Errorf("lone asterisks must survive, got %q", got)
-	}
+	require.Equal(t, "Да. - Ой!", stripMarkdownBold("**Да.** - Ой!"))
+	require.Equal(t, "a * b ** c", stripMarkdownBold("a * b ** c"), "lone asterisks must survive")
 }
 
 func TestBuildSystemInstruction(t *testing.T) {
 	base := "rules"
-	if got := BuildSystemInstruction(base, "en"); got != base {
-		t.Errorf("en instruction = %q, want base without addendum", got)
-	}
-	if got := BuildSystemInstruction(base, "ru"); !strings.Contains(got, ruAddendum) || !strings.Contains(got, base) {
-		t.Errorf("ru instruction must combine prompt and addendum, got %q", got)
-	}
+	require.Equal(t, base, BuildSystemInstruction(base, "en"), "want base without addendum")
+	ruInstruction := BuildSystemInstruction(base, "ru")
+	require.Contains(t, ruInstruction, ruAddendum, "ru instruction must include addendum")
+	require.Contains(t, ruInstruction, base, "ru instruction must include prompt")
 }
 
 func TestSanitizeKeepsEmojiSequences(t *testing.T) {
 	in := "😂 👨‍👩‍👧 ✈️ ♪"
-	if got := sanitizeSubtitleTypography(in); got != in {
-		t.Errorf("sanitizeSubtitleTypography(%q) = %q, want unchanged", in, got)
-	}
+	require.Equal(t, in, sanitizeSubtitleTypography(in), "emoji sequences must stay unchanged")
 }
 
 func TestSplitDialogueLines(t *testing.T) {
@@ -472,8 +365,6 @@ func TestSplitDialogueLines(t *testing.T) {
 		"Первая\n- Да. - Ой!": "Первая\n- Да.\n- Ой!",
 	}
 	for in, want := range cases {
-		if got := splitDialogueLines(in); got != want {
-			t.Errorf("splitDialogueLines(%q) = %q, want %q", in, got, want)
-		}
+		require.Equal(t, want, splitDialogueLines(in), "splitDialogueLines(%q)", in)
 	}
 }

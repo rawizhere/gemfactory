@@ -3,6 +3,7 @@ package keyboard
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"gemfactory/internal/config"
@@ -14,12 +15,10 @@ func TestKeyboardManager(t *testing.T) {
 	defer mgr.Stop()
 
 	mainKb := mgr.GetMainKeyboard()
-	if mainKb == nil || len(mainKb.InlineKeyboard) == 0 {
-		t.Error("expected non-empty main keyboard")
-	}
+	require.NotNil(t, mainKb)
+	require.NotEmpty(t, mainKb.InlineKeyboard, "expected non-empty main keyboard")
 
 	allKb := mgr.GetAllMonthsKeyboard()
-	if allKb == nil || len(allKb.InlineKeyboard) == 0 {
-		t.Error("expected non-empty all months keyboard")
-	}
+	require.NotNil(t, allKb)
+	require.NotEmpty(t, allKb.InlineKeyboard, "expected non-empty all months keyboard")
 }

@@ -82,10 +82,24 @@ func (r *Router) RegisterRoutes(bh *th.BotHandler) {
 		return nil
 	}, messageWithURL())
 
-	bh.HandleCallbackQuery(func(ctx *th.Context, q telego.CallbackQuery) error {
-		r.handlers.HandleCallbackQuery(ctx, &q)
-		return nil
-	}, th.AnyCallbackQuery())
+	kb := r.handlers.User.Keyboard
+	callbackRoutes := []struct {
+		predicate th.Predicate
+		handler   th.CallbackQueryHandler
+	}{
+		{th.CallbackDataPrefix("month_"), func(ctx *th.Context, q telego.CallbackQuery) error {
+			return kb.HandleMonthCallback(ctx, &q)
+		}},
+		{th.CallbackDataEqual("show_all_months"), func(ctx *th.Context, q telego.CallbackQuery) error {
+			return kb.HandleAllMonthsCallback(ctx, &q)
+		}},
+		{th.CallbackDataEqual("back_to_main"), func(ctx *th.Context, q telego.CallbackQuery) error {
+			return kb.HandleMainCallback(ctx, &q)
+		}},
+	}
+	for _, route := range callbackRoutes {
+		bh.HandleCallbackQuery(route.handler, route.predicate)
+	}
 }
 
 func clipHandler(h *handlers.Handlers, command string) th.MessageHandler {

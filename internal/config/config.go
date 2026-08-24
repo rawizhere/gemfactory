@@ -3,10 +3,9 @@ package config
 
 import (
 	"fmt"
-	"os"
-	"strconv"
 	"time"
 
+	"github.com/caarlos0/env/v11"
 	"github.com/joho/godotenv"
 )
 
@@ -16,38 +15,30 @@ const (
 
 // Config holds application settings loaded from the environment and database.
 type Config struct {
-	DatabaseURL          string
-	BotToken             string
-	AdminUsername        string
-	HealthPort           string
-	HealthCheckEnabled   bool
-	WebPort              string
-	WebEnabled           bool
-	LogLevel             string
-	Timezone             string
-	AppDataDir           string
-	DownloadConcurrency  int
-	ScraperDelay         time.Duration
-	ReleaseCheckInterval time.Duration
+	DatabaseURL          string        `env:"DB_DSN"`
+	BotToken             string        `env:"BOT_TOKEN"`
+	AdminUsername        string        `env:"ADMIN_USERNAME"`
+	HealthPort           string        `env:"HEALTH_PORT" envDefault:"8080"`
+	HealthCheckEnabled   bool          `env:"HEALTH_CHECK_ENABLED" envDefault:"true"`
+	WebPort              string        `env:"WEB_PORT" envDefault:"9090"`
+	WebEnabled           bool          `env:"WEB_ENABLED" envDefault:"true"`
+	LogLevel             string        `env:"LOG_LEVEL" envDefault:"info"`
+	Timezone             string        `env:"TIMEZONE" envDefault:"Europe/Moscow"`
+	AppDataDir           string        `env:"APP_DATA_DIR" envDefault:"./data"`
+	DownloadConcurrency  int           `env:"DOWNLOAD_CONCURRENCY" envDefault:"4"`
+	ScraperDelay         time.Duration `env:"SCRAPER_REQUEST_DELAY" envDefault:"2s"`
+	ReleaseCheckInterval time.Duration `env:"RELEASE_CHECK_INTERVAL" envDefault:"24h"`
 }
 
 func Load() (*Config, error) {
 	_ = godotenv.Load()
 
-	cfg := &Config{
-		DatabaseURL:          getEnv("DB_DSN", ""),
-		BotToken:             getEnv("BOT_TOKEN", ""),
-		AdminUsername:        getEnv("ADMIN_USERNAME", ""),
-		HealthPort:           getEnv("HEALTH_PORT", "8080"),
-		HealthCheckEnabled:   getEnvBool("HEALTH_CHECK_ENABLED", true),
-		WebPort:              getEnv("WEB_PORT", "9090"),
-		WebEnabled:           getEnvBool("WEB_ENABLED", true),
-		LogLevel:             getEnv("LOG_LEVEL", "info"),
-		Timezone:             getEnv("TIMEZONE", "Europe/Moscow"),
-		AppDataDir:           getEnv("APP_DATA_DIR", "./data"),
-		DownloadConcurrency:  getEnvInt("DOWNLOAD_CONCURRENCY", 4),
-		ScraperDelay:         getEnvDuration("SCRAPER_REQUEST_DELAY", 2*time.Second),
-		ReleaseCheckInterval: getEnvDuration("RELEASE_CHECK_INTERVAL", 24*time.Hour),
+	cfg := &Config{}
+	if err := env.Parse(cfg); err != nil {
+		return nil, fmt.Errorf("config parsing failed: %w", err)
+	}
+	if cfg.DownloadConcurrency <= 0 {
+		cfg.DownloadConcurrency = 4
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -71,38 +62,4 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid TIMEZONE %q: %w", c.Timezone, err)
 	}
 	return nil
-}
-
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
-	if value := os.Getenv(key); value != "" {
-		if duration, err := time.ParseDuration(value); err == nil {
-			return duration
-		}
-	}
-	return defaultValue
-}
-
-func getEnvBool(key string, defaultValue bool) bool {
-	if value := os.Getenv(key); value != "" {
-		if boolValue, err := strconv.ParseBool(value); err == nil {
-			return boolValue
-		}
-	}
-	return defaultValue
-}
-
-func getEnvInt(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		if intValue, err := strconv.Atoi(value); err == nil && intValue > 0 {
-			return intValue
-		}
-	}
-	return defaultValue
 }

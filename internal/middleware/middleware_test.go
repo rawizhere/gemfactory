@@ -4,29 +4,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
 func TestDebouncerShouldProcess(t *testing.T) {
 	d := NewDebouncer(50*time.Millisecond, zap.NewNop())
 
-	if !d.ShouldProcess(1, "msg:month") {
-		t.Error("first call must pass")
-	}
-	if d.ShouldProcess(1, "msg:month") {
-		t.Error("repeated call within interval must be dropped")
-	}
-	if !d.ShouldProcess(1, "msg:clip") {
-		t.Error("different action for same user must pass")
-	}
-	if !d.ShouldProcess(2, "msg:month") {
-		t.Error("same action for different user must pass")
-	}
+	require.True(t, d.ShouldProcess(1, "msg:month"), "first call must pass")
+	require.False(t, d.ShouldProcess(1, "msg:month"), "repeated call within interval must be dropped")
+	require.True(t, d.ShouldProcess(1, "msg:clip"), "different action for same user must pass")
+	require.True(t, d.ShouldProcess(2, "msg:month"), "same action for different user must pass")
 
 	time.Sleep(60 * time.Millisecond)
-	if !d.ShouldProcess(1, "msg:month") {
-		t.Error("call after interval must pass")
-	}
+	require.True(t, d.ShouldProcess(1, "msg:month"), "call after interval must pass")
 }
 
 func TestDebouncerEntriesExpire(t *testing.T) {
@@ -36,33 +27,23 @@ func TestDebouncerEntriesExpire(t *testing.T) {
 
 	time.Sleep(30 * time.Millisecond)
 
-	if _, ok := d.lastProcess.Get("1:a"); ok {
-		t.Errorf("expected expired entry to be gone")
-	}
-	if _, ok := d.lastProcess.Get("2:b"); ok {
-		t.Errorf("expected expired entry to be gone")
-	}
+	_, ok := d.lastProcess.Get("1:a")
+	require.False(t, ok, "expected expired entry to be gone")
+	_, ok = d.lastProcess.Get("2:b")
+	require.False(t, ok, "expected expired entry to be gone")
 }
 
 func TestRateLimiterAllow(t *testing.T) {
 	rl := NewRateLimiter(3, 50*time.Millisecond, zap.NewNop())
 
 	for i := 0; i < 3; i++ {
-		if !rl.Allow(1) {
-			t.Fatalf("request %d must be allowed", i+1)
-		}
+		require.True(t, rl.Allow(1), "request %d must be allowed", i+1)
 	}
-	if rl.Allow(1) {
-		t.Error("4th request within window must be rejected")
-	}
-	if !rl.Allow(2) {
-		t.Error("other user must not be affected")
-	}
+	require.False(t, rl.Allow(1), "4th request within window must be rejected")
+	require.True(t, rl.Allow(2), "other user must not be affected")
 
 	time.Sleep(60 * time.Millisecond)
-	if !rl.Allow(1) {
-		t.Error("request in a fresh window must be allowed")
-	}
+	require.True(t, rl.Allow(1), "request in a fresh window must be allowed")
 }
 
 func TestRateLimiterEntriesExpire(t *testing.T) {
@@ -72,7 +53,6 @@ func TestRateLimiterEntriesExpire(t *testing.T) {
 
 	time.Sleep(40 * time.Millisecond)
 
-	if _, ok := rl.requests.Get(1); ok {
-		t.Errorf("expected expired user state to be gone")
-	}
+	_, ok := rl.requests.Get(1)
+	require.False(t, ok, "expected expired user state to be gone")
 }

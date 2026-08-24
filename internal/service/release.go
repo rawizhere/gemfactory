@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/uptrace/bun"
+	"github.com/agnivade/levenshtein"
 	"go.uber.org/zap"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -289,12 +290,8 @@ func (s *ReleaseService) ParseReleasesForMonth(ctx context.Context, monthName st
 		currentMonth := int(now.Month())
 
 		requestedMonthIndex := -1
-		months := []string{"january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"}
-		for i, m := range months {
-			if strings.ToLower(month) == m {
-				requestedMonthIndex = i + 1
-				break
-			}
+		if m := model.MonthNumber(month); m > 0 {
+			requestedMonthIndex = m
 		}
 
 		if requestedMonthIndex != -1 && requestedMonthIndex < currentMonth {
@@ -444,13 +441,7 @@ func (s *ReleaseService) GetByArtist(ctx context.Context, artistName string) (st
 }
 
 func monthToInt(month string) int {
-	monthMap := map[string]int{
-		"january": 1, "february": 2, "march": 3,
-		"april": 4, "may": 5, "june": 6,
-		"july": 7, "august": 8, "september": 9,
-		"october": 10, "november": 11, "december": 12,
-	}
-	return monthMap[strings.ToLower(month)]
+	return model.MonthNumber(month)
 }
 
 var staticAliases = map[string]string{
@@ -529,6 +520,29 @@ func (s *ReleaseService) findArtist(scrapedName string, artistMap map[string]*mo
 		}
 	}
 
+	return fuzzyLookup(normMap, normalizeName(raw))
+}
+
+// maxFuzzyEditDistance bounds the Levenshtein fallback so short names don't match wildly.
+const maxFuzzyEditDistance = 2
+
+// fuzzyLookup is the last-resort exact-prefix/typo match: accepts candidates that
+// extend a known name by a few chars or differ from it within edit distance.
+func fuzzyLookup(normMap map[string]*model.Artist, name string) *model.Artist {
+	if len(name) < 5 {
+		return nil
+	}
+	for known, artist := range normMap {
+		if len(known) < 4 {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(name, known), strings.HasPrefix(known, name):
+			return artist
+		case levenshtein.ComputeDistance(name, known) <= maxFuzzyEditDistance:
+			return artist
+		}
+	}
 	return nil
 }
 

@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +16,7 @@ import (
 	th "github.com/mymmrac/telego/telegohandler"
 	"github.com/mymmrac/telego/telegoapi"
 	"github.com/mymmrac/telego/telegoutil"
+	"github.com/dustin/go-humanize"
 	"go.uber.org/zap"
 )
 
@@ -248,13 +251,7 @@ func (p *progressFileReader) Name() string {
 }
 
 func formatSpeed(bytesPerSec float64) string {
-	if bytesPerSec >= 1024*1024 {
-		return fmt.Sprintf("%.1f MB/s", bytesPerSec/(1024*1024))
-	}
-	if bytesPerSec >= 1024 {
-		return fmt.Sprintf("%.0f KB/s", bytesPerSec/1024)
-	}
-	return fmt.Sprintf("%.0f B/s", bytesPerSec)
+	return humanize.Bytes(uint64(bytesPerSec)) + "/s"
 }
 
 func (c *Client) SendVideoFile(ctx context.Context, chatID int64, filePath, caption string, onProgress UploadProgressCallback, replyToMsgID int) error {
@@ -348,16 +345,20 @@ func (c *Client) SetBotCommands(ctx context.Context, commands []telego.BotComman
 	return err
 }
 
+var htmlTagRe = regexp.MustCompile(`</?([a-zA-Z][a-zA-Z0-9]*)[^>]*/?>`)
+
+// splitMessage splits text into chunks under the length limit at line boundaries,
+// keeping every chunk valid HTML: tags left open at a chunk end are closed there
+// and reopened at the start of the next chunk.
 func splitMessage(text string, limit int) []string {
 	if len(text) <= limit {
 		return []string{text}
 	}
 
 	var chunks []string
-	lines := strings.Split(text, "\n")
 	var current strings.Builder
 
-	for _, line := range lines {
+	for _, line := range strings.Split(text, "\n") {
 		if current.Len()+len(line)+1 > limit && current.Len() > 0 {
 			chunks = append(chunks, current.String())
 			current.Reset()
@@ -373,5 +374,42 @@ func splitMessage(text string, limit int) []string {
 		chunks = append(chunks, current.String())
 	}
 
-	return chunks
+	return rebalanceHTMLTags(chunks)
+}
+
+// rebalanceHTMLTags closes tags still open at the end of each chunk and reopens
+// them at the start of the following chunk.
+func rebalanceHTMLTags(chunks []string) []string {
+	out := make([]string, len(chunks))
+	var open []string
+
+	for i, chunk := range chunks {
+		var prefix strings.Builder
+		for _, tag := range open {
+			prefix.WriteString("<" + tag + ">")
+		}
+
+		for _, m := range htmlTagRe.FindAllStringSubmatch(chunk, -1) {
+			name := strings.ToLower(m[1])
+			if strings.HasPrefix(m[0], "</") {
+				for j := len(open) - 1; j >= 0; j-- {
+					if open[j] == name {
+						open = slices.Delete(open, j, j+1)
+						break
+					}
+				}
+			} else if !strings.HasSuffix(m[0], "/>") {
+				open = append(open, name)
+			}
+		}
+
+		var suffix strings.Builder
+		for j := len(open) - 1; j >= 0; j-- {
+			suffix.WriteString("</" + open[j] + ">")
+		}
+
+		out[i] = prefix.String() + chunk + suffix.String()
+	}
+
+	return out
 }

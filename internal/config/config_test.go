@@ -3,6 +3,8 @@ package config
 import (
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestConfigValidate(t *testing.T) {
@@ -12,17 +14,12 @@ func TestConfigValidate(t *testing.T) {
 		Timezone:      "Europe/Moscow",
 		ScraperDelay:  2 * time.Second,
 	}
-
-	if err := cfg.Validate(); err != nil {
-		t.Errorf("Expected valid config, got error: %v", err)
-	}
+	require.NoError(t, cfg.Validate(), "expected valid config")
 
 	invalidCfg := &Config{
 		DatabaseURL: "",
 	}
-	if err := invalidCfg.Validate(); err == nil {
-		t.Error("Expected error for empty DB_DSN, got nil")
-	}
+	require.Error(t, invalidCfg.Validate(), "expected error for empty DB_DSN")
 
 	invalidTzCfg := &Config{
 		DatabaseURL:   "postgres://localhost:5432/test",
@@ -30,7 +27,5 @@ func TestConfigValidate(t *testing.T) {
 		Timezone:      "Invalid/Zone_Name",
 		ScraperDelay:  2 * time.Second,
 	}
-	if err := invalidTzCfg.Validate(); err == nil {
-		t.Error("Expected error for invalid TIMEZONE, got nil")
-	}
+	require.Error(t, invalidTzCfg.Validate(), "expected error for invalid TIMEZONE")
 }

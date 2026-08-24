@@ -24,9 +24,8 @@ func New(config *config.Config, logger *zap.Logger) *Middleware {
 	}
 }
 
-// Handlers returns the telegohandler middleware chain.
-// Entries are applied in order: panic recovery, logging, debouncing, rate limiting.
-// Expired state is evicted automatically by the underlying expirable caches.
+// Handlers returns the telegohandler middleware chain, applied in registration order:
+// panic recovery, timeout, logging, debouncing, rate limiting. Expired state evicts itself.
 func (m *Middleware) Handlers() []th.Handler {
 	return []th.Handler{
 		th.PanicRecovery(),

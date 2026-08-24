@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
@@ -19,9 +20,8 @@ func TestSplitTitle(t *testing.T) {
 	}
 	for _, tc := range tests {
 		a, al := splitTitle(tc.in)
-		if a != tc.artist || al != tc.album {
-			t.Errorf("splitTitle(%q) = (%q, %q), want (%q, %q)", tc.in, a, al, tc.artist, tc.album)
-		}
+		require.Equal(t, tc.artist, a, "splitTitle(%q)", tc.in)
+		require.Equal(t, tc.album, al, "splitTitle(%q)", tc.in)
 	}
 }
 
@@ -35,31 +35,22 @@ func TestFindDateInString(t *testing.T) {
 		{"no date here", ""},
 	}
 	for _, tc := range tests {
-		if got := findDateInString(tc.in); got != tc.want {
-			t.Errorf("findDateInString(%q) = %q, want %q", tc.in, got, tc.want)
-		}
+		require.Equal(t, tc.want, findDateInString(tc.in), "findDateInString(%q)", tc.in)
 	}
 }
 
 func TestCleanArtistName(t *testing.T) {
-	got := cleanArtistName(" BLACKPINK \u202bextra\u202c ")
-	if got != "BLACKPINK extra" {
-		t.Errorf("cleanArtistName = %q, want %q", got, "BLACKPINK extra")
-	}
+	require.Equal(t, "BLACKPINK extra", cleanArtistName(" BLACKPINK \u202bextra\u202c "))
 }
 
 func TestMonthNumber(t *testing.T) {
-	if monthNumber("April") != 4 || monthNumber(" december ") != 12 || monthNumber("Foo") != 0 {
-		t.Error("unexpected monthNumber results")
-	}
+	require.Equal(t, 4, monthNumber("April"))
+	require.Equal(t, 12, monthNumber(" december "))
+	require.Zero(t, monthNumber("Foo"), "unexpected monthNumber results")
 }
 
 func TestCleanAlbumURL(t *testing.T) {
-	got := cleanAlbumURL("https://kpopofficial.com/album/x/?utm=1#top")
-	want := "https://kpopofficial.com/album/x/"
-	if got != want {
-		t.Errorf("cleanAlbumURL = %q, want %q", got, want)
-	}
+	require.Equal(t, "https://kpopofficial.com/album/x/", cleanAlbumURL("https://kpopofficial.com/album/x/?utm=1#top"))
 }
 
 func TestUniqueStrings(t *testing.T) {
@@ -69,25 +60,19 @@ func TestUniqueStrings(t *testing.T) {
 		"https://kpopofficial.com/album/b/",
 	}
 	out := uniqueStrings(in)
-	if len(out) != 2 || out[0] != in[0] || out[1] != in[2] {
-		t.Errorf("uniqueStrings = %v, want first and third entries", out)
-	}
+	require.Len(t, out, 2, "uniqueStrings = %v", out)
+	require.Equal(t, in[0], out[0], "uniqueStrings = %v", out)
+	require.Equal(t, in[2], out[1], "uniqueStrings = %v", out)
 }
 
 func TestReleaseInMonthAndYear(t *testing.T) {
 	d := time.Date(2024, time.March, 5, 0, 0, 0, 0, time.UTC)
-	if !releaseInMonth(d, "march", "2024") {
-		t.Error("expected date in march 2024")
-	}
-	if releaseInMonth(d, "april", "2024") || releaseInMonth(d, "march", "2023") {
-		t.Error("date should not match other month/year")
-	}
-	if releaseInMonth(time.Time{}, "march", "2024") {
-		t.Error("zero date must not match")
-	}
-	if !releaseInYear(d, "2024") || releaseInYear(d, "2025") {
-		t.Error("unexpected releaseInYear results")
-	}
+	require.True(t, releaseInMonth(d, "march", "2024"), "expected date in march 2024")
+	require.False(t, releaseInMonth(d, "april", "2024"), "date should not match other month/year")
+	require.False(t, releaseInMonth(d, "march", "2023"), "date should not match other month/year")
+	require.False(t, releaseInMonth(time.Time{}, "march", "2024"), "zero date must not match")
+	require.True(t, releaseInYear(d, "2024"), "unexpected releaseInYear results")
+	require.False(t, releaseInYear(d, "2025"), "unexpected releaseInYear results")
 }
 
 func TestParseEventPageFromDoc(t *testing.T) {
@@ -108,42 +93,26 @@ func TestParseEventPageFromDoc(t *testing.T) {
 
 	f := &fetcherImpl{logger: zap.NewNop()}
 	doc, err := newTestDoc(html)
-	if err != nil {
-		t.Fatalf("failed to parse html: %v", err)
-	}
+	require.NoError(t, err, "failed to parse html")
 
 	rels, links, err := f.parseEventPageFromDoc(doc, "https://kpopofficial.com/post/how-sweet")
-	if err != nil {
-		t.Fatalf("parseEventPageFromDoc error: %v", err)
-	}
-	if len(rels) != 2 {
-		t.Fatalf("got %d releases, want 2", len(rels))
-	}
+	require.NoError(t, err)
+	require.Len(t, rels, 2)
 
 	first := rels[0]
-	if first.Artist != "NewJeans" || first.AlbumName != "How Sweet" || first.TitleTrack != "How Sweet" {
-		t.Errorf("unexpected release metadata: %+v", first)
-	}
-	if first.Title != "How Sweet" {
-		t.Errorf("main event title = %q, want %q", first.Title, "How Sweet")
-	}
-	if want := time.Date(2024, time.May, 24, 0, 0, 0, 0, time.UTC); !first.Date.Equal(want) {
-		t.Errorf("date = %v, want %v", first.Date, want)
-	}
-	if first.MV != "https://www.youtube.com/watch?v=fEw9f8u0BaM" {
-		t.Errorf("MV = %q", first.MV)
-	}
-	if first.Spotify != "https://open.spotify.com/album/12345" {
-		t.Errorf("Spotify = %q", first.Spotify)
-	}
-	if len(links) != 2 || !strings.HasSuffix(links[0], "/album/how-sweet") {
-		t.Errorf("subLinks = %v, want album and spotify links", links)
-	}
+	require.Equal(t, "NewJeans", first.Artist, "unexpected release metadata: %+v", first)
+	require.Equal(t, "How Sweet", first.AlbumName, "unexpected release metadata: %+v", first)
+	require.Equal(t, "How Sweet", first.TitleTrack, "unexpected release metadata: %+v", first)
+	require.Equal(t, "How Sweet", first.Title, "main event title mismatch")
+	require.Equal(t, time.Date(2024, time.May, 24, 0, 0, 0, 0, time.UTC), first.Date)
+	require.Equal(t, "https://www.youtube.com/watch?v=fEw9f8u0BaM", first.MV)
+	require.Equal(t, "https://open.spotify.com/album/12345", first.Spotify)
+
+	require.Len(t, links, 2, "subLinks = %v", links)
+	require.True(t, strings.HasSuffix(links[0], "/album/how-sweet"), "subLinks = %v", links)
 
 	second := rels[1]
-	if second.Title != "MV Release" {
-		t.Errorf("secondary event title = %q, want %q", second.Title, "MV Release")
-	}
+	require.Equal(t, "MV Release", second.Title, "secondary event title mismatch")
 }
 
 func TestParseEventPageFromDocFallbackDate(t *testing.T) {
@@ -154,21 +123,12 @@ func TestParseEventPageFromDocFallbackDate(t *testing.T) {
 
 	f := &fetcherImpl{logger: zap.NewNop()}
 	doc, err := newTestDoc(html)
-	if err != nil {
-		t.Fatalf("failed to parse html: %v", err)
-	}
+	require.NoError(t, err, "failed to parse html")
 
 	rels, _, err := f.parseEventPageFromDoc(doc, "https://kpopofficial.com/post/x")
-	if err != nil {
-		t.Fatalf("parseEventPageFromDoc error: %v", err)
-	}
-	if len(rels) != 1 {
-		t.Fatalf("got %d releases, want 1", len(rels))
-	}
-	want := time.Date(2024, time.June, 1, 0, 0, 0, 0, time.UTC)
-	if !rels[0].Date.Equal(want) {
-		t.Errorf("date = %v, want %v", rels[0].Date, want)
-	}
+	require.NoError(t, err)
+	require.Len(t, rels, 1)
+	require.Equal(t, time.Date(2024, time.June, 1, 0, 0, 0, 0, time.UTC), rels[0].Date)
 }
 
 func newTestDoc(html string) (*goquery.Document, error) {
@@ -177,28 +137,17 @@ func newTestDoc(html string) (*goquery.Document, error) {
 
 func TestMonthAndYearWindow(t *testing.T) {
 	after, before, err := monthWindow("May", "2024")
-	if err != nil {
-		t.Fatalf("unexpected error for valid month: %v", err)
-	}
-	if after.After(before) {
-		t.Errorf("after %v should be before %v", after, before)
-	}
+	require.NoError(t, err, "unexpected error for valid month")
+	require.False(t, after.After(before), "after %v should be before %v", after, before)
 
-	if _, _, err := monthWindow("InvalidMonth", "2024"); err == nil {
-		t.Error("expected error for invalid month")
-	}
-	if _, _, err := monthWindow("May", "-1"); err == nil {
-		t.Error("expected error for invalid year")
-	}
+	_, _, err = monthWindow("InvalidMonth", "2024")
+	require.Error(t, err, "expected error for invalid month")
+	_, _, err = monthWindow("May", "-1")
+	require.Error(t, err, "expected error for invalid year")
 
 	yAfter, yBefore, err := yearWindow("2024")
-	if err != nil {
-		t.Fatalf("unexpected error for valid year: %v", err)
-	}
-	if yAfter.After(yBefore) {
-		t.Errorf("year after %v should be before %v", yAfter, yBefore)
-	}
-	if _, _, err := yearWindow("invalid"); err == nil {
-		t.Error("expected error for invalid year")
-	}
+	require.NoError(t, err, "unexpected error for valid year")
+	require.False(t, yAfter.After(yBefore), "year after %v should be before %v", yAfter, yBefore)
+	_, _, err = yearWindow("invalid")
+	require.Error(t, err, "expected error for invalid year")
 }

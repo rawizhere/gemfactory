@@ -3,9 +3,6 @@ package keyboard
 import (
 	"context"
 	"fmt"
-	"gemfactory/internal/config"
-	"gemfactory/internal/service"
-	"gemfactory/internal/telegram"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +12,11 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+
+	"gemfactory/internal/config"
+	"gemfactory/internal/model"
+	"gemfactory/internal/service"
+	"gemfactory/internal/telegram"
 )
 
 type Manager struct {
@@ -53,16 +55,11 @@ func (k *Manager) initKeyboards() {
 }
 
 func (k *Manager) initAllMonthsKeyboard() {
-	months := []string{
-		"january", "february", "march", "april", "may", "june",
-		"july", "august", "september", "october", "november", "december",
-	}
-
 	var rows [][]telego.InlineKeyboardButton
-	for i := 0; i < len(months); i += 3 {
+	for i := 0; i < len(model.Months); i += 3 {
 		var row []telego.InlineKeyboardButton
-		for j := 0; j < 3 && i+j < len(months); j++ {
-			month := months[i+j]
+		for j := 0; j < 3 && i+j < len(model.Months); j++ {
+			month := model.Months[i+j]
 			row = append(row, telegoutil.InlineKeyboardButton(cases.Title(language.English).String(month)).
 				WithCallbackData("month_"+month))
 		}
@@ -97,18 +94,13 @@ func (k *Manager) updateMainMonthKeyboard() {
 		nextMonth = 1
 	}
 
-	months := []string{
-		"january", "february", "march", "april", "may", "june",
-		"july", "august", "september", "october", "november", "december",
-	}
-
 	buttons := []telego.InlineKeyboardButton{
-		telegoutil.InlineKeyboardButton(cases.Title(language.English).String(months[prevMonth-1])).
-			WithCallbackData("month_" + months[prevMonth-1]),
-		telegoutil.InlineKeyboardButton(cases.Title(language.English).String(months[currentMonth-1])).
-			WithCallbackData("month_" + months[currentMonth-1]),
-		telegoutil.InlineKeyboardButton(cases.Title(language.English).String(months[nextMonth-1])).
-			WithCallbackData("month_" + months[nextMonth-1]),
+		telegoutil.InlineKeyboardButton(cases.Title(language.English).String(model.Months[prevMonth-1])).
+			WithCallbackData("month_" + model.Months[prevMonth-1]),
+		telegoutil.InlineKeyboardButton(cases.Title(language.English).String(model.Months[currentMonth-1])).
+			WithCallbackData("month_" + model.Months[currentMonth-1]),
+		telegoutil.InlineKeyboardButton(cases.Title(language.English).String(model.Months[nextMonth-1])).
+			WithCallbackData("month_" + model.Months[nextMonth-1]),
 		telegoutil.InlineKeyboardButton("...").WithCallbackData("show_all_months"),
 	}
 
@@ -117,7 +109,7 @@ func (k *Manager) updateMainMonthKeyboard() {
 	k.mainMonthKeyboard = *telegoutil.InlineKeyboard(telegoutil.InlineKeyboardRow(buttons...))
 	k.mu.Unlock()
 
-	k.logger.Info("Updated main month keyboard", zap.String("current_month", months[currentMonth-1]))
+	k.logger.Info("Updated main month keyboard", zap.String("current_month", model.Months[currentMonth-1]))
 }
 
 func (k *Manager) updateMainMonthKeyboardLoop() {
@@ -145,32 +137,8 @@ func (k *Manager) GetAllMonthsKeyboard() *telego.InlineKeyboardMarkup {
 	return &k.allMonthsKeyboard
 }
 
-func (k *Manager) HandleCallbackQuery(ctx context.Context, callback *telego.CallbackQuery) error {
-	data := callback.Data
-	if callback.Message == nil {
-		return fmt.Errorf("callback query message is nil")
-	}
-	chatID := callback.Message.GetChat().ID
-
-	k.logger.Debug("Received callback query", zap.String("data", data), zap.Int64("chat_id", chatID))
-
-	if strings.HasPrefix(data, "month_") {
-		return k.handleMonthCallback(ctx, callback)
-	}
-
-	if data == "show_all_months" {
-		return k.handleShowAllMonthsCallback(ctx, callback)
-	}
-
-	if data == "back_to_main" {
-		return k.handleBackToMainCallback(ctx, callback)
-	}
-
-	k.logger.Warn("Unknown callback query", zap.String("data", data))
-	return fmt.Errorf("unknown callback query: %s", data)
-}
-
-func (k *Manager) handleMonthCallback(ctx context.Context, callback *telego.CallbackQuery) error {
+// HandleMonthCallback shows releases for the "month_<name>" callback data.
+func (k *Manager) HandleMonthCallback(ctx context.Context, callback *telego.CallbackQuery) error {
 	if callback.Message == nil {
 		return fmt.Errorf("callback query message is nil")
 	}
@@ -197,7 +165,8 @@ func (k *Manager) handleMonthCallback(ctx context.Context, callback *telego.Call
 	return nil
 }
 
-func (k *Manager) handleShowAllMonthsCallback(ctx context.Context, callback *telego.CallbackQuery) error {
+// HandleAllMonthsCallback switches the inline keyboard to the full month grid.
+func (k *Manager) HandleAllMonthsCallback(ctx context.Context, callback *telego.CallbackQuery) error {
 	if callback.Message == nil {
 		return fmt.Errorf("callback query message is nil")
 	}
@@ -210,7 +179,8 @@ func (k *Manager) handleShowAllMonthsCallback(ctx context.Context, callback *tel
 	return nil
 }
 
-func (k *Manager) handleBackToMainCallback(ctx context.Context, callback *telego.CallbackQuery) error {
+// HandleMainCallback restores the default inline keyboard.
+func (k *Manager) HandleMainCallback(ctx context.Context, callback *telego.CallbackQuery) error {
 	if callback.Message == nil {
 		return fmt.Errorf("callback query message is nil")
 	}

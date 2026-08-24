@@ -2,25 +2,25 @@ package service
 
 import (
 	"context"
-	"gemfactory/internal/model"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	"gemfactory/internal/model"
 )
 
 func TestMonthToInt(t *testing.T) {
-	if monthToInt("March") != 3 || monthToInt("DECEMBER") != 12 || monthToInt("notamonth") != 0 {
-		t.Error("unexpected monthToInt results")
-	}
+	require.Equal(t, 3, monthToInt("March"))
+	require.Equal(t, 12, monthToInt("DECEMBER"))
+	require.Zero(t, monthToInt("notamonth"), "unexpected monthToInt results")
 }
 
 func TestValidateRelease(t *testing.T) {
 	valid := &model.Release{ArtistID: 1, Title: model.NewUniqueString("X"), Date: time.Now()}
-	if err := NewReleaseService(nil, nil, nil).validateRelease(valid); err != nil {
-		t.Errorf("expected valid release, got %v", err)
-	}
+	require.NoError(t, NewReleaseService(nil, nil, nil).validateRelease(valid), "expected valid release")
 
 	cases := []*model.Release{
 		nil,
@@ -30,16 +30,12 @@ func TestValidateRelease(t *testing.T) {
 	}
 	svc := &ReleaseService{}
 	for i, c := range cases {
-		if err := svc.validateRelease(c); err == nil {
-			t.Errorf("case %d: expected validation error", i)
-		}
+		require.Error(t, svc.validateRelease(c), "case %d: expected validation error", i)
 	}
 }
 
 func TestCleanReleaseTitleAndLink(t *testing.T) {
-	if got := CleanReleaseTitle("  {Multi  word \n title }"); got != "Multi word title" {
-		t.Errorf("CleanReleaseTitle = %q", got)
-	}
+	require.Equal(t, "Multi word title", CleanReleaseTitle("  {Multi  word \n title }"))
 
 	for _, link := range []string{
 		"https://youtube.com/@channel",
@@ -47,16 +43,10 @@ func TestCleanReleaseTitleAndLink(t *testing.T) {
 		"https://youtube.com/user/name",
 		"https://youtube.com/c/name",
 	} {
-		if got := CleanLink(link); got != "" {
-			t.Errorf("CleanLink(%q) should be empty, got %q", link, got)
-		}
+		require.Empty(t, CleanLink(link), "CleanLink(%q) should be empty", link)
 	}
-	if got := CleanLink("https://youtu.be/abc123"); got != "https://youtu.be/abc123" {
-		t.Errorf("CleanLink dropped valid link: %q", got)
-	}
-	if CleanLink("") != "" {
-		t.Error("CleanLink(\"\") should stay empty")
-	}
+	require.Equal(t, "https://youtu.be/abc123", CleanLink("https://youtu.be/abc123"), "CleanLink dropped valid link")
+	require.Empty(t, CleanLink(""), `CleanLink("") should stay empty`)
 }
 
 func TestFindArtist(t *testing.T) {
@@ -115,9 +105,7 @@ func TestFindArtist(t *testing.T) {
 	}
 	for _, tc := range tests {
 		got := (&ReleaseService{}).findArtist(tc.in, artists)
-		if got != tc.want {
-			t.Errorf("findArtist(%q) = %v, want %v", tc.in, got, tc.want)
-		}
+		require.Equal(t, tc.want, got, "findArtist(%q)", tc.in)
 	}
 }
 
@@ -138,42 +126,26 @@ func TestGetReleasesForMonthDedupAndGenderFilter(t *testing.T) {
 	svc := &ReleaseService{repo: repo, logger: zap.NewNop()}
 
 	all, err := svc.GetReleasesForMonth(context.Background(), "may-2024", false, false)
-	if err != nil {
-		t.Fatalf("GetReleasesForMonth error: %v", err)
-	}
-	if got := strings.Count(all, "<b>aespa</b>"); got != 1 {
-		t.Errorf("expected dedup to keep single aespa line, got %d:\n%s", got, all)
-	}
-	if !strings.Contains(all, "https://youtu.be/x1") || !strings.Contains(all, "https://open.spotify.com/x1") {
-		t.Error("dedup must merge MV and Spotify links from duplicates")
-	}
-	if !strings.Contains(all, "Releases for May 2024") || !strings.Contains(all, "<b>Stray Kids</b>") {
-		t.Errorf("unexpected output header/content:\n%s", all)
-	}
+	require.NoError(t, err)
+	require.Equal(t, 1, strings.Count(all, "<b>aespa</b>"), "expected dedup to keep single aespa line:\n%s", all)
+	require.Contains(t, all, "https://youtu.be/x1", "dedup must merge MV and Spotify links from duplicates")
+	require.Contains(t, all, "https://open.spotify.com/x1", "dedup must merge MV and Spotify links from duplicates")
+	require.Contains(t, all, "Releases for May 2024", "unexpected output header/content:\n%s", all)
+	require.Contains(t, all, "<b>Stray Kids</b>", "unexpected output header/content:\n%s", all)
 
 	female, err := svc.GetReleasesForMonth(context.Background(), "may-2024", true, false)
-	if err != nil {
-		t.Fatalf("GetReleasesForMonth error: %v", err)
-	}
-	if strings.Contains(female, "Stray Kids") || !strings.Contains(female, "aespa") {
-		t.Errorf("female filter failed:\n%s", female)
-	}
+	require.NoError(t, err)
+	require.NotContains(t, female, "Stray Kids", "female filter failed:\n%s", female)
+	require.Contains(t, female, "aespa", "female filter failed:\n%s", female)
 
 	male, err := svc.GetReleasesForMonth(context.Background(), "may-2024", false, true)
-	if err != nil {
-		t.Fatalf("GetReleasesForMonth error: %v", err)
-	}
-	if strings.Contains(male, "aespa") || !strings.Contains(male, "Stray Kids") {
-		t.Errorf("male filter failed:\n%s", male)
-	}
+	require.NoError(t, err)
+	require.NotContains(t, male, "aespa", "male filter failed:\n%s", male)
+	require.Contains(t, male, "Stray Kids", "male filter failed:\n%s", male)
 
 	repoEmpty := &mockReleaseRepo{}
 	emptySvc := &ReleaseService{repo: repoEmpty, logger: zap.NewNop()}
 	out, err := emptySvc.GetReleasesForMonth(context.Background(), "may-2024", false, false)
-	if err != nil {
-		t.Fatalf("GetReleasesForMonth error: %v", err)
-	}
-	if !strings.Contains(out, "No releases found") {
-		t.Errorf("expected empty message, got:\n%s", out)
-	}
+	require.NoError(t, err)
+	require.Contains(t, out, "No releases found", "expected empty message, got:\n%s", out)
 }

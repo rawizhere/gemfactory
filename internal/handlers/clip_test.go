@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRenderStatusCard(t *testing.T) {
@@ -22,9 +24,7 @@ func TestRenderStatusCard(t *testing.T) {
 		"<code>1:05.7 – 1:25</code> • Subtitles (ru)\n\n" +
 		"<code>[████████████████]</code> 100%"
 
-	if got != expected {
-		t.Errorf("renderStatusCard mismatch.\nGot:\n%q\n\nWant:\n%q\n\nGot text:\n%s\n\nWant text:\n%s", got, expected, got, expected)
-	}
+	require.Equal(t, expected, got, "renderStatusCard mismatch")
 }
 
 func TestRenderStatusCardWorking(t *testing.T) {
@@ -48,7 +48,5 @@ func TestRenderStatusCardWorking(t *testing.T) {
 		"<code>[████████░░░░░░░░]</code> 50%\n" +
 		"<b>Download:</b> 50%"
 
-	if got != expected {
-		t.Errorf("renderStatusCard working mismatch.\nGot:\n%q\n\nWant:\n%q", got, expected)
-	}
+	require.Equal(t, expected, got, "renderStatusCard working mismatch")
 }
