@@ -3,7 +3,13 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
 
 permissions:
   contents: read
@@ -24,6 +30,7 @@ jobs:
       - name: run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
+          version: v2.13
           args: --timeout=5m
 
   vulnerability-scan:
@@ -80,6 +87,9 @@ jobs:
             type=sha,prefix=sha-
       - name: build image locally
         uses: docker/build-push-action@v7
+        env:
+          DOCKER_BUILD_SUMMARY: false
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
           file: ./deployments/Dockerfile
@@ -90,6 +100,8 @@ jobs:
           cache-to: type=gha,mode=max
       - name: scan image for vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
+        env:
+          TRIVY_CACHE_DIR: /home/runner/.cache/trivy
         with:
           image-ref: gemfactory-ci:scan
           format: table
