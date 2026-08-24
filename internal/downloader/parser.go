@@ -1,14 +1,16 @@
 package downloader
 
 import (
+	"context"
 	"fmt"
 	"net/url"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"golang.org/x/text/language"
+
+	"gemfactory/internal/settings"
 )
 
 // timecodePattern matches "SS(.ms)", "MM:SS(.ms)" and "HH:MM:SS(.ms)" tokens.
@@ -230,15 +232,13 @@ func ExtractFirstURL(text string) string {
 	return ""
 }
 
-func (s *Service) authArgs(cookieFile string) []string {
+func (s *Service) authArgs(ctx context.Context, cookieFile string) []string {
 	var args []string
 	if cookieFile != "" {
 		args = append(args, "--cookies", cookieFile)
 	}
-	if proxy := s.proxy(); proxy != "" {
+	if proxy := settings.New(s.configs).Value(ctx, "YTDLP_PROXY", ""); proxy != "" {
 		args = append(args, "--proxy", proxy)
 	}
 	return args
 }
-
-func (s *Service) proxy() string { return os.Getenv("YTDLP_PROXY") }

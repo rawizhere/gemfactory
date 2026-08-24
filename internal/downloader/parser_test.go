@@ -166,7 +166,7 @@ func TestFormatTimecode(t *testing.T) {
 }
 
 func TestFileNameWithTimecode(t *testing.T) {
-	require.Equal(t, "dQw4w9WgXcQ_000605-900-000616-100", fileNameWithTimecode("dQw4w9WgXcQ", 365900, 376100))
+	require.Equal(t, "dQw4w9WgXcQ_000605-900-000616-100", fileNameWithTimecodeVariant("dQw4w9WgXcQ", 365900, 376100, ""))
 }
 
 func TestFormatHumanSize(t *testing.T) {

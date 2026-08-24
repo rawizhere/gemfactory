@@ -266,7 +266,7 @@ func (s *Service) downloadSubtitlesWithRetry(ctx context.Context, job *Job, lang
 	if err != nil {
 		return err
 	}
-	args := append(s.baseYTDLPArgs(cookieFile),
+	args := append(s.baseYTDLPArgs(ctx, cookieFile),
 		"--write-sub",
 		"--sub-lang", lang,
 		"--sub-format", "vtt",
@@ -611,7 +611,7 @@ func (s *Service) ExtractMetadata(ctx context.Context, url, videoID, cookieFile 
 	}
 	base := strings.TrimSuffix(metaPath, ".info.json")
 
-	args := append(s.baseYTDLPArgs(cookieFile),
+	args := append(s.baseYTDLPArgs(ctx, cookieFile),
 		"--write-info-json",
 		"--skip-download",
 		"-o", base,
@@ -1428,7 +1428,6 @@ func geminiSafetySettings() []*genai.SafetySetting {
 		genai.HarmCategoryHateSpeech,
 		genai.HarmCategorySexuallyExplicit,
 		genai.HarmCategoryDangerousContent,
-		genai.HarmCategoryCivicIntegrity,
 	}
 	settings := make([]*genai.SafetySetting, 0, len(categories))
 	for _, c := range categories {
@@ -1494,7 +1493,9 @@ func translateOpenAICompatible(ctx context.Context, provider, baseURL, apiKey st
 				{Role: openai.ChatMessageRoleUser, Content: userMsg},
 			},
 			Temperature: 0.2,
-			MaxTokens:   maxOutputTokens(len(texts), model),
+			// max_tokens (not MaxCompletionTokens): NVIDIA NIM, Groq and other
+			// OpenAI-compatible providers do not all support the newer field.
+			MaxTokens: maxOutputTokens(len(texts), model), //nolint:staticcheck // SA1019
 		}
 		if isReasoningModel(model) {
 			req.ReasoningEffort = "low"

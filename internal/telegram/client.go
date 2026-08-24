@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mymmrac/telego"
-	th "github.com/mymmrac/telego/telegohandler"
-	"github.com/mymmrac/telego/telegoapi"
-	"github.com/mymmrac/telego/telegoutil"
 	"github.com/dustin/go-humanize"
+	"github.com/mymmrac/telego"
+	"github.com/mymmrac/telego/telegoapi"
+	th "github.com/mymmrac/telego/telegohandler"
+	"github.com/mymmrac/telego/telegoutil"
 	"go.uber.org/zap"
 )
 

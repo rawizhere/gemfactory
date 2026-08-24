@@ -1,20 +1,375 @@
-import { $, el, tableWrap, api } from './api.js';
+import { $, el, tableWrap, api, toast, confirmDialog } from './api.js';
+
+// ---------------------------------------------------------------------------
+// Schema-driven settings page: sub-tabs, field editors, dirty tracking.
+// ---------------------------------------------------------------------------
+
+const PRESETS = ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow'];
+
+const FIELD = (key, label, type, opts = {}) => ({ key, label, type, ...opts });
+
+const SECTIONS = [
+  {
+    id: 'downloads',
+    title: 'Downloads',
+    fields: [
+      FIELD('DOWNLOAD_CONCURRENCY', 'Max Concurrent Downloads', 'number', { min: 1, max: 20, hint: 'Parallel download & re-encode jobs' }),
+      FIELD('DOWNLOAD_RETENTION_HOURS', 'Auto-Cleanup Retention', 'number', { min: 1, max: 8760, unit: 'hours', hint: 'Downloaded files older than this are removed hourly' }),
+      FIELD('TG_FILE_LIMIT_MB', 'Telegram File Limit', 'number', { min: 1, max: 2048, unit: 'MB', hint: 'Larger clips are rejected with a "shorter interval" error' }),
+      FIELD('YTDLP_PROXY', 'yt-dlp Proxy', 'text', { placeholder: 'socks5://host:port (empty = direct)', hint: 'Applies to new yt-dlp processes' }),
+      FIELD('CLIP_DELETE_STATUS', 'Status Card After Completion', 'select', { options: [['false', 'Keep status message'], ['true', 'Delete status message']] }),
+    ],
+    extra: 'storage',
+  },
+  {
+    id: 'encoding',
+    title: 'Encoding',
+    fields: [
+      FIELD('CLIP_CRF', 'Clip Video Quality (CRF)', 'number', { min: 15, max: 35, hint: 'H.264 CRF: lower = better quality' }),
+      FIELD('SUBS_CRF', 'Subtitled Video Quality (CRF)', 'number', { min: 15, max: 35, hint: 'CRF for hardsubbed video' }),
+      FIELD('CLIP_PRESET', 'x264 Encoding Preset', 'select', { options: PRESETS.map((p) => [p, p]), hint: 'CPU speed vs file compression' }),
+      FIELD('CLIP_AUDIO_BITRATE', 'Audio Bitrate', 'select', { options: [['128k', '128k'], ['192k', '192k'], ['256k', '256k'], ['320k', '320k']], hint: 'AAC audio encoding bitrate' }),
+    ],
+  },
+  {
+    id: 'translation',
+    title: 'Translation',
+    fields: [
+      FIELD('TRANSLATION_FALLBACK_ORDER', 'Provider Fallback Chain', 'text', { mono: true, hint: 'Comma-separated: gemini, nvidia, groq, opencode' }),
+      FIELD('SUBS_SOURCE_PREF_RU', 'RU Source Subtitle Priority', 'text', { mono: true, hint: 'Preferred source languages for RU translation' }),
+      FIELD('TRANSLATION_TIMEOUT', 'LLM Request Timeout', 'number', { min: 10, max: 600, unit: 'sec', hint: 'Per-provider timeout before falling back' }),
+      FIELD('SUBS_GOOGLE_ONLY', 'Google Translate Only', 'bool', { hint: 'Skip all LLM providers, use Google Translate web endpoint' }),
+    ],
+  },
+  { id: 'providers', title: 'Providers', extra: 'providers' },
+  { id: 'advanced', title: 'Advanced', extra: 'advanced' },
+  { id: 'system', title: 'System Info', extra: 'system' },
+];
+
+const PROVIDERS = [
+  { id: 'gemini', label: 'Google Gemini', keyPlaceholder: 'AIzaSy... or AQ.Ab8...' },
+  { id: 'nvidia', label: 'NVIDIA NIM', keyPlaceholder: 'nvapi-...' },
+  { id: 'groq', label: 'Groq', keyPlaceholder: 'gsk_...' },
+  { id: 'opencode', label: 'OpenCode Zen', keyPlaceholder: 'sk-...' },
+];
+
+const state = {
+  entries: new Map(), // key -> {value, source, masked, default}
+  edited: new Map(),  // key -> raw editor string, only while unsaved
+  system: [],
+  advancedRows: [],
+  active: 'downloads',
+};
+
+function entryOf(key) {
+  return state.entries.get(key) || { value: '', source: 'default', masked: false, default: '' };
+}
+
+function effectiveValue(key) {
+  return state.edited.has(key) ? state.edited.get(key) : entryOf(key).value;
+}
+
+function isDirty() {
+  return state.edited.size > 0;
+}
+
+function updateSaveBar() {
+  const bar = $('#settings-savebar');
+  const count = $('#dirty-count');
+  if (!bar || !count) return;
+  bar.classList.toggle('visible', isDirty());
+  count.textContent = `${state.edited.size} unsaved change${state.edited.size === 1 ? '' : 's'}`;
+}
+
+// ---------------------------------------------------------------------------
+// Field rendering
+// ---------------------------------------------------------------------------
+
+function srcBadge(key) {
+  const e = entryOf(key);
+  if (state.edited.has(key)) return el('span', { class: 'src-badge' }, 'modified');
+  return el('span', { class: `src-badge src-${e.source}` }, e.source);
+}
+
+function buildEditor(f) {
+  const e = entryOf(f.key);
+  const current = effectiveValue(f.key);
+
+  if (f.type === 'bool') {
+    const cb = el('input', { type: 'checkbox' });
+    cb.checked = String(current) === 'true';
+    cb.addEventListener('change', () => {
+      state.edited.set(f.key, cb.checked ? 'true' : 'false');
+      updateSaveBar();
+    });
+    return cb;
+  }
+
+  let node;
+  if (f.type === 'select') {
+    node = el('select');
+    f.options.forEach(([val, label]) => {
+      node.appendChild(el('option', { value: val }, label));
+    });
+    node.value = current;
+  } else if (f.type === 'textarea') {
+    node = el('textarea', { rows: f.rows || 5, style: 'width:100%; font-family:monospace; font-size:0.8rem; line-height:1.4; resize:vertical; padding:0.5rem;' });
+    node.value = current;
+  } else {
+    node = el('input', { type: f.type });
+    if (f.min !== undefined) node.min = f.min;
+    if (f.max !== undefined) node.max = f.max;
+    if (f.placeholder) node.placeholder = f.placeholder;
+    if (f.mono) node.style.cssText = 'font-family:monospace; font-size:0.8rem;';
+    if (f.unit) node.style.width = '9rem';
+    node.value = current;
+  }
+
+  node.addEventListener('input', () => {
+    state.edited.set(f.key, node.value);
+    updateSaveBar();
+  });
+  node.addEventListener('change', () => {
+    state.edited.set(f.key, node.value);
+    updateSaveBar();
+  });
+  return node;
+}
+
+// One settings row: Setting | Value | Description (same layout as the Advanced table).
+function fieldRow(f, opts = {}) {
+  const tr = el('tr');
+
+  const tdLabel = el('td', { class: 'fld-label' });
+  const labelWrap = el('div', { style: 'display:flex; align-items:center; gap:0.5rem;' });
+  labelWrap.appendChild(el('span', null, f.label));
+  labelWrap.appendChild(srcBadge(f.key));
+  tdLabel.appendChild(labelWrap);
+  tr.appendChild(tdLabel);
+
+  const editor = buildEditor(f);
+  if (opts.placeholder) editor.placeholder = opts.placeholder;
+
+  const tdEdit = el('td', { class: 'fld-edit' });
+  if (opts.toggle) {
+    const holder = el('div', { style: 'display:flex; gap:0.5rem;' });
+    holder.appendChild(editor);
+    const btn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Show');
+    btn.addEventListener('click', () => {
+      editor.type = editor.type === 'password' ? 'text' : 'password';
+      btn.textContent = editor.type === 'password' ? 'Show' : 'Hide';
+    });
+    holder.appendChild(btn);
+    tdEdit.appendChild(holder);
+  } else {
+    tdEdit.appendChild(editor);
+  }
+  tr.appendChild(tdEdit);
+
+  tr.appendChild(el('td', { class: 'fld-hint' }, f.hint || ''));
+  return tr;
+}
+
+function fieldsTable(rows) {
+  const table = el('table');
+  const headRow = el('tr');
+  ['Setting', 'Value', 'Description'].forEach((t) => headRow.appendChild(el('th', null, t)));
+  const thead = el('thead');
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+  const tbody = el('tbody');
+  rows.forEach((r) => tbody.appendChild(r));
+  table.appendChild(tbody);
+  return table;
+}
+
+function renderSectionFields(section, root) {
+  root.appendChild(fieldsTable(section.fields.map((f) => fieldRow(f))));
+}
+
+// ---------------------------------------------------------------------------
+// Extra widgets per section
+// ---------------------------------------------------------------------------
+
+async function loadStorageUsage() {
+  const sizeEl = $('#storage-size');
+  const filesEl = $('#storage-files');
+  if (!sizeEl || !filesEl) return;
+  try {
+    const res = await api('GET', '/api/downloads/storage');
+    sizeEl.textContent = res.formatted || '0 B';
+    filesEl.textContent = `(${res.files || 0} files)`;
+  } catch (err) {
+    console.error('Failed to load storage usage:', err);
+  }
+}
+
+async function cleanStorage() {
+  const ok = await confirmDialog('Delete all downloaded clips and cache? Active downloads are kept.');
+  if (!ok) return;
+  try {
+    await api('POST', '/api/downloads/storage/clean');
+    toast('Storage cleaned', 'success');
+    await loadStorageUsage();
+  } catch (err) {
+    toast(`Failed to clean storage: ${err.message}`, 'error');
+  }
+}
+
+function renderStorageCard(root) {
+  const card = el('div', { class: 'settings-card' });
+  const row = el('div', { class: 'settings-row' });
+  const info = el('div', { class: 'storage-info' });
+  info.appendChild(el('span', { class: 'storage-label' }, 'Downloads Folder: '));
+  const size = el('strong', { id: 'storage-size' }, '…');
+  const files = el('span', { class: 'hint', style: 'margin:0', id: 'storage-files' }, '');
+  info.appendChild(size);
+  info.appendChild(files);
+  const btn = el('button', { class: 'btn btn-danger btn-sm', type: 'button', id: 'clean-storage-btn' }, 'Clean Downloads');
+  btn.addEventListener('click', cleanStorage);
+  row.appendChild(info);
+  row.appendChild(btn);
+  card.appendChild(row);
+  root.appendChild(card);
+  loadStorageUsage();
+}
+
+let testResultEl = null;
+
+function collectProviderOverrides() {
+  const overrides = {};
+  PROVIDERS.forEach((p) => {
+    const k = p.id.toUpperCase();
+    if (state.edited.has(k + '_API_KEY')) overrides[`${p.id}_api_key`] = state.edited.get(k + '_API_KEY');
+    if (state.edited.has(k + '_MODELS')) overrides[`${p.id}_models`] = state.edited.get(k + '_MODELS');
+  });
+  if (state.edited.has('TRANSLATION_PROMPT')) overrides.prompt = state.edited.get('TRANSLATION_PROMPT');
+  return overrides;
+}
+
+async function testTranslation() {
+  const btn = $('#translation-test-btn');
+  const input = $('#translation-test-input');
+  const text = input && input.value.trim() ? input.value.trim() : '리브 미모 난리도 아니야';
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Testing...';
+  }
+  if (testResultEl) {
+    testResultEl.textContent = 'Probing fallback chain...';
+    testResultEl.style.color = '';
+  }
+
+  const appendRow = (e) => {
+    if (!testResultEl) return;
+    const row = document.createElement('div');
+    row.style.marginBottom = '0.35rem';
+    row.style.wordBreak = 'break-word';
+    const name = e.provider === 'google' ? 'Google Translate' : `${e.provider}/${e.model || '?'}`;
+    if (e.ok) {
+      row.style.color = '#4caf50';
+      row.textContent = `${name}: ${e.result ?? ''}`;
+    } else {
+      row.style.color = '#f44336';
+      row.textContent = `${name}: FAIL — ${e.error ?? 'unknown error'}${e.result ? ` | Raw: ${e.result}` : ''}`;
+    }
+    testResultEl.appendChild(row);
+  };
+
+  try {
+    const res = await fetch('/api/translation/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, target_lang: 'ru', ...collectProviderOverrides() }),
+    });
+    if (!res.ok) throw new Error((await res.text()) || res.statusText);
+    if (testResultEl) testResultEl.textContent = '';
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, idx).trim();
+        buffer = buffer.slice(idx + 1);
+        if (!line) continue;
+        const event = JSON.parse(line);
+        if (event.type === 'result') appendRow(event);
+        if (event.type === 'done' && !event.success && testResultEl && !testResultEl.hasChildNodes()) {
+          testResultEl.textContent = 'No provider succeeded';
+          testResultEl.style.color = '#f44336';
+        }
+      }
+    }
+  } catch (err) {
+    if (testResultEl) {
+      testResultEl.textContent = `Error: ${err.message}`;
+      testResultEl.style.color = '#f44336';
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Test Translation';
+    }
+  }
+}
+
+function renderProvidersSection(root) {
+  // Sort providers by the effective fallback chain, unknown ones go last.
+  const chain = (effectiveValue('TRANSLATION_FALLBACK_ORDER') || '')
+    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const ordered = [...PROVIDERS].sort((a, b) => {
+    const ia = chain.indexOf(a.id); const ib = chain.indexOf(b.id);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+
+  const rows = [];
+  ordered.forEach((p) => {
+    rows.push(el('tr', { class: 'prov-head' },
+      el('td', { colspan: '3' }, p.label)));
+    rows.push(fieldRow(
+      FIELD(p.id.toUpperCase() + '_API_KEY', 'API Key', 'password'),
+      { placeholder: p.keyPlaceholder, toggle: true }));
+    rows.push(fieldRow(FIELD(p.id.toUpperCase() + '_MODELS', 'Models Fallback Chain', 'text', { mono: true })));
+  });
+  // Prompt shapes LLM output for every provider.
+  rows.push(el('tr', { class: 'prov-head' }, el('td', { colspan: '3' }, 'Prompt')));
+  rows.push(fieldRow(FIELD('TRANSLATION_PROMPT', 'AI Translation System Prompt', 'textarea', { rows: 6 })));
+  root.appendChild(fieldsTable(rows));
+
+  const row = el('div', { class: 'settings-row' });
+  const input = el('input', { type: 'text', id: 'translation-test-input', placeholder: 'Test text...', style: 'flex:1; font-size:0.85rem;' });
+  const tbtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button', id: 'translation-test-btn' }, 'Test Translation');
+  tbtn.addEventListener('click', testTranslation);
+  row.appendChild(input);
+  row.appendChild(tbtn);
+  root.appendChild(row);
+
+  testResultEl = el('div', { style: 'font-size:0.85rem; color:var(--muted); word-break:break-word;' });
+  root.appendChild(testResultEl);
+}
+
+// ---------------------------------------------------------------------------
+// Advanced (generic DB config) and System sections
+// ---------------------------------------------------------------------------
 
 function renderConfigTable(rows, editable) {
   const box = editable ? $('#config-db-table') : $('#config-env-table');
   box.textContent = '';
-
   if (!rows.length) {
-    box.appendChild(el('p', { class: 'empty' }, 'No entries found.'));
+    box.appendChild(el('p', { class: 'empty' }, 'No extra settings. Everything configurable lives in the sections above.'));
     return;
   }
 
   const table = el('table');
-  const thead = el('thead');
   const headRow = el('tr');
-  ['Key', 'Value', 'Description', ''].forEach((title) => {
-    headRow.appendChild(el('th', null, title));
-  });
+  ['Key', 'Value', 'Description', ''].forEach((t) => headRow.appendChild(el('th', null, t)));
+  const thead = el('thead');
   thead.appendChild(headRow);
   table.appendChild(thead);
 
@@ -22,8 +377,7 @@ function renderConfigTable(rows, editable) {
   rows.forEach((c) => {
     const tr = el('tr');
 
-    const tdKey = el('td');
-    tdKey.style.whiteSpace = 'nowrap';
+    const tdKey = el('td', { style: 'white-space:nowrap' });
     tdKey.appendChild(el('code', { class: 'mono' }, c.key));
     tr.appendChild(tdKey);
 
@@ -37,43 +391,27 @@ function renderConfigTable(rows, editable) {
       if (!c.value) tdVal.style.color = 'var(--muted)';
     }
     tr.appendChild(tdVal);
-
-    const tdDesc = el('td', { style: 'color:var(--muted)' }, c.description || '');
-    tr.appendChild(tdDesc);
+    tr.appendChild(el('td', { style: 'color:var(--muted)' }, c.description || ''));
 
     const tdAct = el('td', { style: 'text-align:right; white-space:nowrap;' });
     if (editable && c.editable) {
       const saveBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Save');
-      const doSave = async () => {
-        const newVal = inputEl.value;
+      saveBtn.addEventListener('click', async () => {
+        saveBtn.disabled = true;
         try {
-          saveBtn.disabled = true;
-          await api('PUT', `/api/config/${encodeURIComponent(c.key)}`, { value: newVal });
+          await api('PUT', `/api/config/${encodeURIComponent(c.key)}`, { value: inputEl.value });
           saveBtn.textContent = 'Saved';
-          setTimeout(() => {
-            saveBtn.textContent = 'Save';
-            saveBtn.disabled = false;
-          }, 1500);
+          setTimeout(() => { saveBtn.textContent = 'Save'; saveBtn.disabled = false; }, 1500);
         } catch (err) {
           saveBtn.disabled = false;
-          alert(`Failed to save: ${err.message}`);
-        }
-      };
-
-      saveBtn.addEventListener('click', doSave);
-      inputEl.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          doSave();
+          toast(`Failed to save: ${err.message}`, 'error');
         }
       });
-
       tdAct.appendChild(saveBtn);
     } else {
       tdAct.appendChild(el('span', { style: 'color:var(--muted);font-size:0.78rem' }, 'read-only'));
     }
     tr.appendChild(tdAct);
-
     tbody.appendChild(tr);
   });
 
@@ -81,495 +419,126 @@ function renderConfigTable(rows, editable) {
   box.appendChild(tableWrap(table));
 }
 
-export async function loadStorageUsage() {
-  const sizeEl = $('#storage-size');
-  const filesEl = $('#storage-files');
-  if (!sizeEl || !filesEl) return;
+async function renderAdvancedSection(root) {
+  const holder = el('div', { id: 'config-db-table' });
+  root.appendChild(holder);
+  renderConfigTable(state.advancedRows, true);
+}
 
-  try {
-    const res = await api('GET', '/api/downloads/storage');
-    if (res) {
-      sizeEl.textContent = res.formatted || '0 B';
-      filesEl.textContent = `(${res.files || 0} files)`;
-    }
-  } catch (err) {
-    console.error('Failed to load storage usage:', err);
+function renderSystemSection(root) {
+  const table = el('table');
+  const headRow = el('tr');
+  ['Key', 'Value'].forEach((t) => headRow.appendChild(el('th', null, t)));
+  const thead = el('thead');
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = el('tbody');
+  state.system.forEach((row) => {
+    const tr = el('tr');
+    const k = el('td');
+    k.appendChild(el('code', { class: 'mono' }, row.key));
+    tr.appendChild(k);
+    tr.appendChild(el('td', null, row.value || '—'));
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  root.appendChild(tableWrap(table));
+}
+
+// ---------------------------------------------------------------------------
+// Page assembly, load and save
+// ---------------------------------------------------------------------------
+
+function renderSectionBody(sectionId) {
+  const body = $('#settings-body');
+  if (!body) return;
+  body.textContent = '';
+
+  const section = SECTIONS.find((s) => s.id === sectionId) || SECTIONS[0];
+  const card = el('div', { class: 'settings-card' });
+
+  switch (section.extra) {
+    case 'storage':
+      renderStorageCard(body);
+      renderSectionFields(section, card);
+      body.appendChild(card);
+      break;
+    case 'providers':
+      renderProvidersSection(card);
+      body.appendChild(card);
+      break;
+    case 'advanced':
+      renderAdvancedSection(body);
+      break;
+    case 'system':
+      renderSystemSection(card);
+      body.appendChild(card);
+      break;
+    default:
+      renderSectionFields(section, card);
+      body.appendChild(card);
   }
 }
 
-export async function cleanStorage() {
-  const btn = $('#clean-storage-btn');
-  if (!confirm('Are you sure you want to clean all downloaded clips and cache?')) return;
-
-  try {
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = 'Cleaning...';
-    }
-    const res = await api('POST', '/api/downloads/storage/clean');
-    await loadStorageUsage();
-  } catch (err) {
-    alert(`Failed to clean storage: ${err.message}`);
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Clean Downloads';
-    }
-  }
-}
-
-let defaultPromptCached = '';
-let defaultGeminiModelsCached = '';
-let defaultGroqModelsCached = '';
-
-export async function loadTranslationConfig() {
-  const geminiInput = $('#gemini-api-key');
-  const groqInput = $('#groq-api-key');
-  const opencodeInput = $('#opencode-api-key');
-  const opencodeModelsInput = $('#opencode-models-input');
-  const nvidiaInput = $('#nvidia-api-key');
-  const nvidiaModelsInput = $('#nvidia-models-input');
-  const geminiModelsInput = $('#gemini-models-input');
-  const groqModelsInput = $('#groq-models-input');
-  const promptArea = $('#translation-prompt');
-  const sourcePrefInput = $('#source-pref-ru-input');
-  const fallbackOrderInput = $('#fallback-order-input');
-  const concurrencyInput = $('#downloader-concurrency-input');
-  const clipCRFInput = $('#clip-crf-input');
-  const subsCRFInput = $('#subs-crf-input');
-  const clipPresetSelect = $('#clip-preset-select');
-  const clipAudioBitrateSelect = $('#clip-audio-bitrate-select');
-  if (!$('#fallback-chain-badge')) return;
-
-  try {
-    const data = await api('GET', '/api/translation');
-    if (data) {
-      if (geminiInput && data.gemini_masked) {
-        geminiInput.value = data.gemini_masked;
-      }
-      if (groqInput && data.groq_masked) {
-        groqInput.value = data.groq_masked;
-      }
-      if (opencodeInput && data.opencode_masked) {
-        opencodeInput.value = data.opencode_masked;
-      }
-      if (data.default_gemini_models) {
-        defaultGeminiModelsCached = data.default_gemini_models;
-      }
-      if (data.default_groq_models) {
-        defaultGroqModelsCached = data.default_groq_models;
-      }
-      if (geminiModelsInput && data.gemini_models) {
-        geminiModelsInput.value = data.gemini_models;
-      }
-      if (groqModelsInput && data.groq_models) {
-        groqModelsInput.value = data.groq_models;
-      }
-      if (opencodeModelsInput && data.opencode_models) {
-        opencodeModelsInput.value = data.opencode_models;
-      }
-      if (nvidiaInput && data.nvidia_masked) {
-        nvidiaInput.value = data.nvidia_masked;
-      }
-      if (nvidiaModelsInput && data.nvidia_models) {
-        nvidiaModelsInput.value = data.nvidia_models;
-      }
-      if (sourcePrefInput && data.source_pref_ru) {
-        sourcePrefInput.value = data.source_pref_ru;
-      }
-      if (fallbackOrderInput) {
-        fallbackOrderInput.value = data.fallback_order || 'gemini, nvidia, groq, opencode';
-      }
-      if (data.default_prompt) {
-        defaultPromptCached = data.default_prompt;
-      }
-      if (promptArea && data.prompt) {
-        promptArea.value = data.prompt;
-      }
-      if (concurrencyInput && data.concurrency) {
-        concurrencyInput.value = data.concurrency;
-      }
-      if (clipCRFInput && data.clip_crf) {
-        clipCRFInput.value = data.clip_crf;
-      }
-      if (subsCRFInput && data.subs_crf) {
-        subsCRFInput.value = data.subs_crf;
-      }
-      if (clipPresetSelect && data.clip_preset) {
-        clipPresetSelect.value = data.clip_preset;
-      }
-      if (clipAudioBitrateSelect && data.clip_audio_bitrate) {
-        clipAudioBitrateSelect.value = data.clip_audio_bitrate;
-      }
-      const clipDeleteStatusSelect = $('#clip-delete-status-select');
-      if (clipDeleteStatusSelect && typeof data.clip_delete_status === 'boolean') {
-        clipDeleteStatusSelect.value = data.clip_delete_status ? 'true' : 'false';
-      }
-      const retentionInput = $('#retention-hours-input');
-      if (retentionInput && data.retention_hours) {
-        retentionInput.value = data.retention_hours;
-      }
-      const timeoutInput = $('#translation-timeout-input');
-      if (timeoutInput && data.translation_timeout) {
-        timeoutInput.value = data.translation_timeout;
-      }
-      updateFallbackBadge(data.chain);
-    }
-  } catch (err) {
-    console.error('Failed to load translation config:', err);
-  }
-}
-
-function updateFallbackBadge(chain) {
-  const badge = $('#fallback-chain-badge');
-  if (!badge) return;
-  if (!chain) return;
-  badge.textContent = chain.startsWith('Chain:') ? chain : 'Chain: ' + chain;
-}
-
-export async function saveTranslationConfig() {
-  const btn = $('#translation-save-btn');
-  const geminiInput = $('#gemini-api-key');
-  const groqInput = $('#groq-api-key');
-  const nvidiaInput = $('#nvidia-api-key');
-  const nvidiaModelsInput = $('#nvidia-models-input');
-  const opencodeInput = $('#opencode-api-key');
-  const opencodeModelsInput = $('#opencode-models-input');
-  const geminiModelsInput = $('#gemini-models-input');
-  const groqModelsInput = $('#groq-models-input');
-  const promptArea = $('#translation-prompt');
-  const sourcePrefInput = $('#source-pref-ru-input');
-  const fallbackOrderInput = $('#fallback-order-input');
-
-  const payload = {
-    gemini_api_key: geminiInput ? geminiInput.value : undefined,
-    groq_api_key: groqInput ? groqInput.value : undefined,
-    opencode_api_key: opencodeInput ? opencodeInput.value : undefined,
-    nvidia_api_key: nvidiaInput ? nvidiaInput.value : undefined,
-    gemini_models: geminiModelsInput ? geminiModelsInput.value : undefined,
-    groq_models: groqModelsInput ? groqModelsInput.value : undefined,
-    opencode_models: opencodeModelsInput ? opencodeModelsInput.value : undefined,
-    nvidia_models: nvidiaModelsInput ? nvidiaModelsInput.value : undefined,
-    source_pref_ru: sourcePrefInput ? sourcePrefInput.value : undefined,
-    fallback_order: fallbackOrderInput ? fallbackOrderInput.value : undefined,
-    prompt: promptArea ? promptArea.value : undefined,
-  };
-
-  const timeoutInput = $('#translation-timeout-input');
-  if (timeoutInput && timeoutInput.value.trim()) {
-    const val = parseInt(timeoutInput.value, 10);
-    if (isNaN(val) || val < 10 || val > 600) {
-      alert('Translation timeout must be between 10 and 600 seconds');
-      return;
-    }
-    payload.translation_timeout = val;
-  }
-
-  try {
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = 'Saving...';
-    }
-    await api('POST', '/api/translation', payload);
-    try {
-      const fresh = await api('GET', '/api/translation');
-      updateFallbackBadge(fresh && fresh.chain);
-    } catch (_) {}
-    if (btn) {
-      btn.textContent = 'Saved!';
-      setTimeout(() => {
-        btn.textContent = 'Save Translation Settings';
-        btn.disabled = false;
-      }, 1500);
-    }
-  } catch (err) {
-    alert(`Failed to save translation config: ${err.message}`);
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Save Translation Settings';
-    }
-  }
-}
-
-export async function testTranslation() {
-  const btn = $('#translation-test-btn');
-  const inputEl = $('#translation-test-input');
-  const resultEl = $('#translation-test-result');
-  const geminiInput = $('#gemini-api-key');
-  const groqInput = $('#groq-api-key');
-  const opencodeInput = $('#opencode-api-key');
-  const opencodeModelsInput = $('#opencode-models-input');
-  const nvidiaInput = $('#nvidia-api-key');
-  const nvidiaModelsInput = $('#nvidia-models-input');
-  const geminiModelsInput = $('#gemini-models-input');
-  const groqModelsInput = $('#groq-models-input');
-  const promptArea = $('#translation-prompt');
-
-  const text = inputEl.value.trim() || '리브 미모 난리도 아니야';
-
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = 'Testing...';
-  }
-  if (resultEl) {
-    resultEl.textContent = 'Probing fallback chain...';
-    resultEl.style.color = 'var(--text-color, #eee)';
-  }
-
-  const appendRow = (e) => {
-    if (!resultEl) return;
-    const row = document.createElement('div');
-    row.style.marginBottom = '0.35rem';
-    row.style.wordBreak = 'break-word';
-    const name = e.provider === 'google' ? 'Google Translate' : `${e.provider}/${e.model || '?'}`;
-    if (e.ok) {
-      row.style.color = 'var(--success-color, #4caf50)';
-      row.innerHTML = `<b>${name}:</b> ${e.result ?? ''}`;
-    } else {
-      row.style.color = 'var(--danger-color, #f44336)';
-      row.innerHTML = `<b>${name}:</b> FAIL — ${e.error ?? 'unknown error'}${e.result ? `<br>Raw: ${e.result}` : ''}`;
-    }
-    resultEl.appendChild(row);
-  };
-
-  try {
-    const res = await fetch('/api/translation/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: text,
-        target_lang: 'ru',
-        gemini_api_key: geminiInput ? geminiInput.value : undefined,
-        groq_api_key: groqInput ? groqInput.value : undefined,
-        opencode_api_key: opencodeInput ? opencodeInput.value : undefined,
-        nvidia_api_key: nvidiaInput ? nvidiaInput.value : undefined,
-        gemini_models: geminiModelsInput ? geminiModelsInput.value : undefined,
-        groq_models: groqModelsInput ? groqModelsInput.value : undefined,
-        opencode_models: opencodeModelsInput ? opencodeModelsInput.value : undefined,
-        nvidia_models: nvidiaModelsInput ? nvidiaModelsInput.value : undefined,
-        prompt: promptArea ? promptArea.value : undefined,
-      }),
+function renderSubtabs() {
+  const host = $('#settings-subtabs');
+  if (!host) return;
+  host.textContent = '';
+  SECTIONS.forEach((s) => {
+    const b = el('button', { class: `subtab${s.id === state.active ? ' active' : ''}`, type: 'button' }, s.title);
+    b.id = `subtab-${s.id}`;
+    // Advanced is an escape hatch for custom DB keys; hide it while there are none.
+    if (s.id === 'advanced' && !state.advancedRows.length) b.style.display = 'none';
+    b.addEventListener('click', () => {
+      state.active = s.id;
+      renderSubtabs();
+      renderSectionBody(s.id);
     });
-    if (!res.ok) {
-      throw new Error((await res.text()) || res.statusText);
-    }
-    if (resultEl) {
-      resultEl.textContent = '';
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let done = false;
-    while (!done) {
-      const { value, done: streamDone } = await reader.read();
-      if (streamDone) break;
-      buffer += decoder.decode(value, { stream: true });
-      let idx;
-      while ((idx = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, idx).trim();
-        buffer = buffer.slice(idx + 1);
-        if (!line) continue;
-        const event = JSON.parse(line);
-        if (event.type === 'start' && resultEl && !resultEl.hasChildNodes()) {
-          resultEl.textContent = '';
-        }
-        if (event.type === 'result') {
-          appendRow(event);
-        }
-        if (event.type === 'done') {
-          done = true;
-          if (!resultEl?.hasChildNodes() && !event.success) {
-            resultEl.textContent = 'No provider succeeded';
-            resultEl.style.color = 'var(--danger-color, #f44336)';
-          }
-        }
-      }
-    }
-  } catch (err) {
-    if (resultEl) {
-      resultEl.textContent = `Error: ${err.message}`;
-      resultEl.style.color = 'var(--danger-color, #f44336)';
-    }
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Test Translation';
-    }
-  }
+    host.appendChild(b);
+  });
 }
 
 export async function loadConfig() {
   try {
-    const rows = await api('GET', '/api/config');
-    renderConfigTable(rows.filter((c) => c.source === 'db'), true);
-    renderConfigTable(rows.filter((c) => c.source === 'env'), false);
-    await loadStorageUsage();
-    await loadTranslationConfig();
+    const [data, configRows] = await Promise.all([
+      api('GET', '/api/settings'),
+      api('GET', '/api/config').catch(() => []),
+    ]);
+    state.entries = new Map(data.settings.map((e) => [e.key, e]));
+    state.system = data.system || [];
+    state.advancedRows = configRows.filter((c) => c.source === 'db');
+    if (state.active === 'advanced' && !state.advancedRows.length) {
+      state.active = SECTIONS[0].id;
+    }
+    state.edited.clear();
+    updateSaveBar();
+    renderSubtabs();
+    renderSectionBody(state.active);
   } catch (err) {
-    console.error('Failed to load config:', err);
+    toast(`Failed to load settings: ${err.message}`, 'error');
   }
 }
 
-export async function saveDownloaderSettings() {
-  const btn = $('#save-downloader-btn');
-  const input = $('#downloader-concurrency-input');
-  const clipCRFInput = $('#clip-crf-input');
-  const subsCRFInput = $('#subs-crf-input');
-  const clipPresetSelect = $('#clip-preset-select');
-  const clipAudioBitrateSelect = $('#clip-audio-bitrate-select');
-  const clipDeleteStatusSelect = $('#clip-delete-status-select');
-  const retentionInput = $('#retention-hours-input');
-
+async function saveChanges() {
+  if (!isDirty()) return;
   const payload = {};
-  if (input) {
-    const val = parseInt(input.value, 10);
-    if (isNaN(val) || val < 1 || val > 20) {
-      alert('Concurrency must be between 1 and 20');
-      return;
-    }
-    payload.concurrency = val;
-  }
-  if (retentionInput && retentionInput.value.trim()) {
-    const val = parseInt(retentionInput.value, 10);
-    if (isNaN(val) || val < 1 || val > 8760) {
-      alert('Retention must be between 1 and 8760 hours');
-      return;
-    }
-    payload.retention_hours = val;
-  }
-  if (clipCRFInput && clipCRFInput.value.trim()) {
-    payload.clip_crf = clipCRFInput.value.trim();
-  }
-  if (subsCRFInput && subsCRFInput.value.trim()) {
-    payload.subs_crf = subsCRFInput.value.trim();
-  }
-  if (clipPresetSelect && clipPresetSelect.value) {
-    payload.clip_preset = clipPresetSelect.value;
-  }
-  if (clipAudioBitrateSelect && clipAudioBitrateSelect.value) {
-    payload.clip_audio_bitrate = clipAudioBitrateSelect.value;
-  }
-  if (clipDeleteStatusSelect && clipDeleteStatusSelect.value) {
-    payload.clip_delete_status = clipDeleteStatusSelect.value === 'true';
-  }
-
+  state.edited.forEach((v, k) => { payload[k] = v; });
   try {
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = 'Saving...';
-    }
-    await api('POST', '/api/translation', payload);
-    if (btn) {
-      btn.textContent = 'Saved!';
-      setTimeout(() => {
-        btn.textContent = 'Save Downloader Settings';
-        btn.disabled = false;
-      }, 1500);
-    }
+    await api('POST', '/api/settings', payload);
+    toast('Settings saved', 'success');
+    state.edited.clear();
+    await loadConfig();
   } catch (err) {
-    alert(`Failed to save downloader settings: ${err.message}`);
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Save Downloader Settings';
-    }
+    toast(`Failed to save: ${err.message}`, 'error');
   }
 }
 
 export function initSettings() {
-  $('#clean-storage-btn')?.addEventListener('click', cleanStorage);
-  $('#save-downloader-btn')?.addEventListener('click', saveDownloaderSettings);
-  $('#translation-save-btn')?.addEventListener('click', saveTranslationConfig);
-  $('#translation-test-btn')?.addEventListener('click', testTranslation);
-
-  $('#translation-prompt-reset')?.addEventListener('click', () => {
-    const promptArea = $('#translation-prompt');
-    if (promptArea && defaultPromptCached) {
-      promptArea.value = defaultPromptCached;
-    }
-  });
-
-  $('#gemini-models-reset')?.addEventListener('click', () => {
-    const input = $('#gemini-models-input');
-    if (input && defaultGeminiModelsCached) {
-      input.value = defaultGeminiModelsCached;
-    }
-  });
-
-  $('#groq-models-reset')?.addEventListener('click', () => {
-    const input = $('#groq-models-input');
-    if (input && defaultGroqModelsCached) {
-      input.value = defaultGroqModelsCached;
-    }
-  });
-
-  $('#gemini-key-toggle')?.addEventListener('click', () => {
-    const input = $('#gemini-api-key');
-    const btn = $('#gemini-key-toggle');
-    if (input && btn) {
-      if (input.type === 'password') {
-        input.type = 'text';
-        btn.textContent = 'Hide';
-      } else {
-        input.type = 'password';
-        btn.textContent = 'Show';
-      }
-    }
-  });
-
-  $('#opencode-models-reset')?.addEventListener('click', () => {
-    const input = $('#opencode-models-input');
-    fetch('/api/translation').then(r=>r.json()).then(d=>{
-      if (input && d.default_opencode_models) input.value = d.default_opencode_models;
-    }).catch(()=>{});
-  });
-
-  $('#opencode-key-toggle')?.addEventListener('click', () => {
-    const input = $('#opencode-api-key');
-    const btn = $('#opencode-key-toggle');
-    if (input && btn) {
-      if (input.type === 'password') {
-        input.type = 'text';
-        btn.textContent = 'Hide';
-      } else {
-        input.type = 'password';
-        btn.textContent = 'Show';
-      }
-    }
-  });
-
-  $('#nvidia-models-reset')?.addEventListener('click', () => {
-    const input = $('#nvidia-models-input');
-    fetch('/api/translation').then(r=>r.json()).then(d=>{
-      if (input && d.default_nvidia_models) input.value = d.default_nvidia_models;
-    }).catch(()=>{});
-  });
-
-  $('#nvidia-key-toggle')?.addEventListener('click', () => {
-    const input = $('#nvidia-api-key');
-    const btn = $('#nvidia-key-toggle');
-    if (input && btn) {
-      if (input.type === 'password') {
-        input.type = 'text';
-        btn.textContent = 'Hide';
-      } else {
-        input.type = 'password';
-        btn.textContent = 'Show';
-      }
-    }
-  });
-
-  $('#groq-key-toggle')?.addEventListener('click', () => {
-    const input = $('#groq-api-key');
-    const btn = $('#groq-key-toggle');
-    if (input && btn) {
-      if (input.type === 'password') {
-        input.type = 'text';
-        btn.textContent = 'Hide';
-      } else {
-        input.type = 'password';
-        btn.textContent = 'Show';
-      }
-    }
+  $('#settings-save-btn')?.addEventListener('click', saveChanges);
+  $('#settings-revert-btn')?.addEventListener('click', () => {
+    state.edited.clear();
+    updateSaveBar();
+    renderSectionBody(state.active);
   });
 }

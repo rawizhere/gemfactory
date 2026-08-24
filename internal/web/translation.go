@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -109,13 +107,10 @@ func chainLabel(cfg downloader.TranslationConfig) string {
 	return strings.Join(parts, " ➔ ")
 }
 
-var (
-	validPresets = map[string]bool{
-		"ultrafast": true, "superfast": true, "veryfast": true, "faster": true,
-		"fast": true, "medium": true, "slow": true,
-	}
-	bitrateRe = regexp.MustCompile(`^\d+k$`)
-)
+var validPresets = map[string]bool{
+	"ultrafast": true, "superfast": true, "veryfast": true, "faster": true,
+	"fast": true, "medium": true, "slow": true,
+}
 
 func validCRF(s string) bool {
 	n, err := strconv.Atoi(s)
@@ -464,24 +459,10 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 
 func writeNDJSON(w http.ResponseWriter, v any) {
 	b, _ := json.Marshal(v)
-	w.Write(append(b, '\n'))
+	_, _ = w.Write(append(b, '\n'))
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
-}
-
-// effectiveKey treats a masked input value as "keep the stored key".
-func (s *Server) effectiveKey(r *http.Request, provided string, cfgKey string) string {
-	if provided != "" && !isMaskedKey(provided) {
-		return provided
-	}
-	ctx := r.Context()
-	if s.configs != nil {
-		if c, err := s.configs.Get(ctx, cfgKey); err == nil && c != nil && strings.TrimSpace(c.Value) != "" {
-			return strings.TrimSpace(c.Value)
-		}
-	}
-	return strings.TrimSpace(os.Getenv(cfgKey))
 }
 
 // isMaskedKey reports whether the value looks like a masked key echoed back by the UI.

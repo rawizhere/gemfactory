@@ -76,7 +76,7 @@ func formatSelector(maxHeight int, hq, shorts, audioOnly bool) string {
 }
 
 // baseYTDLPArgs returns the common flags for every yt-dlp invocation.
-func (s *Service) baseYTDLPArgs(cookieFile string) []string {
+func (s *Service) baseYTDLPArgs(ctx context.Context, cookieFile string) []string {
 	args := []string{
 		"--ignore-config",
 		"--no-playlist",
@@ -88,7 +88,7 @@ func (s *Service) baseYTDLPArgs(cookieFile string) []string {
 		"--extractor-args", "youtube:lang=en",
 		"--progress-template", "download:[download] %(progress._percent_str)s of %(progress._total_bytes_estimate_str|progress._total_bytes_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s",
 	}
-	args = append(args, s.authArgs(cookieFile)...)
+	args = append(args, s.authArgs(ctx, cookieFile)...)
 	return args
 }
 
@@ -121,7 +121,7 @@ func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookie
 
 	format := formatSelector(req.Quality, req.HQ, req.Shorts, req.AudioOnly)
 
-	args := append(s.baseYTDLPArgs(cookieFile),
+	args := append(s.baseYTDLPArgs(ctx, cookieFile),
 		"-f", format,
 		"--newline",
 	)
@@ -293,12 +293,7 @@ func variantSuffix(req ClipRequest) string {
 	return "-" + strings.Join(parts, "-")
 }
 
-// fileNameWithTimecode builds "<id>_<start>_<end>" clip file names.
-func fileNameWithTimecode(videoID string, startMs, endMs float64) string {
-	return fileNameWithTimecodeVariant(videoID, startMs, endMs, "")
-}
-
-// fileNameWithTimecodeVariant appends an optional variant suffix.
+// fileNameWithTimecodeVariant builds "<id>_<start>_<end>" clip file names with an optional variant suffix.
 func fileNameWithTimecodeVariant(videoID string, startMs, endMs float64, variant string) string {
 	start := FormatTimecode(startMs)
 	end := FormatTimecode(endMs)

@@ -57,6 +57,38 @@ export function showMsg(target, text, isOk = false, timeout = 4000) {
   }
 }
 
+let toastHost = null;
+
+export function toast(message, kind = 'info', timeout = 3500) {
+  if (!toastHost) {
+    toastHost = el('div', { class: 'toast-host' });
+    document.body.appendChild(toastHost);
+  }
+  const t = el('div', { class: `toast toast-${kind}` }, message);
+  toastHost.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('show'));
+  setTimeout(() => {
+    t.classList.remove('show');
+    setTimeout(() => t.remove(), 300);
+  }, timeout);
+}
+
+export function confirmDialog(message) {
+  return new Promise((resolve) => {
+    const dlg = el('dialog', { class: 'confirm-dialog' });
+    const text = el('p', { class: 'confirm-text' }, message);
+    const cancel = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Cancel');
+    const ok = el('button', { class: 'btn btn-danger btn-sm', type: 'button' }, 'Confirm');
+    ok.addEventListener('click', () => { dlg.close('ok'); });
+    cancel.addEventListener('click', () => { dlg.close(); });
+    dlg.addEventListener('close', () => { dlg.remove(); resolve(dlg.returnValue === 'ok'); });
+    const box = el('div', { class: 'confirm-box' }, [text, el('div', { class: 'confirm-actions' }, [cancel, ok])]);
+    dlg.appendChild(box);
+    document.body.appendChild(dlg);
+    dlg.showModal();
+  });
+}
+
 export function exportToCSV(filename, rows, headers) {
   if (!rows || !rows.length) return;
   const headerKeys = Object.keys(headers);

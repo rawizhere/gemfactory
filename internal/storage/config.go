@@ -86,32 +86,13 @@ func (r *ConfigRepository) Delete(ctx context.Context, key string) error {
 }
 
 func (r *ConfigRepository) Reset(ctx context.Context) error {
+	// Clear everything: managed settings are re-created on demand when saved,
+	// and startup-only values live in env, not here.
 	_, err := r.db.NewDelete().
 		Model((*model.Config)(nil)).
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to delete config: %w", err)
 	}
-
-	configs := []model.Config{
-		{Key: "RATE_LIMIT_REQUESTS", Value: "10"},
-		{Key: "RATE_LIMIT_WINDOW", Value: "60"},
-		{Key: "SCRAPER_DELAY", Value: "2s"},
-		{Key: "LOG_LEVEL", Value: "info"},
-		{Key: "BOT_TOKEN", Value: ""},
-		{Key: "ADMIN_USERNAME", Value: ""},
-		{Key: "DB_DSN", Value: ""},
-		{Key: "HEALTH_PORT", Value: "8080"},
-	}
-
-	_, err = r.db.NewInsert().
-		Model(&configs).
-		On("CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()").
-		Exec(ctx)
-
-	if err != nil {
-		return fmt.Errorf("failed to insert default configs: %w", err)
-	}
-
 	return nil
 }

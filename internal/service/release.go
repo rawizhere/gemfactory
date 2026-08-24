@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/uptrace/bun"
 	"github.com/agnivade/levenshtein"
+	"github.com/uptrace/bun"
 	"go.uber.org/zap"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"

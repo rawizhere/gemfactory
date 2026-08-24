@@ -609,3 +609,128 @@ footer {
   display: flex;
   justify-content: space-between;
 }
+
+/* ---- Settings: sub-tabs, save bar, source badges ---- */
+.subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+.subtab {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  padding: 0.4rem 0.85rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.84rem;
+}
+.subtab.active {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.src-badge {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.src-db { color: var(--accent); }
+.src-env { color: var(--muted); }
+.src-default { color: var(--muted); opacity: 0.7; }
+
+.save-bar {
+  position: sticky;
+  bottom: 0;
+  max-width: 78rem;
+  display: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  margin-top: 1rem;
+  background: var(--surface-hover);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
+.save-bar.visible { display: flex; }
+.save-bar .dirty-count {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-right: auto;
+}
+
+.provider-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.9rem;
+  margin-bottom: 0.9rem;
+}
+
+/* ---- Toasts ---- */
+.toast-host {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  z-index: 1000;
+}
+.toast {
+  min-width: 220px;
+  max-width: 380px;
+  padding: 0.6rem 0.9rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  background: var(--surface-hover);
+  border: 1px solid var(--line-strong);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast-success { border-color: #2f6b3a; }
+.toast-error { border-color: var(--danger); }
+
+/* ---- Confirm dialog ---- */
+.confirm-dialog {
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text-color, #eee);
+  padding: 1.25rem;
+  max-width: 380px;
+}
+.confirm-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+.confirm-text { margin: 0 0 1rem; font-size: 0.9rem; }
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+/* ---- Settings field rows ---- */
+.fld-label { white-space: nowrap; font-weight: 500; }
+.fld-label .src-badge { margin-left: 0; }
+.fld-edit input, .fld-edit select, .fld-edit textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+.fld-edit input[type='checkbox'] { width: auto; }
+.fld-edit input[type='number'] { max-width: 10rem; }
+.fld-hint { color: var(--muted); font-size: 0.78rem; }
+.prov-head td {
+  background: var(--surface-hover);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}

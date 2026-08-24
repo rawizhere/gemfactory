@@ -400,7 +400,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		clipPath = finalPath
 	}
 
-	if err := checkFileSize(clipPath); err != nil {
+	if err := checkFileSize(clipPath, s.telegramFileLimitBytes(ctx)); err != nil {
 		s.fail(job, err.Error())
 		return
 	}
@@ -734,28 +734,21 @@ func (s *Service) MaxSegmentDurationSeconds(hq bool) float64 {
 	return s.maxSegmentDuration(hq) / 1000
 }
 
-func telegramFileLimitBytes() int64 {
+func (s *Service) telegramFileLimitBytes(ctx context.Context) int64 {
 	const defMB = 49
-	raw := os.Getenv("TG_FILE_LIMIT_MB")
-	mb := defMB
-	if raw != "" {
-		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
-			mb = v
-		}
-	}
+	mb := settings.New(s.configs).Int(ctx, "TG_FILE_LIMIT_MB", defMB)
 	return int64(mb) * 1024 * 1024
 }
 
-func checkFileSize(path string) error {
+func checkFileSize(path string, limitBytes int64) error {
 	st, err := os.Stat(path)
 	if err != nil {
 		return fmt.Errorf("output file missing: %w", err)
 	}
-	limit := telegramFileLimitBytes()
-	if st.Size() > limit {
+	if st.Size() > limitBytes {
 		return fmt.Errorf(
 			"file is too large: %.1f MB (Telegram bot limit is %d MB). Try a shorter interval",
-			float64(st.Size())/(1024*1024), limit/(1024*1024))
+			float64(st.Size())/(1024*1024), limitBytes/(1024*1024))
 	}
 	return nil
 }

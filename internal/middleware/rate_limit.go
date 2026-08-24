@@ -4,9 +4,9 @@ import (
 	"slices"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
-	lru "github.com/hashicorp/golang-lru/v2/expirable"
 	"go.uber.org/zap"
 )
 

@@ -71,6 +71,8 @@ func NewServer(port string, logger *zap.Logger, deps Deps) *Server {
 	mux.HandleFunc("GET /api/releases", s.listReleases)
 	mux.HandleFunc("DELETE /api/releases/{id}", s.deleteRelease)
 	mux.HandleFunc("POST /api/releases/delete", s.deleteReleases)
+	mux.HandleFunc("GET /api/settings", s.getSettings)
+	mux.HandleFunc("POST /api/settings", s.updateSettings)
 	mux.HandleFunc("GET /api/config", s.listConfig)
 	mux.HandleFunc("PUT /api/config/{key}", s.updateConfig)
 	mux.HandleFunc("GET /api/cookies", s.listCookies)
@@ -524,7 +526,9 @@ func (s *Server) listConfig(w http.ResponseWriter, r *http.Request) {
 			"SUBS_SOURCE_PREF_RU", "GEMINI_API_KEY", "GEMINI_MODELS",
 			"GROQ_API_KEY", "GROQ_MODELS", "OPENCODE_API_KEY", "OPENCODE_MODELS",
 			"DOWNLOAD_CONCURRENCY", "CLIP_CRF", "SUBS_CRF", "CLIP_PRESET", "CLIP_AUDIO_BITRATE", "CLIP_DELETE_STATUS",
-			"NVIDIA_API_KEY", "NVIDIA_MODELS":
+			"NVIDIA_API_KEY", "NVIDIA_MODELS",
+			"DOWNLOAD_RETENTION_HOURS", "TRANSLATION_TIMEOUT", "SUBS_GOOGLE_ONLY",
+			"TG_FILE_LIMIT_MB", "YTDLP_PROXY":
 			return true
 		default:
 			return false
@@ -538,10 +542,24 @@ func (s *Server) listConfig(w http.ResponseWriter, r *http.Request) {
 			strings.Contains(key, "SECRET")
 	}
 
+	// Legacy seed rows and startup-only settings: present in the table but never
+	// read back from it. They duplicate env/runtime values shown under System Info.
+	isDeadDBKey := func(key string) bool {
+		switch key {
+		case "RELEASE_CHECK_INTERVAL", "RATE_LIMIT_REQUESTS", "RATE_LIMIT_WINDOW",
+			"SCRAPER_DELAY", "LOG_LEVEL", "TIMEZONE", "APP_DATA_DIR",
+			"BOT_TOKEN", "ADMIN_USERNAME", "DB_DSN",
+			"WEB_PORT", "WEB_ENABLED", "HEALTH_PORT", "HEALTH_CHECK_ENABLED":
+			return true
+		default:
+			return false
+		}
+	}
+
 	out := []entry{}
 	for _, c := range rows {
-		if isDedicatedKey(c.Key) {
-			continue // configured via dedicated Downloader or Subtitle Translation sections
+		if isDedicatedKey(c.Key) || isDeadDBKey(c.Key) {
+			continue
 		}
 		value := c.Value
 		if sensitive(c.Key) {

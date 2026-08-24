@@ -27,15 +27,15 @@ func TestCheckFileSize(t *testing.T) {
 	tmpDir := t.TempDir()
 	filePath := filepath.Join(tmpDir, "sample.mp4")
 
-	require.Error(t, checkFileSize(filePath), "expected error for non-existent file")
+	require.Error(t, checkFileSize(filePath, 49*1024*1024), "expected error for non-existent file")
 
 	require.NoError(t, os.WriteFile(filePath, make([]byte, 1024), 0644))
-	require.NoError(t, checkFileSize(filePath), "unexpected error for small file")
+	require.NoError(t, checkFileSize(filePath, 49*1024*1024), "unexpected error for small file")
 
 	t.Setenv("TG_FILE_LIMIT_MB", "1")
 	largePath := filepath.Join(tmpDir, "large.mp4")
 	require.NoError(t, os.WriteFile(largePath, make([]byte, 2*1024*1024), 0644))
-	require.Error(t, checkFileSize(largePath), "expected error for file exceeding size limit")
+	require.Error(t, checkFileSize(largePath, 1024*1024), "expected error for file exceeding size limit")
 }
 
 func TestMustParsePair(t *testing.T) {
