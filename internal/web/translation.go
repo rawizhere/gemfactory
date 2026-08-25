@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"gemfactory/internal/downloader"
 	"gemfactory/internal/settings"
+	"gemfactory/internal/translate"
 )
 
 type translationConfigResponse struct {
@@ -41,11 +41,11 @@ type translationConfigResponse struct {
 	TranslationTimeout    int    `json:"translation_timeout"`
 }
 
-func (s *Server) translationConfig() downloader.TranslationConfig {
+func (s *Server) translationConfig() translate.Config {
 	if s.downloads != nil {
 		return s.downloads.ResolveTranslationConfig(context.Background())
 	}
-	return downloader.DefaultTranslationConfig()
+	return translate.DefaultConfig()
 }
 
 func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
@@ -60,7 +60,7 @@ func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
 	clipAudioBitrate := cfg.Value(ctx, "CLIP_AUDIO_BITRATE", "192k")
 	clipDeleteStatus := cfg.Bool(ctx, "CLIP_DELETE_STATUS", false)
 	retentionHours := cfg.Int(ctx, "DOWNLOAD_RETENTION_HOURS", 24)
-	translationTimeout := int(downloader.TranslationTimeoutSeconds())
+	translationTimeout := int(tc.Timeout.Seconds())
 	resp := translationConfigResponse{
 		Chain:                 chainLabel(tc),
 		FallbackOrder:         strings.Join(tc.FallbackOrder, ", "),
@@ -72,12 +72,12 @@ func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
 		GroqModels:            strings.Join(tc.GroqModels, ", "),
 		OpencodeModels:        strings.Join(tc.OpencodeModels, ", "),
 		NvidiaModels:          strings.Join(tc.NvidiaModels, ", "),
-		DefaultGeminiModels:   strings.Join(downloader.DefaultGeminiModels, ", "),
-		DefaultGroqModels:     strings.Join(downloader.DefaultGroqModels, ", "),
-		DefaultOpencodeModels: strings.Join(downloader.DefaultOpencodeModels, ", "),
-		DefaultNvidiaModels:   strings.Join(downloader.DefaultNvidiaModels, ", "),
+		DefaultGeminiModels:   strings.Join(translate.DefaultGeminiModels, ", "),
+		DefaultGroqModels:     strings.Join(translate.DefaultGroqModels, ", "),
+		DefaultOpencodeModels: strings.Join(translate.DefaultOpencodeModels, ", "),
+		DefaultNvidiaModels:   strings.Join(translate.DefaultNvidiaModels, ", "),
 		Prompt:                tc.Prompt,
-		DefaultPrompt:         downloader.DefaultTranslationPrompt,
+		DefaultPrompt:         translate.DefaultTranslationPrompt,
 		SourcePrefRU:          strings.Join(tc.SourcePrefRU, ", "),
 		Concurrency:           concurrency,
 		ClipCRF:               clipCRF,
@@ -92,16 +92,16 @@ func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // chainLabel renders the effective provider fallback chain for display.
-func chainLabel(cfg downloader.TranslationConfig) string {
+func chainLabel(cfg translate.Config) string {
 	names := map[string]string{
-		downloader.ProviderGoogle:   "Google Translate",
-		downloader.ProviderGemini:   "Gemini",
-		downloader.ProviderGroq:     "Groq",
-		downloader.ProviderOpencode: "OpenCode",
-		downloader.ProviderNvidia:   "NVIDIA",
+		translate.ProviderGoogle:   "Google Translate",
+		translate.ProviderGemini:   "Gemini",
+		translate.ProviderGroq:     "Groq",
+		translate.ProviderOpencode: "OpenCode",
+		translate.ProviderNvidia:   "NVIDIA",
 	}
 	var parts []string
-	for _, p := range downloader.BuildFallbackChain(cfg) {
+	for _, p := range translate.BuildFallbackChain(cfg) {
 		parts = append(parts, names[p])
 	}
 	return strings.Join(parts, " ➔ ")
@@ -277,7 +277,6 @@ func (s *Server) updateTranslationConfig(w http.ResponseWriter, r *http.Request)
 			http.Error(w, "translation timeout must be between 10 and 600 seconds", http.StatusBadRequest)
 			return
 		}
-		downloader.SetTranslationTimeoutSeconds(int64(sec))
 		if !set("TRANSLATION_TIMEOUT", strconv.Itoa(sec)) {
 			return
 		}
@@ -335,29 +334,29 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 		tc.NvidiaKey = req.NvidiaKey
 	}
 	if req.GeminiModels != "" {
-		tc.GeminiModels = downloader.ParseCSV(req.GeminiModels)
+		tc.GeminiModels = translate.ParseCSV(req.GeminiModels)
 	}
 	if req.GroqModels != "" {
-		tc.GroqModels = downloader.ParseCSV(req.GroqModels)
+		tc.GroqModels = translate.ParseCSV(req.GroqModels)
 	}
 	if req.OpencodeModels != "" {
-		tc.OpencodeModels = downloader.ParseCSV(req.OpencodeModels)
+		tc.OpencodeModels = translate.ParseCSV(req.OpencodeModels)
 	}
 	if req.NvidiaModels != "" {
-		tc.NvidiaModels = downloader.ParseCSV(req.NvidiaModels)
+		tc.NvidiaModels = translate.ParseCSV(req.NvidiaModels)
 	}
 	prompt := strings.TrimSpace(req.Prompt)
 	if prompt == "" {
 		prompt = tc.Prompt
 	}
-	instr := downloader.BuildSystemInstruction(prompt, targetLang)
+	instr := translate.BuildSystemInstruction(prompt, targetLang)
 
-	chain := downloader.BuildFallbackChain(tc)
+	chain := translate.BuildFallbackChain(tc)
 	extract := func(texts []string, _, err error, entry map[string]any) map[string]any {
 		switch {
 		case err != nil:
 			entry["error"] = err.Error()
-		case !downloader.TranslationLooksTarget([]string{sampleText}, texts, targetLang):
+		case !translate.TranslationLooksTarget([]string{sampleText}, texts, targetLang):
 			entry["error"] = "output rejected by language validation"
 			if len(texts) > 0 {
 				entry["result"] = texts[0]
@@ -393,49 +392,49 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 
 	for _, p := range chain {
 		switch p {
-		case downloader.ProviderGoogle:
+		case translate.ProviderGoogle:
 			testModel(p, "web", func() ([]string, string, error) {
-				res, err := downloader.TranslateWithGoogle(ctx, []string{sampleText}, targetLang)
+				res, err := translate.TranslateWithGoogle(ctx, []string{sampleText}, targetLang)
 				return res, "web", err
 			})
-		case downloader.ProviderGemini:
+		case translate.ProviderGemini:
 			if tc.GeminiKey == "" {
 				noKey(p)
 				continue
 			}
 			for _, m := range tc.GeminiModels {
 				testModel(p, m, func() ([]string, string, error) {
-					return downloader.TranslateWithGemini(ctx, []string{sampleText}, targetLang, "", tc.GeminiKey, instr, videoTitle, nil, []string{m})
+					return translate.TranslateWithGemini(ctx, []string{sampleText}, targetLang, "", tc.GeminiKey, instr, videoTitle, tc.Timeout, nil, []string{m})
 				})
 			}
-		case downloader.ProviderGroq:
+		case translate.ProviderGroq:
 			if tc.GroqKey == "" {
 				noKey(p)
 				continue
 			}
 			for _, m := range tc.GroqModels {
 				testModel(p, m, func() ([]string, string, error) {
-					return downloader.TranslateWithGroq(ctx, []string{sampleText}, targetLang, "", tc.GroqKey, instr, videoTitle, nil, []string{m})
+					return translate.TranslateWithGroq(ctx, []string{sampleText}, targetLang, "", tc.GroqKey, instr, videoTitle, tc.Timeout, nil, []string{m})
 				})
 			}
-		case downloader.ProviderOpencode:
+		case translate.ProviderOpencode:
 			if tc.OpencodeKey == "" {
 				noKey(p)
 				continue
 			}
 			for _, m := range tc.OpencodeModels {
 				testModel(p, m, func() ([]string, string, error) {
-					return downloader.TranslateWithOpencode(ctx, []string{sampleText}, targetLang, "", tc.OpencodeKey, instr, videoTitle, nil, []string{m})
+					return translate.TranslateWithOpencode(ctx, []string{sampleText}, targetLang, "", tc.OpencodeKey, instr, videoTitle, tc.Timeout, nil, []string{m})
 				})
 			}
-		case downloader.ProviderNvidia:
+		case translate.ProviderNvidia:
 			if tc.NvidiaKey == "" {
 				noKey(p)
 				continue
 			}
 			for _, m := range tc.NvidiaModels {
 				testModel(p, m, func() ([]string, string, error) {
-					return downloader.TranslateWithNvidia(ctx, []string{sampleText}, targetLang, "", tc.NvidiaKey, instr, videoTitle, nil, []string{m})
+					return translate.TranslateWithNvidia(ctx, []string{sampleText}, targetLang, "", tc.NvidiaKey, instr, videoTitle, tc.Timeout, nil, []string{m})
 				})
 			}
 		}

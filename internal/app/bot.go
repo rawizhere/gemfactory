@@ -9,7 +9,6 @@ import (
 	"gemfactory/internal/health"
 	"gemfactory/internal/keyboard"
 	"gemfactory/internal/service"
-	"gemfactory/internal/settings"
 	"gemfactory/internal/storage"
 	"gemfactory/internal/telegram"
 	"gemfactory/internal/web"
@@ -81,7 +80,6 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 			downloaderSvc.SetConcurrency(n)
 		}
 	}
-	downloader.SetTranslationTimeoutSeconds(int64(settings.New(configRepo).Int(botCtx, "TRANSLATION_TIMEOUT", 180)))
 	if err := downloader.EnsureYTDLP(botCtx); err != nil {
 		logger.Warn("yt-dlp unavailable at startup; downloads disabled until next restart", zap.Error(err))
 	} else {
