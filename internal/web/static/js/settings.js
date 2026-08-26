@@ -461,6 +461,8 @@ function catalogRow(providerId, m) {
   return tr;
 }
 
+const catalogExpanded = new Set();
+
 function renderCatalogTable(providerId, box, models) {
   box.textContent = '';
   const sorted = sortCatalogByStatus(models);
@@ -468,16 +470,37 @@ function renderCatalogTable(providerId, box, models) {
     box.appendChild(el('p', { class: 'empty' }, 'No models returned by the provider catalog.'));
     return;
   }
-  const table = el('table', { class: 'catalog-table' });
-  const thead = el('thead');
-  const hr = el('tr');
-  ['Model', 'Free', 'Context', 'Status', ''].forEach((h) => hr.appendChild(el('th', null, h)));
-  thead.appendChild(hr);
-  table.appendChild(thead);
-  const tbody = el('tbody');
-  sorted.forEach((m) => tbody.appendChild(catalogRow(providerId, m)));
-  table.appendChild(tbody);
-  box.appendChild(tableWrap(table));
+  const sorted = sortCatalogByStatus(models);
+  const free = sorted.filter((m) => m.free);
+  const paid = sorted.filter((m) => !m.free);
+  const expanded = catalogExpanded.has(providerId);
+  const visible = expanded ? sorted : free;
+
+  if (!visible.length) {
+    box.appendChild(el('p', { class: 'empty' }, 'No models returned by the provider catalog.'));
+  } else {
+    const table = el('table', { class: 'catalog-table' });
+    const thead = el('thead');
+    const hr = el('tr');
+    ['Model', 'Free', 'Context', 'Status', ''].forEach((h) => hr.appendChild(el('th', null, h)));
+    thead.appendChild(hr);
+    table.appendChild(thead);
+    const tbody = el('tbody');
+    visible.forEach((m) => tbody.appendChild(catalogRow(providerId, m)));
+    table.appendChild(tbody);
+    box.appendChild(tableWrap(table));
+  }
+
+  if (paid.length) {
+    const label = expanded ? 'Show less' : `Show more (${paid.length})`;
+    const more = el('button', { class: 'btn btn-ghost btn-sm catalog-more', type: 'button' }, label);
+    more.addEventListener('click', () => {
+      if (expanded) catalogExpanded.delete(providerId);
+      else catalogExpanded.add(providerId);
+      renderCatalogTable(providerId, box, models);
+    });
+    box.appendChild(more);
+  }
 }
 
 async function loadModelCatalog(providerId, box, status, refresh) {
