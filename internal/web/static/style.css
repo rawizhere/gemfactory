@@ -748,6 +748,17 @@ footer {
 }
 .provider-card.dragging { opacity: 0.5; border-color: var(--accent); }
 .provider-card-head { display: flex; align-items: center; gap: 0.6rem; }
+.provider-order {
+  margin-left: auto;
+  width: 2.4rem;
+  text-align: center;
+  background: var(--surface-hover);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  padding: 0.15rem 0.25rem;
+}
 .provider-name { font-weight: 600; font-size: 0.95rem; }
 .drag-handle {
   cursor: grab;
