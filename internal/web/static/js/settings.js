@@ -322,6 +322,247 @@ async function testTranslation() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Provider model catalog and fallback-chain drag & drop
+// ---------------------------------------------------------------------------
+
+function fmtContext(n) {
+  const v = typeof n === 'string' ? parseInt(n, 10) : n;
+  if (typeof v !== 'number' || !isFinite(v) || v <= 0) return '—';
+  if (v >= 1e6) return (v / 1e6).toFixed(v % 1e6 === 0 ? 0 : 1).replace(/\.0$/, '') + 'M';
+  if (v >= 1e3) return Math.round(v / 1e3) + 'K';
+  return String(v);
+}
+
+function availabilityInfo(avail) {
+  switch ((avail || '').toLowerCase()) {
+    case 'ok': return { cls: 'ok', label: 'ok' };
+    case 'rate_limited':
+    case 'quota': return { cls: 'warn', label: (avail || 'limited').replace(/_/g, ' ') };
+    case 'slow': return { cls: 'warn', label: 'slow' };
+    case 'dead':
+    case 'not_chat': return { cls: 'dead', label: (avail || 'down').replace(/_/g, ' ') };
+    default: return { cls: 'unknown', label: (avail || 'unknown').replace(/_/g, ' ') };
+  }
+}
+
+function getDragAfter(container, selector, y) {
+  const els = [...container.querySelectorAll(selector + ':not(.dragging)')];
+  let closest = { offset: -Infinity, element: null };
+  for (const child of els) {
+    const box = child.getBoundingClientRect();
+    const offset = y - box.top - box.height / 2;
+    if (offset < 0 && offset > closest.offset) closest = { offset, element: child };
+  }
+  return closest.element;
+}
+
+function findModelsInput(providerId) {
+  return document.getElementById('model-input-' + providerId);
+}
+
+function renderModelChain(providerId) {
+  const ul = document.getElementById('model-chain-' + providerId);
+  if (!ul) return;
+  const key = providerId.toUpperCase() + '_MODELS';
+  const ids = (effectiveValue(key) || '').split(',').map((s) => s.trim()).filter(Boolean);
+  ul.textContent = '';
+  if (!ids.length) {
+    ul.appendChild(el('li', { class: 'model-chain-empty' }, 'No models yet — use + in the catalog below.'));
+    return;
+  }
+  ids.forEach((id) => ul.appendChild(modelChainItem(providerId, id)));
+}
+
+function modelChainItem(providerId, id) {
+  const li = el('li', { class: 'model-chain-item', draggable: 'true', 'data-model': id });
+  li.appendChild(el('span', { class: 'drag-handle' }, '\u280F'));
+  li.appendChild(el('span', { class: 'model-id' }, id));
+  const rm = el('button', { class: 'model-remove', type: 'button', title: 'Remove from chain' }, '\u00D7');
+  rm.addEventListener('click', () => removeModelFromChain(providerId, id));
+  li.appendChild(rm);
+  li.addEventListener('dragstart', (e) => {
+    if (e.target.closest('.model-remove')) { e.preventDefault(); return; }
+    li.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', id); } catch (_) {}
+  });
+  li.addEventListener('dragend', () => {
+    li.classList.remove('dragging');
+    commitModelOrder(providerId);
+  });
+  return li;
+}
+
+function commitModelOrder(providerId) {
+  const ul = document.getElementById('model-chain-' + providerId);
+  if (!ul) return;
+  const ids = [...ul.querySelectorAll('.model-chain-item')].map((li) => li.dataset.model);
+  state.edited.set(providerId.toUpperCase() + '_MODELS', ids.join(','));
+  updateSaveBar();
+}
+
+function removeModelFromChain(providerId, id) {
+  const key = providerId.toUpperCase() + '_MODELS';
+  const ids = (effectiveValue(key) || '').split(',').map((s) => s.trim()).filter(Boolean).filter((x) => x !== id);
+  state.edited.set(key, ids.join(','));
+  const input = findModelsInput(providerId);
+  if (input) input.value = ids.join(',');
+  updateSaveBar();
+  renderModelChain(providerId);
+}
+
+function addModelToChain(providerId, id) {
+  const key = providerId.toUpperCase() + '_MODELS';
+  const ids = (effectiveValue(key) || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (ids.includes(id)) { toast(`${id} is already in the ${providerId} chain`, 'info'); return; }
+  ids.push(id);
+  state.edited.set(key, ids.join(','));
+  const input = findModelsInput(providerId);
+  if (input) input.value = ids.join(',');
+  updateSaveBar();
+  renderModelChain(providerId);
+  toast(`Added ${id} to ${providerId} chain`, 'success');
+}
+
+function catalogRow(providerId, m) {
+  const tr = el('tr');
+  const tdModel = el('td');
+  tdModel.appendChild(el('code', { class: 'mono' }, m.id || '—'));
+  if (m.reasoning) tdModel.appendChild(el('span', { class: 'tag tag-reason' }, 'reasoning'));
+  tr.appendChild(tdModel);
+  tr.appendChild(el('td', null, m.free ? el('span', { class: 'free-badge' }, 'Free') : ''));
+  tr.appendChild(el('td', null, fmtContext(m.context_length)));
+  const info = availabilityInfo(m.availability);
+  tr.appendChild(el('td', null, el('span', { class: `status-badge status-${info.cls}` }, info.label)));
+  const tdAct = el('td', { style: 'text-align:right; white-space:nowrap;' });
+  const add = el('button', { class: 'btn btn-ghost btn-sm', type: 'button', title: 'Add to chain' }, '+');
+  add.addEventListener('click', () => addModelToChain(providerId, m.id));
+  tdAct.appendChild(add);
+  tr.appendChild(tdAct);
+  return tr;
+}
+
+function renderCatalogTable(providerId, box, models) {
+  box.textContent = '';
+  if (!models.length) {
+    box.appendChild(el('p', { class: 'empty' }, 'No models returned by the provider catalog.'));
+    return;
+  }
+  const table = el('table', { class: 'catalog-table' });
+  const thead = el('thead');
+  const hr = el('tr');
+  ['Model', 'Free', 'Context', 'Status', ''].forEach((h) => hr.appendChild(el('th', null, h)));
+  thead.appendChild(hr);
+  table.appendChild(thead);
+  const tbody = el('tbody');
+  models.forEach((m) => tbody.appendChild(catalogRow(providerId, m)));
+  table.appendChild(tbody);
+  box.appendChild(tableWrap(table));
+}
+
+async function loadModelCatalog(providerId, box, status, refresh) {
+  try {
+    const url = `/api/translation/models?provider=${encodeURIComponent(providerId)}${refresh ? '&refresh=true' : ''}`;
+    const data = await api('GET', url);
+    const models = Array.isArray(data) ? data : (data && data.models) ? data.models : [];
+    renderCatalogTable(providerId, box, models);
+    if (status) { status.textContent = `${models.length} models`; status.className = 'catalog-status ok'; }
+  } catch (err) {
+    box.textContent = '';
+    box.appendChild(el('p', { class: 'empty' }, `Model catalog unavailable: ${err.message}`));
+    if (status) { status.textContent = 'unavailable'; status.className = 'catalog-status err'; }
+  }
+}
+
+async function checkModels(providerId, box, status) {
+  if (status) { status.textContent = 'Checking\u2026'; status.className = 'catalog-status'; }
+  try {
+    await api('POST', '/api/translation/models/check', { provider: providerId });
+    await loadModelCatalog(providerId, box, status, true);
+  } catch (err) {
+    toast(`Check failed: ${err.message}`, 'error');
+    if (status) { status.textContent = 'check failed'; status.className = 'catalog-status err'; }
+  }
+}
+
+function setupProviderDrag(card, handle) {
+  handle.addEventListener('mousedown', () => { card.draggable = true; });
+  handle.addEventListener('mouseup', () => { card.draggable = false; });
+  card.addEventListener('dragstart', (e) => {
+    card.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', card.dataset.provider); } catch (_) {}
+  });
+  card.addEventListener('dragend', () => {
+    card.classList.remove('dragging');
+    card.draggable = false;
+    commitProviderOrder();
+  });
+}
+
+function commitProviderOrder() {
+  const host = document.getElementById('providers-chain');
+  if (!host) return;
+  const ids = [...host.querySelectorAll('.provider-card')].map((c) => c.dataset.provider);
+  state.edited.set('TRANSLATION_FALLBACK_ORDER', ids.join(','));
+  updateSaveBar();
+}
+
+function buildProviderCard(p) {
+  const card = el('div', { class: 'provider-card', 'data-provider': p.id });
+
+  const head = el('div', { class: 'provider-card-head' });
+  const handle = el('span', { class: 'drag-handle', title: 'Drag to reorder providers' }, '\u280F');
+  head.appendChild(handle);
+  head.appendChild(el('span', { class: 'provider-name' }, p.label));
+  card.appendChild(head);
+
+  const apiRow = fieldRow(
+    FIELD(p.id.toUpperCase() + '_API_KEY', 'API Key', 'password'),
+    { placeholder: p.keyPlaceholder, toggle: true });
+  const modelsRow = fieldRow(FIELD(p.id.toUpperCase() + '_MODELS', 'Models Fallback Chain', 'text', { mono: true }));
+  const modelsInput = modelsRow.querySelector('input');
+  modelsInput.id = 'model-input-' + p.id;
+  modelsInput.addEventListener('input', () => renderModelChain(p.id));
+  card.appendChild(fieldsTable([apiRow, modelsRow]));
+
+  const chainWrap = el('div', { class: 'model-chain-wrap' });
+  chainWrap.appendChild(el('div', { class: 'subhead' }, 'Chain order — drag to reorder'));
+  const ul = el('ul', { class: 'model-chain', id: 'model-chain-' + p.id, 'data-provider': p.id });
+  ul.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    const dragging = ul.querySelector('.model-chain-item.dragging');
+    if (!dragging) return;
+    const after = getDragAfter(ul, '.model-chain-item', e.clientY);
+    if (after == null) ul.appendChild(dragging);
+    else ul.insertBefore(dragging, after);
+  });
+  chainWrap.appendChild(ul);
+  card.appendChild(chainWrap);
+  renderModelChain(p.id);
+
+  const catWrap = el('div', { class: 'model-catalog-wrap' });
+  const toolbar = el('div', { class: 'catalog-toolbar' });
+  const refreshBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Refresh');
+  const checkBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Check availability');
+  const status = el('span', { class: 'catalog-status' });
+  toolbar.appendChild(refreshBtn);
+  toolbar.appendChild(checkBtn);
+  toolbar.appendChild(status);
+  catWrap.appendChild(toolbar);
+  const catBox = el('div', { class: 'catalog-box', id: 'catalog-' + p.id });
+  catWrap.appendChild(catBox);
+  card.appendChild(catWrap);
+
+  refreshBtn.addEventListener('click', () => loadModelCatalog(p.id, catBox, status, true));
+  checkBtn.addEventListener('click', () => checkModels(p.id, catBox, status));
+  loadModelCatalog(p.id, catBox, status, false);
+
+  setupProviderDrag(card, handle);
+  return card;
+}
+
 function renderProvidersSection(root) {
   // Sort providers by the effective fallback chain, unknown ones go last.
   const chain = (effectiveValue('TRANSLATION_FALLBACK_ORDER') || '')
@@ -331,19 +572,24 @@ function renderProvidersSection(root) {
     return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
   });
 
-  const rows = [];
-  ordered.forEach((p) => {
-    rows.push(el('tr', { class: 'prov-head' },
-      el('td', { colspan: '3' }, p.label)));
-    rows.push(fieldRow(
-      FIELD(p.id.toUpperCase() + '_API_KEY', 'API Key', 'password'),
-      { placeholder: p.keyPlaceholder, toggle: true }));
-    rows.push(fieldRow(FIELD(p.id.toUpperCase() + '_MODELS', 'Models Fallback Chain', 'text', { mono: true })));
+  const chainHost = el('div', { class: 'prov-chain', id: 'providers-chain' });
+  chainHost.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    const dragging = chainHost.querySelector('.provider-card.dragging');
+    if (!dragging) return;
+    const after = getDragAfter(chainHost, '.provider-card', e.clientY);
+    if (after == null) chainHost.appendChild(dragging);
+    else chainHost.insertBefore(dragging, after);
   });
+  ordered.forEach((p) => chainHost.appendChild(buildProviderCard(p)));
+  root.appendChild(chainHost);
+
   // Prompt shapes LLM output for every provider.
-  rows.push(el('tr', { class: 'prov-head' }, el('td', { colspan: '3' }, 'Prompt')));
-  rows.push(fieldRow(FIELD('TRANSLATION_PROMPT', 'AI Translation System Prompt', 'textarea', { rows: 6 })));
-  root.appendChild(fieldsTable(rows));
+  const promptRows = [
+    el('tr', { class: 'prov-head' }, el('td', { colspan: '3' }, 'Prompt')),
+    fieldRow(FIELD('TRANSLATION_PROMPT', 'AI Translation System Prompt', 'textarea', { rows: 6 })),
+  ];
+  root.appendChild(fieldsTable(promptRows));
 
   const row = el('div', { class: 'settings-row' });
   const input = el('input', { type: 'text', id: 'translation-test-input', placeholder: 'Test text...', style: 'flex:1; font-size:0.85rem;' });
