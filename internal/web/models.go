@@ -18,6 +18,8 @@ func keyForProvider(tc translate.Config, provider string) string {
 		return tc.NvidiaKey
 	case translate.ProviderGemini:
 		return tc.GeminiKey
+	case translate.ProviderOpenRouter:
+		return tc.OpenRouterKey
 	}
 	return ""
 }

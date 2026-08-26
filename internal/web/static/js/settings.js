@@ -433,7 +433,7 @@ function catalogRow(providerId, m) {
   tr.appendChild(tdModel);
   tr.appendChild(el('td', null, m.free ? el('span', { class: 'free-badge' }, 'Free') : ''));
   tr.appendChild(el('td', null, fmtContext(m.context_length)));
-  const info = availabilityInfo(m.availability);
+  const info = availabilityInfo(m.status);
   tr.appendChild(el('td', null, el('span', { class: `status-badge status-${info.cls}` }, info.label)));
   const tdAct = el('td', { style: 'text-align:right; white-space:nowrap;' });
   const add = el('button', { class: 'btn btn-ghost btn-sm', type: 'button', title: 'Add to chain' }, '+');
@@ -478,7 +478,19 @@ async function loadModelCatalog(providerId, box, status, refresh) {
 async function checkModels(providerId, box, status) {
   if (status) { status.textContent = 'Checking\u2026'; status.className = 'catalog-status'; }
   try {
-    await api('POST', '/api/translation/models/check', { provider: providerId });
+    const data = await api('GET', `/api/translation/models?provider=${encodeURIComponent(providerId)}&refresh=true`);
+    const models = Array.isArray(data) ? data : (data && data.models) ? data.models : [];
+    let ids = models.filter((m) => m.free).map((m) => m.id);
+    if (!ids.length) {
+      const key = providerId.toUpperCase() + '_MODELS';
+      ids = (effectiveValue(key) || '').split(',').map((s) => s.trim()).filter(Boolean);
+    }
+    if (!ids.length) {
+      toast('No models to check for this provider', 'info');
+      if (status) { status.textContent = 'no models'; status.className = 'catalog-status'; }
+      return;
+    }
+    await api('POST', '/api/translation/models/check', { provider: providerId, models: ids });
     await loadModelCatalog(providerId, box, status, true);
   } catch (err) {
     toast(`Check failed: ${err.message}`, 'error');
