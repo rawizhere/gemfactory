@@ -734,3 +734,76 @@ footer {
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+
+/* Provider fallback chain drag & drop */
+.prov-chain { display: flex; flex-direction: column; gap: 0.9rem; }
+.provider-card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.8rem 1rem;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+.provider-card.dragging { opacity: 0.5; border-color: var(--accent); }
+.provider-card-head { display: flex; align-items: center; gap: 0.6rem; }
+.provider-name { font-weight: 600; font-size: 0.95rem; }
+.drag-handle {
+  cursor: grab;
+  color: var(--muted);
+  user-select: none;
+  font-size: 1rem;
+  line-height: 1;
+}
+.drag-handle:active { cursor: grabbing; }
+.subhead {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+.model-chain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.model-chain-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--surface-hover);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0.3rem 0.5rem;
+}
+.model-chain-item.dragging { opacity: 0.5; }
+.model-id { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.82rem; flex: 1; }
+.model-remove {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+}
+.model-remove:hover { color: var(--danger); }
+.model-chain-empty { color: var(--muted); font-size: 0.82rem; padding: 0.2rem 0; }
+.catalog-toolbar { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+.catalog-status { font-size: 0.78rem; color: var(--muted); }
+.catalog-status.ok { color: var(--ok); }
+.catalog-status.err { color: var(--danger); }
+.catalog-table th:last-child, .catalog-table td:last-child { width: 1%; }
+.tag {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  margin-left: 0.4rem;
+}
+.tag-reason { background: var(--warning-bg); color: var(--warning); }
+.status-badge { font-size: 0.72rem; padding: 0.12rem 0.5rem; border-radius: 999px; text-transform: capitalize; }
+.status-ok { background: var(--ok-bg); color: var(--ok); }
+.status-warn { background: var(--warning-bg); color: var(--warning); }
+.status-dead { background: var(--danger-bg); color: var(--danger); }
+.status-unknown { background: var(--line); color: var(--muted); }
+.free-badge { font-size: 0.72rem; padding: 0.12rem 0.5rem; border-radius: 999px; background: var(--ok-bg); color: var(--ok); }
