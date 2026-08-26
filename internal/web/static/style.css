@@ -807,3 +807,73 @@ footer {
 .status-dead { background: var(--danger-bg); color: var(--danger); }
 .status-unknown { background: var(--line); color: var(--muted); }
 .free-badge { font-size: 0.72rem; padding: 0.12rem 0.5rem; border-radius: 999px; background: var(--ok-bg); color: var(--ok); }
+
+
+/* Test-translation model picker */
+.field-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.model-picker { position: relative; display: inline-block; }
+.model-picker-btn {
+  max-width: 24rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-picker-panel {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  min-width: 22rem;
+  max-width: 34rem;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.model-picker-panel[hidden] { display: none; }
+.model-picker-search {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  padding: 0.4rem 0.55rem;
+  font: inherit;
+  font-size: 0.82rem;
+}
+.model-picker-search:focus { outline: none; border-color: var(--accent); }
+.model-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 18rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.model-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+.model-picker-item:hover { background: var(--surface-hover); }
+.model-picker-item.selected { background: var(--accent); color: var(--accent-ink); }
+.model-picker-item .prov { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.model-picker-item.selected .prov { color: var(--accent-ink); }
+.model-picker-item .mid { font-family: ui-monospace, SFMono-Regular, monospace; flex: 1; }
+.model-picker-empty { color: var(--muted); font-size: 0.8rem; padding: 0.4rem 0.5rem; }
+.model-picker-status { font-size: 0.74rem; color: var(--muted); }
