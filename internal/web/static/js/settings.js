@@ -136,6 +136,7 @@ function buildEditor(f) {
     state.edited.set(f.key, node.value);
     updateSaveBar();
   });
+  node.dataset.key = f.key;
   return node;
 }
 
@@ -398,7 +399,11 @@ function commitModelOrder(providerId) {
   const ul = document.getElementById('model-chain-' + providerId);
   if (!ul) return;
   const ids = [...ul.querySelectorAll('.model-chain-item')].map((li) => li.dataset.model);
-  state.edited.set(providerId.toUpperCase() + '_MODELS', ids.join(','));
+  const order = ids.join(',');
+  const key = providerId.toUpperCase() + '_MODELS';
+  state.edited.set(key, order);
+  const input = document.getElementById('model-input-' + providerId);
+  if (input && input.value !== order) input.value = order;
   updateSaveBar();
 }
 
@@ -517,8 +522,25 @@ function commitProviderOrder() {
   const host = document.getElementById('providers-chain');
   if (!host) return;
   const ids = [...host.querySelectorAll('.provider-card')].map((c) => c.dataset.provider);
-  state.edited.set('TRANSLATION_FALLBACK_ORDER', ids.join(','));
+  const order = ids.join(',');
+  state.edited.set('TRANSLATION_FALLBACK_ORDER', order);
+  syncFieldInput('TRANSLATION_FALLBACK_ORDER', order);
+  updateProviderOrderBadges();
   updateSaveBar();
+}
+
+function syncFieldInput(key, value) {
+  const input = document.querySelector(`#settings-body [data-key="${key}"]`);
+  if (input && input.value !== value) input.value = value;
+}
+
+function updateProviderOrderBadges() {
+  const host = document.getElementById('providers-chain');
+  if (!host) return;
+  [...host.querySelectorAll('.provider-card')].forEach((card, i) => {
+    const ord = document.querySelector(`[data-provider-order="${card.dataset.provider}"]`);
+    if (ord) ord.value = String(i + 1);
+  });
 }
 
 function buildProviderCard(p) {
@@ -528,6 +550,8 @@ function buildProviderCard(p) {
   const handle = el('span', { class: 'drag-handle', title: 'Drag to reorder providers' }, '\u280F');
   head.appendChild(handle);
   head.appendChild(el('span', { class: 'provider-name' }, p.label));
+  const ordInput = el('input', { class: 'provider-order', type: 'text', readonly: 'readonly', 'data-provider-order': p.id, 'aria-label': 'Fallback chain position' });
+  head.appendChild(ordInput);
   card.appendChild(head);
 
   const apiRow = fieldRow(
@@ -593,7 +617,13 @@ function renderProvidersSection(root) {
     if (after == null) chainHost.appendChild(dragging);
     else chainHost.insertBefore(dragging, after);
   });
-  ordered.forEach((p) => chainHost.appendChild(buildProviderCard(p)));
+  chainHost.addEventListener('drop', (e) => e.preventDefault());
+  ordered.forEach((p, i) => {
+    const card = buildProviderCard(p);
+    const ord = card.querySelector('[data-provider-order]');
+    if (ord) ord.value = String(i + 1);
+    chainHost.appendChild(card);
+  });
   root.appendChild(chainHost);
 
   // Prompt shapes LLM output for every provider.
@@ -801,5 +831,8 @@ export function initSettings() {
     state.edited.clear();
     updateSaveBar();
     renderSectionBody(state.active);
+  });
+  window.addEventListener('mouseup', () => {
+    document.querySelectorAll('.provider-card[draggable="true"]').forEach((c) => { c.draggable = false; });
   });
 }
