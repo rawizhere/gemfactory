@@ -99,18 +99,20 @@ func settingRegistry() []settingSpec {
 		{key: "CLIP_DELETE_STATUS", def: "false", validate: boolSpec()},
 		{key: "TRANSLATION_TIMEOUT", def: "180", validate: intRange(10, 600)},
 		{key: "SUBS_GOOGLE_ONLY", def: "false", validate: boolSpec()},
-		{key: "TRANSLATION_FALLBACK_ORDER", def: "gemini,nvidia,groq,opencode",
-			validate: csvOf(translate.ProviderGoogle, translate.ProviderGemini, translate.ProviderNvidia, translate.ProviderGroq, translate.ProviderOpencode)},
+		{key: "TRANSLATION_FALLBACK_ORDER", def: "gemini,nvidia,groq,opencode,openrouter",
+			validate: csvOf(translate.ProviderGoogle, translate.ProviderGemini, translate.ProviderNvidia, translate.ProviderGroq, translate.ProviderOpencode, translate.ProviderOpenRouter)},
 		{key: "SUBS_SOURCE_PREF_RU", def: "en,ko"},
 		{key: "TRANSLATION_PROMPT", def: translate.DefaultTranslationPrompt},
 		{key: "GEMINI_API_KEY", masked: true},
 		{key: "GROQ_API_KEY", masked: true},
 		{key: "OPENCODE_API_KEY", masked: true},
 		{key: "NVIDIA_API_KEY", masked: true},
+		{key: "OPENROUTER_API_KEY", masked: true},
 		{key: "GEMINI_MODELS", def: strings.Join(translate.DefaultGeminiModels, ",")},
 		{key: "GROQ_MODELS", def: strings.Join(translate.DefaultGroqModels, ",")},
 		{key: "OPENCODE_MODELS", def: strings.Join(translate.DefaultOpencodeModels, ",")},
 		{key: "NVIDIA_MODELS", def: strings.Join(translate.DefaultNvidiaModels, ",")},
+		{key: "OPENROUTER_MODELS", def: strings.Join(translate.DefaultOpenRouterModels, ",")},
 	}
 }
 

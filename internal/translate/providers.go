@@ -251,9 +251,10 @@ func geminiAPIErrorDetails(err error) (int, string) {
 
 // OpenAI-compatible endpoints used by the translation providers.
 const (
-	groqBaseURL     = "https://api.groq.com/openai/v1"
-	opencodeBaseURL = "https://opencode.ai/zen/v1"
-	nvidiaBaseURL   = "https://integrate.api.nvidia.com/v1"
+	groqBaseURL       = "https://api.groq.com/openai/v1"
+	opencodeBaseURL   = "https://opencode.ai/zen/v1"
+	nvidiaBaseURL     = "https://integrate.api.nvidia.com/v1"
+	openRouterBaseURL = "https://openrouter.ai/api/v1"
 )
 
 func TranslateWithGroq(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction, videoTitle string, timeout time.Duration, onAttempt func(string), models ...[]string) ([]string, string, error) {
@@ -268,6 +269,11 @@ func TranslateWithOpencode(ctx context.Context, texts []string, targetLang, sour
 // TranslateWithNvidia calls NVIDIA NIM (OpenAI-compatible) with the given model chain.
 func TranslateWithNvidia(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction, videoTitle string, timeout time.Duration, onAttempt func(string), models ...[]string) ([]string, string, error) {
 	return translateOpenAICompatible(ctx, ProviderNvidia, nvidiaBaseURL, apiKey, firstModels(models, DefaultNvidiaModels), texts, targetLang, sourceLang, systemInstruction, videoTitle, timeout, onAttempt)
+}
+
+// TranslateWithOpenRouter calls OpenRouter (OpenAI-compatible) with the given model chain.
+func TranslateWithOpenRouter(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction, videoTitle string, timeout time.Duration, onAttempt func(string), models ...[]string) ([]string, string, error) {
+	return translateOpenAICompatible(ctx, ProviderOpenRouter, openRouterBaseURL, apiKey, firstModels(models, DefaultOpenRouterModels), texts, targetLang, sourceLang, systemInstruction, videoTitle, timeout, onAttempt)
 }
 
 // requestTimeout falls back to the built-in default when the caller passes no explicit value.

@@ -37,7 +37,7 @@ const SECTIONS = [
     id: 'translation',
     title: 'Translation',
     fields: [
-      FIELD('TRANSLATION_FALLBACK_ORDER', 'Provider Fallback Chain', 'text', { mono: true, hint: 'Comma-separated: gemini, nvidia, groq, opencode' }),
+      FIELD('TRANSLATION_FALLBACK_ORDER', 'Provider Fallback Chain', 'text', { mono: true, hint: 'Comma-separated: gemini, nvidia, groq, opencode, openrouter' }),
       FIELD('SUBS_SOURCE_PREF_RU', 'RU Source Subtitle Priority', 'text', { mono: true, hint: 'Preferred source languages for RU translation' }),
       FIELD('TRANSLATION_TIMEOUT', 'LLM Request Timeout', 'number', { min: 10, max: 600, unit: 'sec', hint: 'Per-provider timeout before falling back' }),
       FIELD('SUBS_GOOGLE_ONLY', 'Google Translate Only', 'bool', { hint: 'Skip all LLM providers, use Google Translate web endpoint' }),
@@ -53,6 +53,7 @@ const PROVIDERS = [
   { id: 'nvidia', label: 'NVIDIA NIM', keyPlaceholder: 'nvapi-...' },
   { id: 'groq', label: 'Groq', keyPlaceholder: 'gsk_...' },
   { id: 'opencode', label: 'OpenCode Zen', keyPlaceholder: 'sk-...' },
+  { id: 'openrouter', label: 'OpenRouter', keyPlaceholder: 'sk-or-v1-...' },
 ];
 
 const state = {

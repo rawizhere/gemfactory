@@ -14,31 +14,34 @@ import (
 )
 
 type translationConfigResponse struct {
-	Chain                 string `json:"chain"`
-	FallbackOrder         string `json:"fallback_order"`
-	GeminiMasked          string `json:"gemini_masked"`
-	GroqMasked            string `json:"groq_masked"`
-	OpencodeMasked        string `json:"opencode_masked"`
-	NvidiaMasked          string `json:"nvidia_masked"`
-	GeminiModels          string `json:"gemini_models"`
-	GroqModels            string `json:"groq_models"`
-	OpencodeModels        string `json:"opencode_models"`
-	NvidiaModels          string `json:"nvidia_models"`
-	DefaultGeminiModels   string `json:"default_gemini_models"`
-	DefaultGroqModels     string `json:"default_groq_models"`
-	DefaultOpencodeModels string `json:"default_opencode_models"`
-	DefaultNvidiaModels   string `json:"default_nvidia_models"`
-	Prompt                string `json:"prompt"`
-	DefaultPrompt         string `json:"default_prompt"`
-	SourcePrefRU          string `json:"source_pref_ru"`
-	Concurrency           int    `json:"concurrency"`
-	ClipCRF               string `json:"clip_crf"`
-	SubsCRF               string `json:"subs_crf"`
-	ClipPreset            string `json:"clip_preset"`
-	ClipAudioBitrate      string `json:"clip_audio_bitrate"`
-	ClipDeleteStatus      bool   `json:"clip_delete_status"`
-	RetentionHours        int    `json:"retention_hours"`
-	TranslationTimeout    int    `json:"translation_timeout"`
+	Chain                   string `json:"chain"`
+	FallbackOrder           string `json:"fallback_order"`
+	GeminiMasked            string `json:"gemini_masked"`
+	GroqMasked              string `json:"groq_masked"`
+	OpencodeMasked          string `json:"opencode_masked"`
+	NvidiaMasked            string `json:"nvidia_masked"`
+	OpenRouterMasked        string `json:"openrouter_masked"`
+	GeminiModels            string `json:"gemini_models"`
+	GroqModels              string `json:"groq_models"`
+	OpencodeModels          string `json:"opencode_models"`
+	NvidiaModels            string `json:"nvidia_models"`
+	OpenRouterModels        string `json:"openrouter_models"`
+	DefaultGeminiModels     string `json:"default_gemini_models"`
+	DefaultGroqModels       string `json:"default_groq_models"`
+	DefaultOpencodeModels   string `json:"default_opencode_models"`
+	DefaultNvidiaModels     string `json:"default_nvidia_models"`
+	DefaultOpenRouterModels string `json:"default_openrouter_models"`
+	Prompt                  string `json:"prompt"`
+	DefaultPrompt           string `json:"default_prompt"`
+	SourcePrefRU            string `json:"source_pref_ru"`
+	Concurrency             int    `json:"concurrency"`
+	ClipCRF                 string `json:"clip_crf"`
+	SubsCRF                 string `json:"subs_crf"`
+	ClipPreset              string `json:"clip_preset"`
+	ClipAudioBitrate        string `json:"clip_audio_bitrate"`
+	ClipDeleteStatus        bool   `json:"clip_delete_status"`
+	RetentionHours          int    `json:"retention_hours"`
+	TranslationTimeout      int    `json:"translation_timeout"`
 }
 
 func (s *Server) translationConfig() translate.Config {
@@ -62,31 +65,34 @@ func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
 	retentionHours := cfg.Int(ctx, "DOWNLOAD_RETENTION_HOURS", 24)
 	translationTimeout := int(tc.Timeout.Seconds())
 	resp := translationConfigResponse{
-		Chain:                 chainLabel(tc),
-		FallbackOrder:         strings.Join(tc.FallbackOrder, ", "),
-		GeminiMasked:          maskKey(tc.GeminiKey),
-		GroqMasked:            maskKey(tc.GroqKey),
-		OpencodeMasked:        maskKey(tc.OpencodeKey),
-		NvidiaMasked:          maskKey(tc.NvidiaKey),
-		GeminiModels:          strings.Join(tc.GeminiModels, ", "),
-		GroqModels:            strings.Join(tc.GroqModels, ", "),
-		OpencodeModels:        strings.Join(tc.OpencodeModels, ", "),
-		NvidiaModels:          strings.Join(tc.NvidiaModels, ", "),
-		DefaultGeminiModels:   strings.Join(translate.DefaultGeminiModels, ", "),
-		DefaultGroqModels:     strings.Join(translate.DefaultGroqModels, ", "),
-		DefaultOpencodeModels: strings.Join(translate.DefaultOpencodeModels, ", "),
-		DefaultNvidiaModels:   strings.Join(translate.DefaultNvidiaModels, ", "),
-		Prompt:                tc.Prompt,
-		DefaultPrompt:         translate.DefaultTranslationPrompt,
-		SourcePrefRU:          strings.Join(tc.SourcePrefRU, ", "),
-		Concurrency:           concurrency,
-		ClipCRF:               clipCRF,
-		SubsCRF:               subsCRF,
-		ClipPreset:            clipPreset,
-		ClipAudioBitrate:      clipAudioBitrate,
-		ClipDeleteStatus:      clipDeleteStatus,
-		RetentionHours:        retentionHours,
-		TranslationTimeout:    translationTimeout,
+		Chain:                   chainLabel(tc),
+		FallbackOrder:           strings.Join(tc.FallbackOrder, ", "),
+		GeminiMasked:            maskKey(tc.GeminiKey),
+		GroqMasked:              maskKey(tc.GroqKey),
+		OpencodeMasked:          maskKey(tc.OpencodeKey),
+		NvidiaMasked:            maskKey(tc.NvidiaKey),
+		OpenRouterMasked:        maskKey(tc.OpenRouterKey),
+		GeminiModels:            strings.Join(tc.GeminiModels, ", "),
+		GroqModels:              strings.Join(tc.GroqModels, ", "),
+		OpencodeModels:          strings.Join(tc.OpencodeModels, ", "),
+		NvidiaModels:            strings.Join(tc.NvidiaModels, ", "),
+		OpenRouterModels:        strings.Join(tc.OpenRouterModels, ", "),
+		DefaultGeminiModels:     strings.Join(translate.DefaultGeminiModels, ", "),
+		DefaultGroqModels:       strings.Join(translate.DefaultGroqModels, ", "),
+		DefaultOpencodeModels:   strings.Join(translate.DefaultOpencodeModels, ", "),
+		DefaultNvidiaModels:     strings.Join(translate.DefaultNvidiaModels, ", "),
+		DefaultOpenRouterModels: strings.Join(translate.DefaultOpenRouterModels, ", "),
+		Prompt:                  tc.Prompt,
+		DefaultPrompt:           translate.DefaultTranslationPrompt,
+		SourcePrefRU:            strings.Join(tc.SourcePrefRU, ", "),
+		Concurrency:             concurrency,
+		ClipCRF:                 clipCRF,
+		SubsCRF:                 subsCRF,
+		ClipPreset:              clipPreset,
+		ClipAudioBitrate:        clipAudioBitrate,
+		ClipDeleteStatus:        clipDeleteStatus,
+		RetentionHours:          retentionHours,
+		TranslationTimeout:      translationTimeout,
 	}
 	writeJSON(w, resp)
 }
@@ -94,11 +100,12 @@ func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
 // chainLabel renders the effective provider fallback chain for display.
 func chainLabel(cfg translate.Config) string {
 	names := map[string]string{
-		translate.ProviderGoogle:   "Google Translate",
-		translate.ProviderGemini:   "Gemini",
-		translate.ProviderGroq:     "Groq",
-		translate.ProviderOpencode: "OpenCode",
-		translate.ProviderNvidia:   "NVIDIA",
+		translate.ProviderGoogle:     "Google Translate",
+		translate.ProviderGemini:     "Gemini",
+		translate.ProviderGroq:       "Groq",
+		translate.ProviderOpencode:   "OpenCode",
+		translate.ProviderNvidia:     "NVIDIA",
+		translate.ProviderOpenRouter: "OpenRouter",
 	}
 	var parts []string
 	for _, p := range translate.BuildFallbackChain(cfg) {
@@ -123,10 +130,12 @@ func (s *Server) updateTranslationConfig(w http.ResponseWriter, r *http.Request)
 		GroqKey            *string `json:"groq_api_key"`
 		OpencodeKey        *string `json:"opencode_api_key"`
 		NvidiaKey          *string `json:"nvidia_api_key"`
+		OpenRouterKey      *string `json:"openrouter_api_key"`
 		GeminiModels       *string `json:"gemini_models"`
 		GroqModels         *string `json:"groq_models"`
 		OpencodeModels     *string `json:"opencode_models"`
 		NvidiaModels       *string `json:"nvidia_models"`
+		OpenRouterModels   *string `json:"openrouter_models"`
 		FallbackOrder      *string `json:"fallback_order"`
 		SourcePrefRU       *string `json:"source_pref_ru"`
 		Prompt             *string `json:"prompt"`
@@ -170,6 +179,9 @@ func (s *Server) updateTranslationConfig(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if req.NvidiaKey != nil && !setKey("NVIDIA_API_KEY", req.NvidiaKey) {
+		return
+	}
+	if req.OpenRouterKey != nil && !setKey("OPENROUTER_API_KEY", req.OpenRouterKey) {
 		return
 	}
 
@@ -228,6 +240,9 @@ func (s *Server) updateTranslationConfig(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if req.NvidiaModels != nil && !set("NVIDIA_MODELS", strings.TrimSpace(*req.NvidiaModels)) {
+		return
+	}
+	if req.OpenRouterModels != nil && !set("OPENROUTER_MODELS", strings.TrimSpace(*req.OpenRouterModels)) {
 		return
 	}
 	if req.FallbackOrder != nil && !set("TRANSLATION_FALLBACK_ORDER", strings.TrimSpace(*req.FallbackOrder)) {
@@ -289,18 +304,20 @@ func (s *Server) updateTranslationConfig(w http.ResponseWriter, r *http.Request)
 // testTranslation probes the saved fallback chain in parallel and streams results as NDJSON lines.
 func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Text           string `json:"text"`
-		TargetLang     string `json:"target_lang"`
-		VideoTitle     string `json:"video_title"`
-		GeminiKey      string `json:"gemini_api_key"`
-		GroqKey        string `json:"groq_api_key"`
-		GeminiModels   string `json:"gemini_models"`
-		GroqModels     string `json:"groq_models"`
-		OpencodeKey    string `json:"opencode_api_key"`
-		OpencodeModels string `json:"opencode_models"`
-		NvidiaKey      string `json:"nvidia_api_key"`
-		NvidiaModels   string `json:"nvidia_models"`
-		Prompt         string `json:"prompt"`
+		Text             string `json:"text"`
+		TargetLang       string `json:"target_lang"`
+		VideoTitle       string `json:"video_title"`
+		GeminiKey        string `json:"gemini_api_key"`
+		GroqKey          string `json:"groq_api_key"`
+		GeminiModels     string `json:"gemini_models"`
+		GroqModels       string `json:"groq_models"`
+		OpencodeKey      string `json:"opencode_api_key"`
+		OpencodeModels   string `json:"opencode_models"`
+		NvidiaKey        string `json:"nvidia_api_key"`
+		NvidiaModels     string `json:"nvidia_models"`
+		OpenRouterKey    string `json:"openrouter_api_key"`
+		OpenRouterModels string `json:"openrouter_models"`
+		Prompt           string `json:"prompt"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -333,6 +350,9 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 	if req.NvidiaKey != "" && !isMaskedKey(req.NvidiaKey) {
 		tc.NvidiaKey = req.NvidiaKey
 	}
+	if req.OpenRouterKey != "" && !isMaskedKey(req.OpenRouterKey) {
+		tc.OpenRouterKey = req.OpenRouterKey
+	}
 	if req.GeminiModels != "" {
 		tc.GeminiModels = translate.ParseCSV(req.GeminiModels)
 	}
@@ -344,6 +364,9 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.NvidiaModels != "" {
 		tc.NvidiaModels = translate.ParseCSV(req.NvidiaModels)
+	}
+	if req.OpenRouterModels != "" {
+		tc.OpenRouterModels = translate.ParseCSV(req.OpenRouterModels)
 	}
 	prompt := strings.TrimSpace(req.Prompt)
 	if prompt == "" {
@@ -435,6 +458,16 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 			for _, m := range tc.NvidiaModels {
 				testModel(p, m, func() ([]string, string, error) {
 					return translate.TranslateWithNvidia(ctx, []string{sampleText}, targetLang, "", tc.NvidiaKey, instr, videoTitle, tc.Timeout, nil, []string{m})
+				})
+			}
+		case translate.ProviderOpenRouter:
+			if tc.OpenRouterKey == "" {
+				noKey(p)
+				continue
+			}
+			for _, m := range tc.OpenRouterModels {
+				testModel(p, m, func() ([]string, string, error) {
+					return translate.TranslateWithOpenRouter(ctx, []string{sampleText}, targetLang, "", tc.OpenRouterKey, instr, videoTitle, tc.Timeout, nil, []string{m})
 				})
 			}
 		}

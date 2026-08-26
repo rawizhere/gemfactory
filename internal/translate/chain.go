@@ -72,6 +72,17 @@ func Chain(ctx context.Context, texts []string, targetLang, sourceLang string, c
 			}
 			logTranslateFailure(log, provider, model, err, texts, translated, targetLang)
 			lastErr = fmt.Errorf("groq (%s): %w", modelOrEmpty(model), errIf(err))
+
+		case ProviderOpenRouter:
+			if cfg.OpenRouterKey == "" {
+				continue
+			}
+			translated, model, err := TranslateWithOpenRouter(ctx, texts, targetLang, sourceLang, cfg.OpenRouterKey, instr, videoTitle, cfg.Timeout, onAttempt, cfg.OpenRouterModels)
+			if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
+				return preserveSpeakerTags(texts, translated), ProviderOpenRouter + "/" + model, nil
+			}
+			logTranslateFailure(log, provider, model, err, texts, translated, targetLang)
+			lastErr = fmt.Errorf("openrouter (%s): %w", modelOrEmpty(model), errIf(err))
 		}
 	}
 

@@ -763,6 +763,9 @@ func (s *Service) ResolveTranslationConfig(ctx context.Context) translate.Config
 	if v, ok := get("NVIDIA_API_KEY"); ok {
 		cfg.NvidiaKey = v
 	}
+	if v, ok := get("OPENROUTER_API_KEY"); ok {
+		cfg.OpenRouterKey = v
+	}
 	if v, ok := get("GEMINI_MODELS"); ok {
 		cfg.GeminiModels = translate.ParseCSV(v)
 	}
@@ -774,6 +777,9 @@ func (s *Service) ResolveTranslationConfig(ctx context.Context) translate.Config
 	}
 	if v, ok := get("NVIDIA_MODELS"); ok {
 		cfg.NvidiaModels = translate.ParseCSV(v)
+	}
+	if v, ok := get("OPENROUTER_MODELS"); ok {
+		cfg.OpenRouterModels = translate.ParseCSV(v)
 	}
 	if v, ok := get("TRANSLATION_FALLBACK_ORDER"); ok {
 		cfg.FallbackOrder = translate.ParseCSV(v)
