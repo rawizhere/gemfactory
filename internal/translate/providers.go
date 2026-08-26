@@ -18,8 +18,24 @@ import (
 	"google.golang.org/genai"
 )
 
-// thinkTagRe strips reasoning/thinking tags emitted by models like Qwen.
+// thinkTagRe strips Qwen-style thinking tags.
 var thinkTagRe = regexp.MustCompile(`(?s)<think>.*?</think>`)
+
+// numberedLineStartRe matches a leading "N." / "N)" / "N:" translated line.
+var numberedLineStartRe = regexp.MustCompile(`^\s*(?:\*{0,2})?\d+[.)\]:]`)
+
+// stripReasoningPreamble cuts model reasoning from the body, keeping from the first numbered line.
+func stripReasoningPreamble(s string) string {
+	s = thinkTagRe.ReplaceAllString(s, "")
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if numberedLineStartRe.MatchString(strings.TrimSpace(line)) {
+			return strings.Join(lines[i:], "\n")
+		}
+	}
+	return s
+}
 
 var mdBoldRe = regexp.MustCompile(`\*\*([^*]+)\*\*`)
 
@@ -304,6 +320,8 @@ func translateOpenAICompatible(ctx context.Context, provider, baseURL, apiKey st
 	var lastErr error
 	for _, model := range models {
 		fireAttempt(onAttempt, provider, model)
+
+		initial := maxOutputTokens(len(texts), model)
 		req := openai.ChatCompletionRequest{
 			Model: model,
 			Messages: []openai.ChatCompletionMessage{
@@ -311,32 +329,51 @@ func translateOpenAICompatible(ctx context.Context, provider, baseURL, apiKey st
 				{Role: openai.ChatMessageRoleUser, Content: userMsg},
 			},
 			Temperature: 0.2,
-			// max_tokens (not MaxCompletionTokens): NVIDIA NIM, Groq and other
-			// OpenAI-compatible providers do not all support the newer field.
-			MaxTokens: maxOutputTokens(len(texts), model), //nolint:staticcheck // SA1019
+			// max_tokens (not MaxCompletionTokens): some providers reject the newer field.
+			MaxTokens: initial, //nolint:staticcheck // SA1019
 		}
 		if isReasoningModel(model) {
 			req.ReasoningEffort = "low"
 		}
-
-		resp, err := createChatCompletionWithRetry(ctx, client, req)
-		if err != nil {
-			lastErr = fmt.Errorf("%s (%s): %w", provider, model, err)
-			continue
+		if kwargs := reasoningDisableKwargs(provider, model); kwargs != nil {
+			req.ChatTemplateKwargs = kwargs
 		}
 
-		outText := thinkTagRe.ReplaceAllString(resp.Choices[0].Message.Content, "")
-		res, perr := parseNumberedLines(stripMarkdownBold(outText), len(texts))
-		if perr == nil {
-			return res, model, nil
+		budget := initial
+		var resp openai.ChatCompletionResponse
+		var err error
+		for attempt := 0; attempt < reasoningRetryAttempts; attempt++ {
+			req.MaxTokens = budget //nolint:staticcheck // SA1019
+			resp, err = createChatCompletionWithRetry(ctx, client, req)
+			if err != nil {
+				lastErr = fmt.Errorf("%s (%s): %w", provider, model, err)
+				break
+			}
+
+			outText := stripReasoningPreamble(resp.Choices[0].Message.Content)
+			if strings.TrimSpace(outText) != "" {
+				res, perr := parseNumberedLines(stripMarkdownBold(outText), len(texts))
+				if perr == nil {
+					return res, model, nil
+				}
+				lastErr = perr
+				break
+			}
+
+			if hasReasoningTokens(resp) && attempt < reasoningRetryAttempts-1 {
+				budget = nextReasoningBudget(resp, budget, len(texts))
+				lastErr = fmt.Errorf("%s (%s): empty content with reasoning, budget -> %d", provider, model, budget)
+				continue
+			}
+			lastErr = fmt.Errorf("%s (%s): empty response", provider, model)
+			break
 		}
-		lastErr = perr
 	}
 
 	return nil, "", lastErr
 }
 
-// createChatCompletionWithRetry sends the request, retrying once on 429/5xx; rejects empty completions.
+// createChatCompletionWithRetry sends the request, retrying once on 429/5xx.
 func createChatCompletionWithRetry(ctx context.Context, client *openai.Client, req openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	var resp openai.ChatCompletionResponse
 	err := retry.Do(
@@ -357,9 +394,6 @@ func createChatCompletionWithRetry(ctx context.Context, client *openai.Client, r
 	if err != nil {
 		return openai.ChatCompletionResponse{}, err
 	}
-	if len(resp.Choices) == 0 || strings.TrimSpace(resp.Choices[0].Message.Content) == "" {
-		return resp, fmt.Errorf("empty response")
-	}
 	return resp, nil
 }
 
@@ -376,11 +410,75 @@ func isReasoningModel(model string) bool {
 		strings.Contains(model, "minimax")
 }
 
-// maxOutputTokens scales the budget with batch size; reasoning models get extra headroom for hidden reasoning.
+// reasoningBudgetCap is the initial max_tokens for heavy reasoning models.
+const reasoningBudgetCap = 24000
+
+// reasoningBudgetMax caps the budget when retrying with a larger window.
+const reasoningBudgetMax = 32768
+
+// reasoningRetryAttempts bounds empty-content-with-reasoning retries per model.
+const reasoningRetryAttempts = 3
+
+// isHeavyReasoningModel reports models that burn the budget on hidden reasoning.
+func isHeavyReasoningModel(model string) bool {
+	m := strings.ToLower(model)
+	return strings.Contains(m, "stepfun") ||
+		strings.Contains(m, "step-3.7") ||
+		strings.Contains(m, "hy3") ||
+		strings.Contains(m, "deepseek-v4-flash") ||
+		strings.Contains(m, "deepseek-reasoner") ||
+		strings.Contains(m, "nemotron-3.5-lightning")
+}
+
+// hasReasoningTokens reports whether the response carried hidden reasoning.
+func hasReasoningTokens(resp openai.ChatCompletionResponse) bool {
+	if len(resp.Choices) > 0 && strings.TrimSpace(resp.Choices[0].Message.ReasoningContent) != "" {
+		return true
+	}
+	if resp.Usage.CompletionTokensDetails != nil && resp.Usage.CompletionTokensDetails.ReasoningTokens > 0 {
+		return true
+	}
+	return false
+}
+
+// nextReasoningBudget grows the budget from observed reasoning tokens, capped.
+func nextReasoningBudget(resp openai.ChatCompletionResponse, cur, lines int) int {
+	contentEstimate := lines*60 + 256
+	var needed int
+	if resp.Usage.CompletionTokensDetails != nil && resp.Usage.CompletionTokensDetails.ReasoningTokens > 0 {
+		needed = resp.Usage.CompletionTokensDetails.ReasoningTokens + contentEstimate
+	} else {
+		needed = cur * 2
+	}
+	if needed < cur+2048 {
+		needed = cur + 2048
+	}
+	if needed > reasoningBudgetMax {
+		needed = reasoningBudgetMax
+	}
+	return needed
+}
+
+// reasoningDisableKwargs returns chat_template_kwargs to disable reasoning where safe.
+func reasoningDisableKwargs(provider, model string) map[string]any {
+	if provider != ProviderOpencode {
+		return nil
+	}
+	m := strings.ToLower(model)
+	if strings.Contains(m, "nemotron") || strings.Contains(m, "laguna") {
+		return map[string]any{"enable_thinking": false}
+	}
+	return nil
+}
+
+// maxOutputTokens scales the budget with batch size; reasoning models get extra headroom.
 func maxOutputTokens(lines int, model string) int {
 	tokens := lines*60 + 256
 	if isReasoningModel(model) {
 		tokens += 2048
+	}
+	if isHeavyReasoningModel(model) {
+		tokens = reasoningBudgetCap
 	}
 	if tokens < 1024 {
 		return 1024
