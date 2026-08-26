@@ -346,6 +346,24 @@ function availabilityInfo(avail) {
   }
 }
 
+// Rank from availabilityInfo: ok first, then warn, dead, unknown last.
+function availabilityRank(avail) {
+  switch (availabilityInfo(avail).cls) {
+    case 'ok': return 0;
+    case 'warn': return 1;
+    case 'dead': return 2;
+    default: return 3;
+  }
+}
+
+// Stable sort: group by status rank, preserve original order within a group.
+function sortCatalogByStatus(models) {
+  return models
+    .map((m, i) => ({ m, i }))
+    .sort((a, b) => availabilityRank(a.m.status) - availabilityRank(b.m.status) || a.i - b.i)
+    .map((x) => x.m);
+}
+
 function getDragAfter(container, selector, y) {
   const els = [...container.querySelectorAll(selector + ':not(.dragging)')];
   let closest = { offset: -Infinity, element: null };
@@ -445,7 +463,8 @@ function catalogRow(providerId, m) {
 
 function renderCatalogTable(providerId, box, models) {
   box.textContent = '';
-  if (!models.length) {
+  const sorted = sortCatalogByStatus(models);
+  if (!sorted.length) {
     box.appendChild(el('p', { class: 'empty' }, 'No models returned by the provider catalog.'));
     return;
   }
@@ -456,7 +475,7 @@ function renderCatalogTable(providerId, box, models) {
   thead.appendChild(hr);
   table.appendChild(thead);
   const tbody = el('tbody');
-  models.forEach((m) => tbody.appendChild(catalogRow(providerId, m)));
+  sorted.forEach((m) => tbody.appendChild(catalogRow(providerId, m)));
   table.appendChild(tbody);
   box.appendChild(tableWrap(table));
 }
