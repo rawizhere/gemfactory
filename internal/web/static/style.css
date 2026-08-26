@@ -791,6 +791,7 @@ footer {
 .catalog-status { font-size: 0.78rem; color: var(--muted); }
 .catalog-status.ok { color: var(--ok); }
 .catalog-status.err { color: var(--danger); }
+.catalog-more { margin-top: 0.6rem; }
 .catalog-table th:last-child, .catalog-table td:last-child { width: 1%; }
 .tag {
   font-size: 0.66rem;
