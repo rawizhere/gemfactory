@@ -240,6 +240,11 @@ function renderStorageCard(root) {
 
 let testResultEl = null;
 
+// Test-translation model picker state: null = probe the full fallback chain.
+let selectedTestModel = null;
+let modelPickerCache = null;
+let modelPickerOutsideBound = false;
+
 function collectProviderOverrides() {
   const overrides = {};
   PROVIDERS.forEach((p) => {
@@ -249,6 +254,104 @@ function collectProviderOverrides() {
   });
   if (state.edited.has('TRANSLATION_PROMPT')) overrides.prompt = state.edited.get('TRANSLATION_PROMPT');
   return overrides;
+}
+
+// Aggregates model catalogs across every LLM provider into a flat
+// [{provider, model}] list used by the test-translation model picker.
+async function loadAllModels() {
+  if (modelPickerCache) return modelPickerCache;
+  const items = [];
+  await Promise.all(PROVIDERS.map(async (p) => {
+    try {
+      const data = await api('GET', `/api/translation/models?provider=${encodeURIComponent(p.id)}`);
+      const models = Array.isArray(data) ? data : (data && data.models) ? data.models : [];
+      models.forEach((m) => { if (m.id) items.push({ provider: p.id, model: m.id }); });
+    } catch (_) {
+      // Skip providers whose catalog is unavailable right now.
+    }
+  }));
+  modelPickerCache = { items };
+  return modelPickerCache;
+}
+
+function renderModelPickerList(filter, status, list, btn, panel) {
+  return loadAllModels().then(({ items }) => {
+    list.textContent = '';
+    const q = filter.trim().toLowerCase();
+    const matches = (it) =>
+      !q || `${it.provider}/${it.model}`.toLowerCase().includes(q) ||
+      it.provider.toLowerCase().includes(q) || it.model.toLowerCase().includes(q);
+    const filtered = items.filter(matches);
+
+    const addItem = (label, value, highlight) => {
+      const li = el('li', {
+        class: 'model-picker-item' + (selectedTestModel === value ? ' selected' : ''),
+      }, highlight ? el('span', { class: 'prov' }, '★ ') : null);
+      li.appendChild(el('span', { class: 'mid' }, label));
+      li.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectedTestModel = value || null;
+        btn.textContent = selectedTestModel || 'Any model (test full chain)';
+        panel.hidden = true;
+      });
+      list.appendChild(li);
+    };
+
+    addItem('Any model (test full chain)', '', true);
+    if (!filtered.length) {
+      list.appendChild(el('li', { class: 'model-picker-empty' }, 'No models match your filter'));
+    }
+    filtered.forEach((it) => addItem(`${it.provider}/${it.model}`, `${it.provider}/${it.model}`, false));
+    status.textContent = filtered.length
+      ? `${filtered.length} model${filtered.length === 1 ? '' : 's'} across ${new Set(filtered.map((x) => x.provider)).size} providers`
+      : 'No matches';
+  });
+}
+
+function buildModelPicker() {
+  const wrap = el('div', { class: 'model-picker', id: 'translation-model-picker' });
+  const btn = el('button', {
+    class: 'btn btn-ghost btn-sm model-picker-btn',
+    type: 'button',
+    id: 'translation-model-btn',
+  }, selectedTestModel || 'Any model (test full chain)');
+  const panel = el('div', { class: 'model-picker-panel', id: 'translation-model-panel', hidden: true });
+  const search = el('input', {
+    type: 'text',
+    class: 'model-picker-search',
+    placeholder: 'Filter by provider or model…',
+    autocomplete: 'off',
+  });
+  const list = el('ul', { class: 'model-picker-list', id: 'translation-model-list' });
+  const status = el('div', { class: 'model-picker-status' }, 'Loading models…');
+  panel.appendChild(search);
+  panel.appendChild(list);
+  panel.appendChild(status);
+  wrap.appendChild(btn);
+  wrap.appendChild(panel);
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = panel.hidden;
+    panel.hidden = !open;
+    if (open) {
+      search.focus();
+      if (!list.childElementCount) renderModelPickerList(search.value, status, list, btn, panel);
+    }
+  });
+
+  search.addEventListener('input', () => renderModelPickerList(search.value, status, list, btn, panel));
+
+  if (!modelPickerOutsideBound) {
+    modelPickerOutsideBound = true;
+    document.addEventListener('click', (e) => {
+      const p = document.getElementById('translation-model-panel');
+      const b = document.getElementById('translation-model-btn');
+      if (p && !p.hidden && b && !b.contains(e.target) && !p.contains(e.target)) p.hidden = true;
+    });
+  }
+
+  return wrap;
 }
 
 async function testTranslation() {
@@ -261,7 +364,9 @@ async function testTranslation() {
     btn.textContent = 'Testing...';
   }
   if (testResultEl) {
-    testResultEl.textContent = 'Probing fallback chain...';
+    testResultEl.textContent = selectedTestModel
+      ? `Testing ${selectedTestModel}…`
+      : 'Probing fallback chain...';
     testResultEl.style.color = '';
   }
 
@@ -285,7 +390,7 @@ async function testTranslation() {
     const res = await fetch('/api/translation/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, target_lang: 'ru', ...collectProviderOverrides() }),
+      body: JSON.stringify({ text, target_lang: 'ru', model: selectedTestModel || '', ...collectProviderOverrides() }),
     });
     if (!res.ok) throw new Error((await res.text()) || res.statusText);
     if (testResultEl) testResultEl.textContent = '';
@@ -732,6 +837,12 @@ function renderProvidersSection(root) {
     fieldRow(FIELD('TRANSLATION_PROMPT', 'AI Translation System Prompt', 'textarea', { rows: 6 })),
   ];
   root.appendChild(fieldsTable(promptRows));
+
+  const pickerRow = el('div', { class: 'settings-row' });
+  pickerRow.appendChild(el('label', { class: 'field-label', for: 'translation-model-btn' }, 'Test model'));
+  pickerRow.appendChild(buildModelPicker());
+  pickerRow.appendChild(el('span', { class: 'hint', style: 'margin:0' }, 'Pick one model, or leave as “Any” to probe the whole chain'));
+  root.appendChild(pickerRow);
 
   const row = el('div', { class: 'settings-row' });
   const input = el('input', { type: 'text', id: 'translation-test-input', placeholder: 'Test text...', style: 'flex:1; font-size:0.85rem;' });

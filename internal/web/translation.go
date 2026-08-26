@@ -301,6 +301,46 @@ func (s *Server) updateTranslationConfig(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, map[string]any{"status": "ok"})
 }
 
+// restrictTestToModel narrows the translation test to a single provider/model.
+// The UI sends "provider/model" (e.g. "opencode/nemotron-3.5-lightning-free"); when set,
+// only that provider is probed and its model list is reduced to the chosen model.
+func restrictTestToModel(tc *translate.Config, chain []string, model string) []string {
+	if model == "" {
+		return chain
+	}
+	parts := strings.SplitN(model, "/", 2)
+	if len(parts) != 2 {
+		return chain
+	}
+	provider, m := parts[0], parts[1]
+	switch provider {
+	case translate.ProviderGemini:
+		tc.GeminiModels = []string{m}
+	case translate.ProviderGroq:
+		tc.GroqModels = []string{m}
+	case translate.ProviderOpencode:
+		tc.OpencodeModels = []string{m}
+	case translate.ProviderNvidia:
+		tc.NvidiaModels = []string{m}
+	case translate.ProviderOpenRouter:
+		tc.OpenRouterModels = []string{m}
+	case translate.ProviderGoogle:
+		// Google web translate has no model id; the provider restriction is enough.
+	default:
+		return chain
+	}
+	restricted := []string{}
+	for _, p := range chain {
+		if p == provider {
+			restricted = append(restricted, p)
+		}
+	}
+	if len(restricted) == 0 {
+		restricted = []string{provider}
+	}
+	return restricted
+}
+
 // testTranslation probes the saved fallback chain in parallel and streams results as NDJSON lines.
 func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -318,6 +358,7 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 		OpenRouterKey    string `json:"openrouter_api_key"`
 		OpenRouterModels string `json:"openrouter_models"`
 		Prompt           string `json:"prompt"`
+		Model            string `json:"model"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -374,7 +415,8 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 	}
 	instr := translate.BuildSystemInstruction(prompt, targetLang)
 
-	chain := translate.BuildFallbackChain(tc)
+	chain := restrictTestToModel(&tc, translate.BuildFallbackChain(tc), req.Model)
+
 	extract := func(texts []string, _, err error, entry map[string]any) map[string]any {
 		switch {
 		case err != nil:
