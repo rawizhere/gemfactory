@@ -379,6 +379,9 @@ function findModelsInput(providerId) {
   return document.getElementById('model-input-' + providerId);
 }
 
+// Tracks a model id being dragged from the provider catalog into a chain.
+let draggedCatalogModel = null;
+
 function renderModelChain(providerId) {
   const ul = document.getElementById('model-chain-' + providerId);
   if (!ul) return;
@@ -415,8 +418,11 @@ function modelChainItem(providerId, id) {
 function commitModelOrder(providerId) {
   const ul = document.getElementById('model-chain-' + providerId);
   if (!ul) return;
+  const key = providerId.toUpperCase() + '_MODELS';
   const ids = [...ul.querySelectorAll('.model-chain-item')].map((li) => li.dataset.model);
-  state.edited.set(providerId.toUpperCase() + '_MODELS', ids.join(','));
+  state.edited.set(key, ids.join(','));
+  const input = findModelsInput(providerId);
+  if (input) input.value = ids.join(',');
   updateSaveBar();
 }
 
@@ -443,9 +449,27 @@ function addModelToChain(providerId, id) {
   toast(`Added ${id} to ${providerId} chain`, 'success');
 }
 
+// Insert a catalog model into the chain at the drop position (before beforeId, or at the end).
+function insertModelIntoChain(providerId, modelId, beforeId) {
+  const key = providerId.toUpperCase() + '_MODELS';
+  const ids = (effectiveValue(key) || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const existed = ids.includes(modelId);
+  if (existed) ids.splice(ids.indexOf(modelId), 1);
+  let pos = beforeId == null ? ids.length : ids.indexOf(beforeId);
+  if (pos < 0) pos = ids.length;
+  ids.splice(pos, 0, modelId);
+  state.edited.set(key, ids.join(','));
+  const input = findModelsInput(providerId);
+  if (input) input.value = ids.join(',');
+  updateSaveBar();
+  renderModelChain(providerId);
+  toast(`${existed ? 'Moved' : 'Added'} ${modelId} ${existed ? 'in' : 'to'} ${providerId} chain`, 'success');
+}
+
 function catalogRow(providerId, m) {
-  const tr = el('tr');
+  const tr = el('tr', { draggable: 'true' });
   const tdModel = el('td');
+  tdModel.appendChild(el('span', { class: 'drag-handle', title: 'Drag into the chain' }, '⠏'));
   tdModel.appendChild(el('code', { class: 'mono' }, m.id || '—'));
   if (m.reasoning) tdModel.appendChild(el('span', { class: 'tag tag-reason' }, 'reasoning'));
   tr.appendChild(tdModel);
@@ -458,6 +482,20 @@ function catalogRow(providerId, m) {
   add.addEventListener('click', () => addModelToChain(providerId, m.id));
   tdAct.appendChild(add);
   tr.appendChild(tdAct);
+  tr.addEventListener('dragstart', (e) => {
+    if (e.target.closest('.btn')) { e.preventDefault(); return; }
+    draggedCatalogModel = { id: m.id, provider: providerId };
+    tr.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'copy';
+    try { e.dataTransfer.setData('text/plain', m.id); } catch (_) {}
+  });
+  tr.addEventListener('dragend', () => {
+    tr.classList.remove('dragging');
+    draggedCatalogModel = null;
+    const ph = document.querySelector('.model-chain-placeholder');
+    if (ph) ph.remove();
+    renderModelChain(providerId);
+  });
   return tr;
 }
 
@@ -585,12 +623,36 @@ function buildProviderCard(p) {
   chainWrap.appendChild(el('div', { class: 'subhead' }, 'Chain order — drag to reorder'));
   const ul = el('ul', { class: 'model-chain', id: 'model-chain-' + p.id, 'data-provider': p.id });
   ul.addEventListener('dragover', (e) => {
+    const reordering = ul.querySelector('.model-chain-item.dragging');
+    if (reordering) {
+      e.preventDefault();
+      const after = getDragAfter(ul, '.model-chain-item', e.clientY);
+      if (after == null) ul.appendChild(reordering);
+      else ul.insertBefore(reordering, after);
+      return;
+    }
+    if (draggedCatalogModel && draggedCatalogModel.provider === providerId) {
+      e.preventDefault();
+      const empty = ul.querySelector('.model-chain-empty');
+      if (empty) empty.remove();
+      const after = getDragAfter(ul, '.model-chain-item', e.clientY);
+      let ph = ul.querySelector('.model-chain-placeholder');
+      if (!ph) ph = el('li', { class: 'model-chain-placeholder' });
+      if (after == null) ul.appendChild(ph);
+      else ul.insertBefore(ph, after);
+    }
+  });
+  ul.addEventListener('drop', (e) => {
+    const reordering = ul.querySelector('.model-chain-item.dragging');
+    if (reordering) { e.preventDefault(); return; }
+    if (!draggedCatalogModel || draggedCatalogModel.provider !== providerId) return;
     e.preventDefault();
-    const dragging = ul.querySelector('.model-chain-item.dragging');
-    if (!dragging) return;
+    const modelId = draggedCatalogModel.id;
     const after = getDragAfter(ul, '.model-chain-item', e.clientY);
-    if (after == null) ul.appendChild(dragging);
-    else ul.insertBefore(dragging, after);
+    const ph = ul.querySelector('.model-chain-placeholder');
+    if (ph) ph.remove();
+    insertModelIntoChain(providerId, modelId, after ? after.dataset.model : null);
+    draggedCatalogModel = null;
   });
   chainWrap.appendChild(ul);
   card.appendChild(chainWrap);
