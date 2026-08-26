@@ -8,11 +8,12 @@ import (
 )
 
 const (
-	ProviderGoogle   = "google"
-	ProviderGemini   = "gemini"
-	ProviderGroq     = "groq"
-	ProviderOpencode = "opencode"
-	ProviderNvidia   = "nvidia"
+	ProviderGoogle     = "google"
+	ProviderGemini     = "gemini"
+	ProviderGroq       = "groq"
+	ProviderOpencode   = "opencode"
+	ProviderNvidia     = "nvidia"
+	ProviderOpenRouter = "openrouter"
 )
 
 // DefaultOpencodeModels is the free-model fallback chain on OpenCode Zen.

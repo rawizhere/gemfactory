@@ -88,6 +88,8 @@ func NewServer(port string, logger *zap.Logger, deps Deps) *Server {
 	mux.HandleFunc("GET /api/translation", s.getTranslationConfig)
 	mux.HandleFunc("POST /api/translation", s.updateTranslationConfig)
 	mux.HandleFunc("POST /api/translation/test", s.testTranslation)
+	mux.HandleFunc("GET /api/translation/models", s.getModels)
+	mux.HandleFunc("POST /api/translation/models/check", s.checkModels)
 
 	static, _ := fs.Sub(staticFS, "static")
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static))))
