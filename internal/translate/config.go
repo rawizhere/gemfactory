@@ -8,11 +8,12 @@ import (
 )
 
 const (
-	ProviderGoogle   = "google"
-	ProviderGemini   = "gemini"
-	ProviderGroq     = "groq"
-	ProviderOpencode = "opencode"
-	ProviderNvidia   = "nvidia"
+	ProviderGoogle     = "google"
+	ProviderGemini     = "gemini"
+	ProviderGroq       = "groq"
+	ProviderOpencode   = "opencode"
+	ProviderNvidia     = "nvidia"
+	ProviderOpenRouter = "openrouter"
 )
 
 // DefaultOpencodeModels is the free-model fallback chain on OpenCode Zen.
@@ -25,6 +26,13 @@ var DefaultOpencodeModels = []string{
 // DefaultNvidiaModels is the free-model chain on NVIDIA NIM.
 var DefaultNvidiaModels = []string{
 	"minimaxai/minimax-m3",
+}
+
+// DefaultOpenRouterModels is the free-model chain on OpenRouter.
+var DefaultOpenRouterModels = []string{
+	"minimax/minimax-m3:free",
+	"nvidia/nemotron-3.5-lightning:free",
+	"dots-studio/dots-3-note-preview:free",
 }
 
 const translatorRole = "You are a professional video subtitle translator."
@@ -55,19 +63,21 @@ func BuildSystemInstruction(prompt, targetLang string) string {
 
 // Config holds the provider fallback order, API keys, models, custom prompt and LLM request timeout.
 type Config struct {
-	GoogleOnly     bool // force Google Translate, skip all LLM providers
-	GeminiKey      string
-	GroqKey        string
-	OpencodeKey    string
-	NvidiaKey      string
-	GeminiModels   []string
-	GroqModels     []string
-	OpencodeModels []string
-	NvidiaModels   []string
-	FallbackOrder  []string
-	Prompt         string
-	SourcePrefRU   []string // preferred source languages when translating into ru
-	Timeout        time.Duration
+	GoogleOnly       bool // force Google Translate, skip all LLM providers
+	GeminiKey        string
+	GroqKey          string
+	OpencodeKey      string
+	NvidiaKey        string
+	OpenRouterKey    string
+	GeminiModels     []string
+	GroqModels       []string
+	OpencodeModels   []string
+	NvidiaModels     []string
+	OpenRouterModels []string
+	FallbackOrder    []string
+	Prompt           string
+	SourcePrefRU     []string // preferred source languages when translating into ru
+	Timeout          time.Duration
 }
 
 var DefaultGeminiModels = []string{
@@ -108,17 +118,19 @@ func IsTruthy(s string) bool {
 // DefaultConfig resolves the translation config from env with built-in defaults.
 func DefaultConfig() Config {
 	cfg := Config{
-		GeminiKey:      strings.TrimSpace(os.Getenv("GEMINI_API_KEY")),
-		GroqKey:        strings.TrimSpace(os.Getenv("GROQ_API_KEY")),
-		OpencodeKey:    strings.TrimSpace(os.Getenv("OPENCODE_API_KEY")),
-		NvidiaKey:      strings.TrimSpace(os.Getenv("NVIDIA_API_KEY")),
-		GeminiModels:   ParseCSV(os.Getenv("GEMINI_MODELS")),
-		GroqModels:     ParseCSV(os.Getenv("GROQ_MODELS")),
-		OpencodeModels: ParseCSV(os.Getenv("OPENCODE_MODELS")),
-		NvidiaModels:   ParseCSV(os.Getenv("NVIDIA_MODELS")),
-		FallbackOrder:  ParseCSV(os.Getenv("TRANSLATION_FALLBACK_ORDER")),
-		Prompt:         strings.TrimSpace(os.Getenv("TRANSLATION_PROMPT")),
-		SourcePrefRU:   ParseCSV(os.Getenv("SUBS_SOURCE_PREF_RU")),
+		GeminiKey:        strings.TrimSpace(os.Getenv("GEMINI_API_KEY")),
+		GroqKey:          strings.TrimSpace(os.Getenv("GROQ_API_KEY")),
+		OpencodeKey:      strings.TrimSpace(os.Getenv("OPENCODE_API_KEY")),
+		NvidiaKey:        strings.TrimSpace(os.Getenv("NVIDIA_API_KEY")),
+		OpenRouterKey:    strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")),
+		GeminiModels:     ParseCSV(os.Getenv("GEMINI_MODELS")),
+		GroqModels:       ParseCSV(os.Getenv("GROQ_MODELS")),
+		OpencodeModels:   ParseCSV(os.Getenv("OPENCODE_MODELS")),
+		NvidiaModels:     ParseCSV(os.Getenv("NVIDIA_MODELS")),
+		OpenRouterModels: ParseCSV(os.Getenv("OPENROUTER_MODELS")),
+		FallbackOrder:    ParseCSV(os.Getenv("TRANSLATION_FALLBACK_ORDER")),
+		Prompt:           strings.TrimSpace(os.Getenv("TRANSLATION_PROMPT")),
+		SourcePrefRU:     ParseCSV(os.Getenv("SUBS_SOURCE_PREF_RU")),
 	}
 	cfg.GoogleOnly = IsTruthy(os.Getenv("SUBS_GOOGLE_ONLY"))
 	return ApplyDefaults(cfg)
@@ -136,6 +148,9 @@ func ApplyDefaults(cfg Config) Config {
 	}
 	if len(cfg.NvidiaModels) == 0 {
 		cfg.NvidiaModels = DefaultNvidiaModels
+	}
+	if len(cfg.OpenRouterModels) == 0 {
+		cfg.OpenRouterModels = DefaultOpenRouterModels
 	}
 	if len(cfg.SourcePrefRU) == 0 {
 		cfg.SourcePrefRU = ParseCSV(DefaultSourcePrefRU)
@@ -165,7 +180,7 @@ func BuildFallbackChain(cfg Config) []string {
 		var chain []string
 		for _, p := range cfg.FallbackOrder {
 			p = strings.ToLower(strings.TrimSpace(p))
-			if p == ProviderGoogle || p == ProviderGemini || p == ProviderGroq || p == ProviderOpencode || p == ProviderNvidia {
+			if p == ProviderGoogle || p == ProviderGemini || p == ProviderGroq || p == ProviderOpencode || p == ProviderNvidia || p == ProviderOpenRouter {
 				chain = append(chain, p)
 			}
 		}
@@ -173,5 +188,5 @@ func BuildFallbackChain(cfg Config) []string {
 			return chain
 		}
 	}
-	return []string{ProviderGemini, ProviderNvidia, ProviderGroq, ProviderOpencode}
+	return []string{ProviderGemini, ProviderNvidia, ProviderGroq, ProviderOpencode, ProviderOpenRouter}
 }
