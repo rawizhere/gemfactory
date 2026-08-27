@@ -457,6 +457,34 @@ func updateToNightly(parent context.Context) {
 // subtitleStyle burns subs in Lato with a translucent outline box; needs libass + Lato on the host.
 const subtitleStyle = "Fontname=Lato\\,OutlineColour=&H40000000\\,BorderStyle=3"
 
+func calculateBitrateCapKbps(durationSec float64, audioBitrateStr string, maxFileMB int, gif bool) float64 {
+	if durationSec <= 0 {
+		return 0
+	}
+	if maxFileMB <= 0 {
+		maxFileMB = 49
+	}
+	// Target slightly below limit to leave room for container/metadata overhead.
+	targetMB := float64(maxFileMB) - 1.0
+	if targetMB <= 0 {
+		targetMB = float64(maxFileMB) * 0.95
+	}
+	totalBits := targetMB * 1024 * 1024 * 8
+	audioKbps := 192.0
+	if gif {
+		audioKbps = 0.0
+	} else if strings.HasSuffix(audioBitrateStr, "k") {
+		if val, err := strconv.ParseFloat(strings.TrimSuffix(audioBitrateStr, "k"), 64); err == nil && val > 0 {
+			audioKbps = val
+		}
+	}
+	maxVideoKbps := (totalBits / durationSec / 1000.0) - audioKbps
+	if maxVideoKbps < 500 {
+		maxVideoKbps = 500
+	}
+	return maxVideoKbps
+}
+
 var ffmpegOutTimeRe = regexp.MustCompile(`^out_time_(?:us|ms)=(\d+)`)
 var ffmpegSpeedRe = regexp.MustCompile(`^speed=\s*([^\s]+)`)
 
@@ -466,34 +494,51 @@ func (s *Service) ReencodeWithSubs(ctx context.Context, clipPath, trimmedVTT str
 		return "", fmt.Errorf("ffmpeg not found in PATH")
 	}
 
+	opts := s.GetEncodeOptions(ctx, trimmedVTT != "")
+	maxSizeBytes := int64(opts.MaxFileMB) * 1024 * 1024
+	if maxSizeBytes <= 0 {
+		maxSizeBytes = 49 * 1024 * 1024
+	}
+
 	tmpPath := strings.TrimSuffix(clipPath, filepath.Ext(clipPath)) + "_reencoded.mp4"
 
-	// Fast path: no subtitles, no gif -> try ultra-fast remux if already Apple/H.264/AAC compatible.
+	// Fast path: no subtitles, no gif -> try ultra-fast remux if already Apple/H.264/AAC compatible and under size limit.
 	if trimmedVTT == "" && !gif && isAppleCompatible(clipPath) {
 		fastCmd := exec.CommandContext(ctx, bin, "-y", "-nostdin", "-i", clipPath, "-c", "copy", "-movflags", "+faststart", tmpPath)
 		if out, err := fastCmd.CombinedOutput(); err == nil {
-			if renErr := os.Rename(tmpPath, clipPath); renErr == nil {
-				return clipPath, nil
+			if fi, serr := os.Stat(tmpPath); serr == nil && fi.Size() <= maxSizeBytes {
+				if renErr := os.Rename(tmpPath, clipPath); renErr == nil {
+					return clipPath, nil
+				}
 			}
+			_ = os.Remove(tmpPath)
 		} else {
 			s.logger.Debug("fast remux fallback to full reencode", zap.String("output", string(out)))
 			_ = os.Remove(tmpPath)
 		}
 	}
 
-	opts := s.GetEncodeOptions(ctx, trimmedVTT != "")
+	durationSec := expectedDurationMS / 1000.0
+	if durationSec <= 0 {
+		if vDur, _, err := probeStreamDurations(clipPath); err == nil && vDur > 0 {
+			durationSec = vDur
+		}
+	}
+	maxVideoKbps := calculateBitrateCapKbps(durationSec, opts.AudioBitrate, opts.MaxFileMB, gif)
 
 	args := []string{"-y", "-nostdin", "-i", clipPath}
+	var vfilters []string
 	if trimmedVTT != "" {
 		subArg := escapeFilterPath(trimmedVTT)
-		args = append(args,
-			"-vf",
-			fmt.Sprintf("subtitles=%s:force_style=%s,scale=trunc(iw/2)*2:trunc(ih/2)*2", subArg, subtitleStyle),
-		)
-	} else {
-		// H.264 requires even dimensions.
-		args = append(args, "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2")
+		vfilters = append(vfilters, fmt.Sprintf("subtitles=%s:force_style=%s", subArg, subtitleStyle))
 	}
+	if maxVideoKbps > 0 && maxVideoKbps < 2800 {
+		vfilters = append(vfilters, "scale=trunc(min(iw\\,1280)/2)*2:trunc(min(ih\\,720)/2)*2")
+	} else {
+		vfilters = append(vfilters, "scale=trunc(iw/2)*2:trunc(ih/2)*2")
+	}
+	args = append(args, "-vf", strings.Join(vfilters, ","))
+
 	if gif {
 		args = append(args, "-an")
 	} else {
@@ -507,7 +552,14 @@ func (s *Service) ReencodeWithSubs(ctx context.Context, clipPath, trimmedVTT str
 		"-crf", opts.CRF,
 		"-preset", opts.Preset,
 		"-pix_fmt", "yuv420p",
-		// moov atom first: Telegram can stream the upload without transcoding it server-side.
+	)
+	if maxVideoKbps > 0 && maxVideoKbps < 8000 {
+		args = append(args,
+			"-maxrate", fmt.Sprintf("%dk", int(maxVideoKbps)),
+			"-bufsize", fmt.Sprintf("%dk", int(maxVideoKbps*2)),
+		)
+	}
+	args = append(args,
 		"-movflags", "+faststart",
 		tmpPath)
 
@@ -517,7 +569,8 @@ func (s *Service) ReencodeWithSubs(ctx context.Context, clipPath, trimmedVTT str
 		zap.Bool("burn_subs", trimmedVTT != ""),
 		zap.String("crf", opts.CRF),
 		zap.String("preset", opts.Preset),
-		zap.String("audio_bitrate", opts.AudioBitrate))
+		zap.String("audio_bitrate", opts.AudioBitrate),
+		zap.Float64("max_video_kbps", maxVideoKbps))
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

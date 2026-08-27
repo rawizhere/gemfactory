@@ -107,22 +107,23 @@ func TestGetEncodeOptions(t *testing.T) {
 
 	// Default fallback values
 	optsClip := svc.GetEncodeOptions(context.Background(), false)
-	require.Equal(t, EncodeOptions{CRF: "20", Preset: "fast", AudioBitrate: "192k"}, optsClip, "unexpected default clip options")
+	require.Equal(t, EncodeOptions{CRF: "20", Preset: "fast", AudioBitrate: "192k", MaxFileMB: 49}, optsClip, "unexpected default clip options")
 
 	optsSubs := svc.GetEncodeOptions(context.Background(), true)
-	require.Equal(t, EncodeOptions{CRF: "20", Preset: "fast", AudioBitrate: "192k"}, optsSubs, "unexpected default subs options")
+	require.Equal(t, EncodeOptions{CRF: "20", Preset: "fast", AudioBitrate: "192k", MaxFileMB: 49}, optsSubs, "unexpected default subs options")
 
 	// Environment variable overrides
 	t.Setenv("CLIP_CRF", "23")
 	t.Setenv("SUBS_CRF", "18")
 	t.Setenv("CLIP_PRESET", "veryfast")
 	t.Setenv("CLIP_AUDIO_BITRATE", "128k")
+	t.Setenv("TG_FILE_LIMIT_MB", "30")
 
 	optsClipEnv := svc.GetEncodeOptions(context.Background(), false)
-	require.Equal(t, EncodeOptions{CRF: "23", Preset: "veryfast", AudioBitrate: "128k"}, optsClipEnv, "unexpected env clip options")
+	require.Equal(t, EncodeOptions{CRF: "23", Preset: "veryfast", AudioBitrate: "128k", MaxFileMB: 30}, optsClipEnv, "unexpected env clip options")
 
 	optsSubsEnv := svc.GetEncodeOptions(context.Background(), true)
-	require.Equal(t, EncodeOptions{CRF: "18", Preset: "veryfast", AudioBitrate: "128k"}, optsSubsEnv, "unexpected env subs options")
+	require.Equal(t, EncodeOptions{CRF: "18", Preset: "veryfast", AudioBitrate: "128k", MaxFileMB: 30}, optsSubsEnv, "unexpected env subs options")
 }
 
 func TestOutputPathFor(t *testing.T) {

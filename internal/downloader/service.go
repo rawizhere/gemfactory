@@ -711,6 +711,7 @@ type EncodeOptions struct {
 	CRF          string
 	Preset       string
 	AudioBitrate string
+	MaxFileMB    int
 }
 
 // GetEncodeOptions resolves encoding options from database config with fallback to environment or defaults.
@@ -722,11 +723,13 @@ func (s *Service) GetEncodeOptions(ctx context.Context, hasSubs bool) EncodeOpti
 	crf := s.getConfigValue(ctx, crfKey, "20")
 	preset := s.getConfigValue(ctx, "CLIP_PRESET", "fast")
 	audioBitrate := s.getConfigValue(ctx, "CLIP_AUDIO_BITRATE", "192k")
+	maxFileMB := settings.New(s.configs).Int(ctx, "TG_FILE_LIMIT_MB", 49)
 
 	return EncodeOptions{
 		CRF:          crf,
 		Preset:       preset,
 		AudioBitrate: audioBitrate,
+		MaxFileMB:    maxFileMB,
 	}
 }
 
