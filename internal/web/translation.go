@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"gemfactory/internal/settings"
@@ -350,7 +352,7 @@ func restrictTestToModel(tc *translate.Config, chain []string, model string) []s
 	return restricted
 }
 
-// testTranslation probes the fallback chain sequentially and streams results as NDJSON lines.
+// testTranslation probes the fallback chain in parallel and streams results as NDJSON lines.
 func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Text             string `json:"text"`
@@ -430,6 +432,52 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 
 	chain := restrictTestToModel(&tc, translate.BuildFallbackChain(tc), req.Model)
 
+	type testItem struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+
+	var items []testItem
+	for _, p := range chain {
+		if p == translate.ProviderGoogle {
+			items = append(items, testItem{Provider: p, Model: "web"})
+			continue
+		}
+		var models []string
+		switch p {
+		case translate.ProviderGemini:
+			models = tc.GeminiModels
+		case translate.ProviderGroq:
+			models = tc.GroqModels
+		case translate.ProviderOpencode:
+			models = tc.OpencodeModels
+		case translate.ProviderNvidia:
+			models = tc.NvidiaModels
+		case translate.ProviderOpenRouter:
+			models = tc.OpenRouterModels
+		}
+		if len(models) == 0 {
+			items = append(items, testItem{Provider: p, Model: ""})
+		} else {
+			for _, m := range models {
+				items = append(items, testItem{Provider: p, Model: m})
+			}
+		}
+	}
+	if items == nil {
+		items = []testItem{}
+	}
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	var writeMu sync.Mutex
+	sendNDJSON := func(v any) {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		writeNDJSON(w, v)
+	}
+
+	sendNDJSON(map[string]any{"type": "init", "chain": chain, "items": items})
+
 	extract := func(texts []string, _, err error, entry map[string]any) map[string]any {
 		switch {
 		case err != nil:
@@ -448,86 +496,89 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 		return entry
 	}
 
-	w.Header().Set("Content-Type", "application/x-ndjson")
-	writeNDJSON(w, map[string]any{"type": "start", "chain": chain})
+	var okCount int64
+	var wg sync.WaitGroup
 
-	success := false
-outer:
-	for _, p := range chain {
-		if ctx.Err() != nil {
-			break
-		}
+	for _, it := range items {
+		item := it
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 
-		var key string
-		var models []string
-		var fn func(model string) ([]string, string, error)
-
-		switch p {
-		case translate.ProviderGoogle:
-			texts, err := translate.TranslateWithGoogle(ctx, []string{sampleText}, targetLang)
-			entry := extract(texts, nil, err, map[string]any{
-				"type": "result", "provider": p, "model": "web", "ok": false,
-			})
-			writeNDJSON(w, entry)
-			if entry["ok"] == true {
-				success = true
-				break outer
-			}
-			continue
-		case translate.ProviderGemini:
-			key = tc.GeminiKey
-			models = tc.GeminiModels
-			fn = func(m string) ([]string, string, error) {
-				return translate.TranslateWithGemini(ctx, []string{sampleText}, targetLang, "", key, instr, videoTitle, tc.Timeout, nil, []string{m})
-			}
-		case translate.ProviderGroq:
-			key = tc.GroqKey
-			models = tc.GroqModels
-			fn = func(m string) ([]string, string, error) {
-				return translate.TranslateWithGroq(ctx, []string{sampleText}, targetLang, "", key, instr, videoTitle, tc.Timeout, nil, []string{m})
-			}
-		case translate.ProviderOpencode:
-			key = tc.OpencodeKey
-			models = tc.OpencodeModels
-			fn = func(m string) ([]string, string, error) {
-				return translate.TranslateWithOpencode(ctx, []string{sampleText}, targetLang, "", key, instr, videoTitle, tc.Timeout, nil, []string{m})
-			}
-		case translate.ProviderNvidia:
-			key = tc.NvidiaKey
-			models = tc.NvidiaModels
-			fn = func(m string) ([]string, string, error) {
-				return translate.TranslateWithNvidia(ctx, []string{sampleText}, targetLang, "", key, instr, videoTitle, tc.Timeout, nil, []string{m})
-			}
-		case translate.ProviderOpenRouter:
-			key = tc.OpenRouterKey
-			models = tc.OpenRouterModels
-			fn = func(m string) ([]string, string, error) {
-				return translate.TranslateWithOpenRouter(ctx, []string{sampleText}, targetLang, "", key, instr, videoTitle, tc.Timeout, nil, []string{m})
-			}
-		}
-
-		if key == "" {
-			writeNDJSON(w, map[string]any{"type": "result", "provider": p, "model": "", "ok": false, "error": "no API key configured"})
-			continue
-		}
-
-		for _, m := range models {
 			if ctx.Err() != nil {
-				break outer
+				sendNDJSON(map[string]any{
+					"type":       "result",
+					"provider":   item.Provider,
+					"model":      item.Model,
+					"ok":         false,
+					"latency_ms": 0,
+					"error":      ctx.Err().Error(),
+				})
+				return
 			}
-			texts, _, err := fn(m)
+
+			var key string
+			switch item.Provider {
+			case translate.ProviderGemini:
+				key = tc.GeminiKey
+			case translate.ProviderGroq:
+				key = tc.GroqKey
+			case translate.ProviderOpencode:
+				key = tc.OpencodeKey
+			case translate.ProviderNvidia:
+				key = tc.NvidiaKey
+			case translate.ProviderOpenRouter:
+				key = tc.OpenRouterKey
+			}
+
+			if item.Provider != translate.ProviderGoogle && key == "" {
+				sendNDJSON(map[string]any{
+					"type":       "result",
+					"provider":   item.Provider,
+					"model":      item.Model,
+					"ok":         false,
+					"latency_ms": 0,
+					"error":      "no API key configured",
+				})
+				return
+			}
+
+			start := time.Now()
+			var texts []string
+			var err error
+
+			switch item.Provider {
+			case translate.ProviderGoogle:
+				texts, err = translate.TranslateWithGoogle(ctx, []string{sampleText}, targetLang)
+			case translate.ProviderGemini:
+				texts, _, err = translate.TranslateWithGemini(ctx, []string{sampleText}, targetLang, "", key, instr, videoTitle, tc.Timeout, nil, []string{item.Model})
+			case translate.ProviderGroq:
+				texts, _, err = translate.TranslateWithGroq(ctx, []string{sampleText}, targetLang, "", key, instr, videoTitle, tc.Timeout, nil, []string{item.Model})
+			case translate.ProviderOpencode:
+				texts, _, err = translate.TranslateWithOpencode(ctx, []string{sampleText}, targetLang, "", key, instr, videoTitle, tc.Timeout, nil, []string{item.Model})
+			case translate.ProviderNvidia:
+				texts, _, err = translate.TranslateWithNvidia(ctx, []string{sampleText}, targetLang, "", key, instr, videoTitle, tc.Timeout, nil, []string{item.Model})
+			case translate.ProviderOpenRouter:
+				texts, _, err = translate.TranslateWithOpenRouter(ctx, []string{sampleText}, targetLang, "", key, instr, videoTitle, tc.Timeout, nil, []string{item.Model})
+			}
+
+			latencyMs := int(time.Since(start).Milliseconds())
 			entry := extract(texts, nil, err, map[string]any{
-				"type": "result", "provider": p, "model": m, "ok": false,
+				"type":       "result",
+				"provider":   item.Provider,
+				"model":      item.Model,
+				"ok":         false,
+				"latency_ms": latencyMs,
 			})
-			writeNDJSON(w, entry)
 			if entry["ok"] == true {
-				success = true
-				break outer
+				atomic.AddInt64(&okCount, 1)
 			}
-		}
+			sendNDJSON(entry)
+		}()
 	}
 
-	writeNDJSON(w, map[string]any{"type": "done", "success": success})
+	wg.Wait()
+	sendNDJSON(map[string]any{"type": "done", "success": atomic.LoadInt64(&okCount) > 0})
 }
 
 func writeNDJSON(w http.ResponseWriter, v any) {

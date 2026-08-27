@@ -244,6 +244,7 @@ function collectProviderOverrides() {
 }
 
 function getProvider(id) {
+  if (id === 'google') return { id: 'google', label: 'Google Translate', keyPlaceholder: '' };
   return PROVIDERS.find((p) => p.id === id) || { id, label: id, keyPlaceholder: 'API key' };
 }
 
@@ -393,7 +394,38 @@ async function runChainTest(text, timeline, btn) {
 
   const sample = text.trim() || '리브 미모 난리도 아니야';
   const startTime = performance.now();
-  let lastTime = startTime;
+  const stepMap = new Map();
+
+  const createStepElement = (item, index) => {
+    const stepEl = el('div', { class: 'timeline-step pending' });
+    const head = el('div', { class: 'timeline-step-head' });
+    const provLabel = getProvider(item.provider)?.label || item.provider;
+    const modelLabel = item.model && item.model !== 'web' ? `${provLabel} / ${item.model}` : provLabel;
+
+    const dotEl = el('span', { class: 'status-dot none' });
+    const title = el('span', { class: 'timeline-step-title' }, [
+      dotEl,
+      el('strong', null, `#${index + 1}`),
+      el('span', null, modelLabel),
+    ]);
+
+    const latencyEl = el('span', { class: 'timeline-latency' }, '');
+    const badgeEl = el('span', { class: 'timeline-status-badge pending' }, 'Testing...');
+
+    const meta = el('span', { class: 'timeline-step-meta' }, [
+      latencyEl,
+      badgeEl,
+    ]);
+
+    head.appendChild(title);
+    head.appendChild(meta);
+    stepEl.appendChild(head);
+
+    const bodyEl = el('div', { class: 'timeline-step-body' }, 'Waiting for response...');
+    stepEl.appendChild(bodyEl);
+
+    return { stepEl, badgeEl, latencyEl, bodyEl, dotEl };
+  };
 
   try {
     const res = await fetch('/api/translation/test', {
@@ -410,7 +442,6 @@ async function runChainTest(text, timeline, btn) {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    let stepIndex = 0;
 
     for (;;) {
       const { value, done } = await reader.read();
@@ -422,38 +453,37 @@ async function runChainTest(text, timeline, btn) {
         buffer = buffer.slice(idx + 1);
         if (!line) continue;
         const event = JSON.parse(line);
-        if (event.type === 'result') {
-          stepIndex++;
-          const now = performance.now();
-          const latency = Math.round(now - lastTime);
-          lastTime = now;
-          const stepEl = el('div', { class: `timeline-step ${event.ok ? 'ok' : 'err'}` });
 
-          const head = el('div', { class: 'timeline-step-head' });
-          const provLabel = PROVIDERS.find((p) => p.id === event.provider)?.label || event.provider;
-          const modelLabel = event.model ? `${provLabel} / ${event.model}` : provLabel;
+        if (event.type === 'init' && Array.isArray(event.items)) {
+          timeline.textContent = '';
+          stepMap.clear();
+          event.items.forEach((item, index) => {
+            const entry = createStepElement(item, index);
+            stepMap.set(`${item.provider}:${item.model}`, entry);
+            timeline.appendChild(entry.stepEl);
+          });
+        } else if (event.type === 'result') {
+          const key = `${event.provider}:${event.model}`;
+          let entry = stepMap.get(key);
+          if (!entry) {
+            entry = createStepElement(event, stepMap.size);
+            stepMap.set(key, entry);
+            timeline.appendChild(entry.stepEl);
+          }
 
-          const title = el('span', { class: 'timeline-step-title' }, [
-            el('strong', null, `#${stepIndex}`),
-            el('span', null, modelLabel),
-          ]);
+          entry.stepEl.className = `timeline-step ${event.ok ? 'ok' : 'err'}`;
+          if (entry.dotEl) {
+            entry.dotEl.className = `status-dot ${event.ok ? 'ok' : 'broken'}`;
+          }
+          entry.badgeEl.className = `timeline-status-badge ${event.ok ? 'ok' : 'err'}`;
+          entry.badgeEl.textContent = event.ok ? 'OK' : 'FAIL';
 
-          const meta = el('span', { class: 'timeline-step-meta' }, [
-            el('span', { class: 'timeline-latency' }, `${latency}ms`),
-            el('span', { class: `timeline-status-badge ${event.ok ? 'ok' : 'err'}` }, event.ok ? 'OK' : 'FAIL'),
-          ]);
+          const latency = event.latency_ms !== undefined ? event.latency_ms : Math.round(performance.now() - startTime);
+          entry.latencyEl.textContent = `${latency}ms`;
 
-          head.appendChild(title);
-          head.appendChild(meta);
-          stepEl.appendChild(head);
-
-          const body = el('div', { class: 'timeline-step-body' },
-            event.ok
-              ? (event.result || 'Empty result')
-              : (event.error || 'Unknown error') + (event.result ? ` (Raw: ${event.result})` : '')
-          );
-          stepEl.appendChild(body);
-          timeline.appendChild(stepEl);
+          entry.bodyEl.textContent = event.ok
+            ? (event.result || 'Empty result')
+            : (event.error || 'Unknown error') + (event.result ? ` (Raw: ${event.result})` : '');
         } else if (event.type === 'done' && !event.success && !timeline.hasChildNodes()) {
           const emptyStep = el('div', { class: 'timeline-step err' }, [
             el('div', { class: 'timeline-step-head' }, [
@@ -467,14 +497,18 @@ async function runChainTest(text, timeline, btn) {
       }
     }
   } catch (err) {
-    const errStep = el('div', { class: 'timeline-step err' }, [
-      el('div', { class: 'timeline-step-head' }, [
-        el('span', { class: 'timeline-step-title' }, 'Test Error'),
-        el('span', { class: 'timeline-status-badge err' }, 'FAIL'),
-      ]),
-      el('div', { class: 'timeline-step-body' }, err.message),
-    ]);
-    timeline.appendChild(errStep);
+    if (!timeline.hasChildNodes()) {
+      const errStep = el('div', { class: 'timeline-step err' }, [
+        el('div', { class: 'timeline-step-head' }, [
+          el('span', { class: 'timeline-step-title' }, 'Test Error'),
+          el('span', { class: 'timeline-status-badge err' }, 'FAIL'),
+        ]),
+        el('div', { class: 'timeline-step-body' }, err.message),
+      ]);
+      timeline.appendChild(errStep);
+    } else {
+      toast(`Chain test error: ${err.message}`, 'error');
+    }
   } finally {
     if (btn) {
       btn.disabled = false;

@@ -947,38 +947,30 @@ footer {
 .chain-timeline {
   display: flex;
   flex-direction: column;
+  gap: 0.45rem;
   margin-top: 0.85rem;
-  gap: 0;
-  max-height: 240px;
+  max-height: 480px;
   overflow-y: auto;
   padding-right: 0.25rem;
 }
 .timeline-step {
-  position: relative;
-  padding-left: 1.25rem;
-  padding-bottom: 0.75rem;
-  border-left: 2px solid var(--line-strong);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  background: var(--surface-hover);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.55rem 0.75rem;
+  transition: border-color 0.2s ease;
 }
-.timeline-step:last-child {
-  border-left-color: transparent;
-  padding-bottom: 0;
+.timeline-step.pending {
+  border-color: var(--line);
 }
-.timeline-step::before {
-  content: "";
-  position: absolute;
-  left: -5px;
-  top: 4px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--muted);
-  border: 2px solid var(--surface);
+.timeline-step.ok {
+  border-color: color-mix(in srgb, var(--ok) 40%, transparent);
 }
-.timeline-step.ok::before { background: var(--ok); }
-.timeline-step.err::before { background: var(--danger); }
-.timeline-step.running::before {
-  background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+.timeline-step.err {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
 }
 
 .timeline-step-head {
@@ -987,7 +979,6 @@ footer {
   justify-content: space-between;
   gap: 0.5rem;
   font-size: 0.82rem;
-  margin-bottom: 0.2rem;
 }
 .timeline-step-title {
   font-weight: 500;
@@ -1012,17 +1003,34 @@ footer {
   border-radius: 3px;
   font-weight: 500;
   text-transform: uppercase;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 .timeline-status-badge.ok { background: var(--ok-bg); color: var(--ok); }
 .timeline-status-badge.err { background: var(--danger-bg); color: var(--danger); }
+.timeline-status-badge.pending {
+  background: color-mix(in srgb, var(--muted) 15%, transparent);
+  color: var(--muted);
+  animation: timeline-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes timeline-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
 .timeline-step-body {
   font-size: 0.8rem;
   color: var(--muted);
   word-break: break-word;
-  background: var(--surface-hover);
+  background: var(--surface);
   padding: 0.35rem 0.55rem;
   border-radius: 4px;
   border: 1px solid var(--line);
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+.timeline-step.pending .timeline-step-body {
+  color: var(--muted);
+  border-style: dashed;
 }
 .timeline-step.ok .timeline-step-body {
   color: var(--ink);

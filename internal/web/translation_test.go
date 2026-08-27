@@ -1,8 +1,14 @@
 package web
 
 import (
+	"encoding/json"
+	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"gemfactory/internal/translate"
 )
@@ -93,4 +99,48 @@ func TestRestrictTestToModel(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTestTranslation(t *testing.T) {
+	s := &Server{logger: zap.NewNop()}
+
+	t.Run("invalid body", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/api/translation/test", strings.NewReader("bad-json"))
+		s.testTranslation(rec, req)
+		require.Equal(t, 400, rec.Code)
+	})
+
+	t.Run("parallel chain stream", func(t *testing.T) {
+		body := `{"text":"test","target_lang":"ru","fallback_order":"gemini,groq","gemini_models":"gemini-test","groq_models":"groq-test"}`
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/api/translation/test", strings.NewReader(body))
+		s.testTranslation(rec, req)
+		require.Equal(t, 200, rec.Code)
+		require.Equal(t, "application/x-ndjson", rec.Header().Get("Content-Type"))
+
+		lines := strings.Split(strings.TrimSpace(rec.Body.String()), "\n")
+		require.GreaterOrEqual(t, len(lines), 3)
+
+		var initEv struct {
+			Type  string   `json:"type"`
+			Chain []string `json:"chain"`
+			Items []struct {
+				Provider string `json:"provider"`
+				Model    string `json:"model"`
+			} `json:"items"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(lines[0]), &initEv))
+		require.Equal(t, "init", initEv.Type)
+		require.Equal(t, []string{"gemini", "groq"}, initEv.Chain)
+		require.Len(t, initEv.Items, 2)
+
+		var doneEv struct {
+			Type    string `json:"type"`
+			Success bool   `json:"success"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(lines[len(lines)-1]), &doneEv))
+		require.Equal(t, "done", doneEv.Type)
+		require.False(t, doneEv.Success)
+	})
 }
