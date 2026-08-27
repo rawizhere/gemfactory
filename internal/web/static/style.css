@@ -735,6 +735,54 @@ footer {
   letter-spacing: 0.05em;
 }
 
+/* General Translation Settings */
+.trans-general-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+.trans-general-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1.25rem;
+}
+.trans-field-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 180px;
+}
+.trans-field-col.trans-field-toggle {
+  flex: 0 0 auto;
+  min-width: auto;
+  align-self: center;
+  padding-bottom: 0.15rem;
+}
+.trans-field-label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.trans-field-label-toggle {
+  font-size: 0.82rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  user-select: none;
+}
+.trans-field-input {
+  width: 100%;
+}
+
 /* Master-Detail Pipeline Layout */
 .pipeline-layout {
   display: grid;
@@ -870,7 +918,7 @@ footer {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 1rem;
+  padding: 1.25rem;
 }
 .pipeline-test-form {
   display: flex;
@@ -892,6 +940,9 @@ footer {
   flex-direction: column;
   margin-top: 0.85rem;
   gap: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
 }
 .timeline-step {
   position: relative;
@@ -1216,11 +1267,38 @@ footer {
   margin-top: 0.5rem;
 }
 
-/* Prompt section below layout */
-.pipeline-prompt-card {
+/* Collapsible AI Translation Prompt Accordion */
+.pipeline-prompt-details {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+  overflow: hidden;
+}
+.pipeline-prompt-summary {
+  padding: 0.85rem 1.15rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  background: var(--surface);
+  transition: background 0.15s ease;
+  list-style-position: inside;
+}
+.pipeline-prompt-summary:hover {
+  background: var(--surface-hover);
+}
+.pipeline-prompt-body {
+  padding: 0.85rem 1.15rem 1.15rem 1.15rem;
+  border-top: 1px solid var(--line);
+}
+.pipeline-prompt-textarea {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  resize: vertical;
+  padding: 0.6rem;
+  box-sizing: border-box;
 }
 

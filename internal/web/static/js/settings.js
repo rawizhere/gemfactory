@@ -33,17 +33,7 @@ const SECTIONS = [
       FIELD('CLIP_AUDIO_BITRATE', 'Audio Bitrate', 'select', { options: [['128k', '128k'], ['192k', '192k'], ['256k', '256k'], ['320k', '320k']], hint: 'AAC audio encoding bitrate' }),
     ],
   },
-  {
-    id: 'translation',
-    title: 'Translation',
-    fields: [
-      FIELD('TRANSLATION_FALLBACK_ORDER', 'Provider Fallback Chain', 'text', { mono: true, hint: 'Comma-separated: gemini, nvidia, groq, opencode, openrouter' }),
-      FIELD('SUBS_SOURCE_PREF_RU', 'RU Source Subtitle Priority', 'text', { mono: true, hint: 'Preferred source languages for RU translation' }),
-      FIELD('TRANSLATION_TIMEOUT', 'LLM Request Timeout', 'number', { min: 10, max: 600, unit: 'sec', hint: 'Per-provider timeout before falling back' }),
-      FIELD('SUBS_GOOGLE_ONLY', 'Google Translate Only', 'bool', { hint: 'Skip all LLM providers, use Google Translate web endpoint' }),
-    ],
-  },
-  { id: 'providers', title: 'Providers', extra: 'providers' },
+  { id: 'translation', title: 'Translation', extra: 'translation' },
   { id: 'advanced', title: 'Advanced', extra: 'advanced' },
   { id: 'system', title: 'System Info', extra: 'system' },
 ];
@@ -241,7 +231,9 @@ function renderStorageCard(root) {
 }
 
 function collectProviderOverrides() {
-  const overrides = {};
+  const overrides = {
+    fallback_order: effectiveValue('TRANSLATION_FALLBACK_ORDER'),
+  };
   PROVIDERS.forEach((p) => {
     const k = p.id.toUpperCase();
     if (state.edited.has(k + '_API_KEY')) overrides[`${p.id}_api_key`] = state.edited.get(k + '_API_KEY');
@@ -399,7 +391,7 @@ async function runChainTest(text, timeline, btn) {
   }
   timeline.textContent = '';
 
-  const sample = text.trim() || '대박! 오늘 무대 진짜 레전드였어!';
+  const sample = text.trim() || '리브 미모 난리도 아니야';
   const startTime = performance.now();
 
   try {
@@ -596,38 +588,6 @@ function renderPipelineMaster(masterContainer, refresh) {
 
   card.appendChild(list);
   masterContainer.appendChild(card);
-
-  const testCard = el('div', { class: 'pipeline-test-card' });
-  const testHead = el('div', { class: 'pipeline-card-header' });
-  testHead.appendChild(el('h3', null, 'Test Fallback Chain'));
-  testCard.appendChild(testHead);
-
-  const testForm = el('div', { class: 'pipeline-test-form' });
-  const testRow = el('div', { class: 'pipeline-test-row' });
-  const testInput = el('input', {
-    type: 'text',
-    class: 'pipeline-test-input',
-    id: 'translation-test-input',
-    placeholder: 'Enter text to test fallback chain...',
-    value: '대박! 오늘 무대 진짜 레전드였어!',
-  });
-  const testBtn = el('button', {
-    class: 'btn btn-ghost btn-sm',
-    type: 'button',
-    id: 'translation-test-btn',
-  }, 'Test Chain');
-
-  testRow.appendChild(testInput);
-  testRow.appendChild(testBtn);
-  testForm.appendChild(testRow);
-
-  const timeline = el('div', { class: 'chain-timeline', id: 'translation-timeline' });
-  testForm.appendChild(timeline);
-  testCard.appendChild(testForm);
-
-  testBtn.addEventListener('click', () => runChainTest(testInput.value, timeline, testBtn));
-
-  masterContainer.appendChild(testCard);
 }
 
 const catalogCache = new Map();
@@ -963,8 +923,109 @@ function renderPipelineDetail(detailContainer, refresh) {
   detailContainer.appendChild(card);
 }
 
-function renderProvidersSection(root) {
+function renderTranslationGeneralCard(root) {
+  const card = el('div', { class: 'trans-general-card' });
+  const row = el('div', { class: 'trans-general-row' });
+
+  const fRu = FIELD('SUBS_SOURCE_PREF_RU', 'RU Source Priority', 'text', { mono: true, placeholder: 'ko, ja, en', hint: 'Preferred source languages' });
+  const colRu = el('div', { class: 'trans-field-col' });
+  const lblRu = el('label', { class: 'trans-field-label' });
+  lblRu.appendChild(el('span', null, fRu.label));
+  lblRu.appendChild(srcBadge(fRu.key));
+  const editRu = buildEditor(fRu);
+  editRu.classList.add('trans-field-input');
+  colRu.appendChild(lblRu);
+  colRu.appendChild(editRu);
+  if (fRu.hint) colRu.appendChild(el('span', { class: 'fld-hint' }, fRu.hint));
+  row.appendChild(colRu);
+
+  const fTimeout = FIELD('TRANSLATION_TIMEOUT', 'LLM Timeout', 'number', { min: 10, max: 600, unit: 'sec', hint: 'Per-provider timeout' });
+  const colTimeout = el('div', { class: 'trans-field-col' });
+  const lblTimeout = el('label', { class: 'trans-field-label' });
+  lblTimeout.appendChild(el('span', null, fTimeout.label));
+  lblTimeout.appendChild(srcBadge(fTimeout.key));
+  const editTimeout = buildEditor(fTimeout);
+  editTimeout.classList.add('trans-field-input');
+  colTimeout.appendChild(lblTimeout);
+  colTimeout.appendChild(editTimeout);
+  if (fTimeout.hint) colTimeout.appendChild(el('span', { class: 'fld-hint' }, fTimeout.hint));
+  row.appendChild(colTimeout);
+
+  const fGoogle = FIELD('SUBS_GOOGLE_ONLY', 'Google Translate Only', 'bool', { hint: 'Skip LLMs' });
+  const colGoogle = el('div', { class: 'trans-field-col trans-field-toggle' });
+  const lblGoogle = el('label', { class: 'trans-field-label-toggle' });
+  const editGoogle = buildEditor(fGoogle);
+  lblGoogle.appendChild(editGoogle);
+  lblGoogle.appendChild(el('span', null, fGoogle.label));
+  lblGoogle.appendChild(srcBadge(fGoogle.key));
+  colGoogle.appendChild(lblGoogle);
+  if (fGoogle.hint) colGoogle.appendChild(el('span', { class: 'fld-hint' }, fGoogle.hint));
+  row.appendChild(colGoogle);
+
+  card.appendChild(row);
+  root.appendChild(card);
+}
+
+function renderTranslationPrompt(root) {
+  const details = el('details', { class: 'pipeline-prompt-details' });
+  const summary = el('summary', { class: 'pipeline-prompt-summary' }, 'AI Translation System Prompt');
+  const body = el('div', { class: 'pipeline-prompt-body' });
+  const desc = el('div', { class: 'pipeline-section-desc' }, 'Instructions and guidelines passed to all LLM translation providers.');
+  const promptArea = el('textarea', {
+    rows: 6,
+    class: 'pipeline-prompt-textarea',
+    placeholder: 'Enter translation system prompt...',
+  });
+  promptArea.value = effectiveValue('TRANSLATION_PROMPT');
+  promptArea.addEventListener('input', () => {
+    state.edited.set('TRANSLATION_PROMPT', promptArea.value);
+    updateSaveBar();
+  });
+  body.appendChild(desc);
+  body.appendChild(promptArea);
+  details.appendChild(summary);
+  details.appendChild(body);
+  root.appendChild(details);
+}
+
+function renderTranslationTestCard(root) {
+  const testCard = el('div', { class: 'pipeline-test-card' });
+  const testHead = el('div', { class: 'pipeline-card-header' });
+  testHead.appendChild(el('h3', null, 'Test Fallback Chain'));
+  testCard.appendChild(testHead);
+
+  const testForm = el('div', { class: 'pipeline-test-form' });
+  const testRow = el('div', { class: 'pipeline-test-row' });
+  const testInput = el('input', {
+    type: 'text',
+    class: 'pipeline-test-input',
+    id: 'translation-test-input',
+    placeholder: '리브 미모 난리도 아니야',
+    value: '리브 미모 난리도 아니야',
+  });
+  const testBtn = el('button', {
+    class: 'btn btn-primary btn-sm',
+    type: 'button',
+    id: 'translation-test-btn',
+  }, 'Test Chain');
+
+  testRow.appendChild(testInput);
+  testRow.appendChild(testBtn);
+  testForm.appendChild(testRow);
+
+  const timeline = el('div', { class: 'chain-timeline', id: 'translation-timeline' });
+  testForm.appendChild(timeline);
+  testCard.appendChild(testForm);
+
+  testBtn.addEventListener('click', () => runChainTest(testInput.value, timeline, testBtn));
+
+  root.appendChild(testCard);
+}
+
+function renderTranslationSection(root) {
   root.textContent = '';
+
+  renderTranslationGeneralCard(root);
 
   const chain = getEffectiveFallbackChain();
   if (!state.selectedProvider || !chain.includes(state.selectedProvider)) {
@@ -987,23 +1048,8 @@ function renderProvidersSection(root) {
   pipeline.appendChild(detail);
   root.appendChild(pipeline);
 
-  const promptCard = el('div', { class: 'pipeline-prompt-card' });
-  const promptTitle = el('h3', { class: 'pipeline-section-title' }, 'AI Translation System Prompt');
-  const promptDesc = el('div', { class: 'pipeline-section-desc' }, 'Instructions and guidelines passed to all LLM translation providers.');
-  const promptArea = el('textarea', {
-    rows: 6,
-    style: 'width:100%; font-family:monospace; font-size:0.82rem; line-height:1.4; resize:vertical; padding:0.6rem;',
-    placeholder: 'Enter translation system prompt...',
-  });
-  promptArea.value = effectiveValue('TRANSLATION_PROMPT');
-  promptArea.addEventListener('input', () => {
-    state.edited.set('TRANSLATION_PROMPT', promptArea.value);
-    updateSaveBar();
-  });
-  promptCard.appendChild(promptTitle);
-  promptCard.appendChild(promptDesc);
-  promptCard.appendChild(promptArea);
-  root.appendChild(promptCard);
+  renderTranslationPrompt(root);
+  renderTranslationTestCard(root);
 }
 
 // ---------------------------------------------------------------------------
@@ -1116,9 +1162,8 @@ function renderSectionBody(sectionId) {
       renderSectionFields(section, card);
       body.appendChild(card);
       break;
-    case 'providers':
-      renderProvidersSection(card);
-      body.appendChild(card);
+    case 'translation':
+      renderTranslationSection(body);
       break;
     case 'advanced':
       renderAdvancedSection(body);
@@ -1163,6 +1208,9 @@ export async function loadConfig() {
     state.advancedRows = configRows.filter((c) => c.source === 'db');
     if (transConfig && transConfig.broken_keys) {
       state.brokenKeys = transConfig.broken_keys;
+    }
+    if (state.active === 'providers' || !SECTIONS.some((s) => s.id === state.active)) {
+      state.active = 'translation';
     }
     if (state.active === 'advanced' && !state.advancedRows.length) {
       state.active = SECTIONS[0].id;

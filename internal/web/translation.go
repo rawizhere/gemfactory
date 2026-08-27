@@ -357,6 +357,7 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 		Text             string `json:"text"`
 		TargetLang       string `json:"target_lang"`
 		VideoTitle       string `json:"video_title"`
+		FallbackOrder    string `json:"fallback_order"`
 		GeminiKey        string `json:"gemini_api_key"`
 		GroqKey          string `json:"groq_api_key"`
 		GeminiModels     string `json:"gemini_models"`
@@ -384,11 +385,14 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 	}
 	sampleText := strings.TrimSpace(req.Text)
 	if sampleText == "" {
-		sampleText = "대박! 오늘 무대 진짜 레전드였어!"
+		sampleText = "리브 미모 난리도 아니야"
 	}
 	videoTitle := strings.TrimSpace(req.VideoTitle)
 
 	tc := s.translationConfig()
+	if req.FallbackOrder != "" {
+		tc.FallbackOrder = translate.ParseCSV(req.FallbackOrder)
+	}
 	if req.GeminiKey != "" && !isMaskedKey(req.GeminiKey) {
 		tc.GeminiKey = req.GeminiKey
 	}
