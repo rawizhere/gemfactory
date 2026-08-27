@@ -393,6 +393,7 @@ async function runChainTest(text, timeline, btn) {
 
   const sample = text.trim() || '리브 미모 난리도 아니야';
   const startTime = performance.now();
+  let lastTime = startTime;
 
   try {
     const res = await fetch('/api/translation/test', {
@@ -423,7 +424,9 @@ async function runChainTest(text, timeline, btn) {
         const event = JSON.parse(line);
         if (event.type === 'result') {
           stepIndex++;
-          const latency = Math.round(performance.now() - startTime);
+          const now = performance.now();
+          const latency = Math.round(now - lastTime);
+          lastTime = now;
           const stepEl = el('div', { class: `timeline-step ${event.ok ? 'ok' : 'err'}` });
 
           const head = el('div', { class: 'timeline-step-head' });
@@ -925,44 +928,42 @@ function renderPipelineDetail(detailContainer, refresh) {
 
 function renderTranslationGeneralCard(root) {
   const card = el('div', { class: 'trans-general-card' });
-  const row = el('div', { class: 'trans-general-row' });
+  const grid = el('div', { class: 'trans-general-grid' });
 
   const fRu = FIELD('SUBS_SOURCE_PREF_RU', 'RU Source Priority', 'text', { mono: true, placeholder: 'ko, ja, en', hint: 'Preferred source languages' });
-  const colRu = el('div', { class: 'trans-field-col' });
-  const lblRu = el('label', { class: 'trans-field-label' });
-  lblRu.appendChild(el('span', null, fRu.label));
-  lblRu.appendChild(srcBadge(fRu.key));
+  const colRu = el('div', { class: 'trans-col' });
+  const headRu = el('div', { class: 'trans-col-head' });
+  headRu.appendChild(el('span', null, fRu.label));
+  headRu.appendChild(srcBadge(fRu.key));
   const editRu = buildEditor(fRu);
-  editRu.classList.add('trans-field-input');
-  colRu.appendChild(lblRu);
+  colRu.appendChild(headRu);
   colRu.appendChild(editRu);
   if (fRu.hint) colRu.appendChild(el('span', { class: 'fld-hint' }, fRu.hint));
-  row.appendChild(colRu);
+  grid.appendChild(colRu);
 
   const fTimeout = FIELD('TRANSLATION_TIMEOUT', 'LLM Timeout', 'number', { min: 10, max: 600, unit: 'sec', hint: 'Per-provider timeout' });
-  const colTimeout = el('div', { class: 'trans-field-col' });
-  const lblTimeout = el('label', { class: 'trans-field-label' });
-  lblTimeout.appendChild(el('span', null, fTimeout.label));
-  lblTimeout.appendChild(srcBadge(fTimeout.key));
+  const colTimeout = el('div', { class: 'trans-col' });
+  const headTimeout = el('div', { class: 'trans-col-head' });
+  headTimeout.appendChild(el('span', null, fTimeout.label));
+  headTimeout.appendChild(srcBadge(fTimeout.key));
   const editTimeout = buildEditor(fTimeout);
-  editTimeout.classList.add('trans-field-input');
-  colTimeout.appendChild(lblTimeout);
+  colTimeout.appendChild(headTimeout);
   colTimeout.appendChild(editTimeout);
   if (fTimeout.hint) colTimeout.appendChild(el('span', { class: 'fld-hint' }, fTimeout.hint));
-  row.appendChild(colTimeout);
+  grid.appendChild(colTimeout);
 
   const fGoogle = FIELD('SUBS_GOOGLE_ONLY', 'Google Translate Only', 'bool', { hint: 'Skip LLMs' });
-  const colGoogle = el('div', { class: 'trans-field-col trans-field-toggle' });
-  const lblGoogle = el('label', { class: 'trans-field-label-toggle' });
+  const colGoogle = el('div', { class: 'trans-col' });
+  const headGoogle = el('label', { class: 'trans-col-head trans-toggle' });
   const editGoogle = buildEditor(fGoogle);
-  lblGoogle.appendChild(editGoogle);
-  lblGoogle.appendChild(el('span', null, fGoogle.label));
-  lblGoogle.appendChild(srcBadge(fGoogle.key));
-  colGoogle.appendChild(lblGoogle);
+  headGoogle.appendChild(editGoogle);
+  headGoogle.appendChild(el('span', null, fGoogle.label));
+  headGoogle.appendChild(srcBadge(fGoogle.key));
+  colGoogle.appendChild(headGoogle);
   if (fGoogle.hint) colGoogle.appendChild(el('span', { class: 'fld-hint' }, fGoogle.hint));
-  row.appendChild(colGoogle);
+  grid.appendChild(colGoogle);
 
-  card.appendChild(row);
+  card.appendChild(grid);
   root.appendChild(card);
 }
 

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"gemfactory/internal/settings"
@@ -351,7 +350,7 @@ func restrictTestToModel(tc *translate.Config, chain []string, model string) []s
 	return restricted
 }
 
-// testTranslation probes the saved fallback chain in parallel and streams results as NDJSON lines.
+// testTranslation probes the fallback chain sequentially and streams results as NDJSON lines.
 func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Text             string `json:"text"`
@@ -452,97 +451,83 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	writeNDJSON(w, map[string]any{"type": "start", "chain": chain})
 
-	results := make(chan map[string]any, 64)
-	var wg sync.WaitGroup
-
-	testModel := func(provider, model string, fn func() ([]string, string, error)) {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			texts, _, err := fn()
-			results <- extract(texts, nil, err, map[string]any{
-				"type": "result", "provider": provider, "model": model, "ok": false,
-			})
-		}()
-	}
-	noKey := func(provider string) {
-		results <- map[string]any{"type": "result", "provider": provider, "model": "", "ok": false, "error": "no API key configured"}
-	}
-
+	success := false
+outer:
 	for _, p := range chain {
+		if ctx.Err() != nil {
+			break
+		}
+
+		var key string
+		var models []string
+		var fn func(model string) ([]string, string, error)
+
 		switch p {
 		case translate.ProviderGoogle:
-			testModel(p, "web", func() ([]string, string, error) {
-				res, err := translate.TranslateWithGoogle(ctx, []string{sampleText}, targetLang)
-				return res, "web", err
+			texts, err := translate.TranslateWithGoogle(ctx, []string{sampleText}, targetLang)
+			entry := extract(texts, nil, err, map[string]any{
+				"type": "result", "provider": p, "model": "web", "ok": false,
 			})
-		case translate.ProviderGemini:
-			if tc.GeminiKey == "" {
-				noKey(p)
-				continue
+			writeNDJSON(w, entry)
+			if entry["ok"] == true {
+				success = true
+				break outer
 			}
-			for _, m := range tc.GeminiModels {
-				testModel(p, m, func() ([]string, string, error) {
-					return translate.TranslateWithGemini(ctx, []string{sampleText}, targetLang, "", tc.GeminiKey, instr, videoTitle, tc.Timeout, nil, []string{m})
-				})
+			continue
+		case translate.ProviderGemini:
+			key = tc.GeminiKey
+			models = tc.GeminiModels
+			fn = func(m string) ([]string, string, error) {
+				return translate.TranslateWithGemini(ctx, []string{sampleText}, targetLang, "", key, instr, videoTitle, tc.Timeout, nil, []string{m})
 			}
 		case translate.ProviderGroq:
-			if tc.GroqKey == "" {
-				noKey(p)
-				continue
-			}
-			for _, m := range tc.GroqModels {
-				testModel(p, m, func() ([]string, string, error) {
-					return translate.TranslateWithGroq(ctx, []string{sampleText}, targetLang, "", tc.GroqKey, instr, videoTitle, tc.Timeout, nil, []string{m})
-				})
+			key = tc.GroqKey
+			models = tc.GroqModels
+			fn = func(m string) ([]string, string, error) {
+				return translate.TranslateWithGroq(ctx, []string{sampleText}, targetLang, "", key, instr, videoTitle, tc.Timeout, nil, []string{m})
 			}
 		case translate.ProviderOpencode:
-			if tc.OpencodeKey == "" {
-				noKey(p)
-				continue
-			}
-			for _, m := range tc.OpencodeModels {
-				testModel(p, m, func() ([]string, string, error) {
-					return translate.TranslateWithOpencode(ctx, []string{sampleText}, targetLang, "", tc.OpencodeKey, instr, videoTitle, tc.Timeout, nil, []string{m})
-				})
+			key = tc.OpencodeKey
+			models = tc.OpencodeModels
+			fn = func(m string) ([]string, string, error) {
+				return translate.TranslateWithOpencode(ctx, []string{sampleText}, targetLang, "", key, instr, videoTitle, tc.Timeout, nil, []string{m})
 			}
 		case translate.ProviderNvidia:
-			if tc.NvidiaKey == "" {
-				noKey(p)
-				continue
-			}
-			for _, m := range tc.NvidiaModels {
-				testModel(p, m, func() ([]string, string, error) {
-					return translate.TranslateWithNvidia(ctx, []string{sampleText}, targetLang, "", tc.NvidiaKey, instr, videoTitle, tc.Timeout, nil, []string{m})
-				})
+			key = tc.NvidiaKey
+			models = tc.NvidiaModels
+			fn = func(m string) ([]string, string, error) {
+				return translate.TranslateWithNvidia(ctx, []string{sampleText}, targetLang, "", key, instr, videoTitle, tc.Timeout, nil, []string{m})
 			}
 		case translate.ProviderOpenRouter:
-			if tc.OpenRouterKey == "" {
-				noKey(p)
-				continue
+			key = tc.OpenRouterKey
+			models = tc.OpenRouterModels
+			fn = func(m string) ([]string, string, error) {
+				return translate.TranslateWithOpenRouter(ctx, []string{sampleText}, targetLang, "", key, instr, videoTitle, tc.Timeout, nil, []string{m})
 			}
-			for _, m := range tc.OpenRouterModels {
-				testModel(p, m, func() ([]string, string, error) {
-					return translate.TranslateWithOpenRouter(ctx, []string{sampleText}, targetLang, "", tc.OpenRouterKey, instr, videoTitle, tc.Timeout, nil, []string{m})
-				})
+		}
+
+		if key == "" {
+			writeNDJSON(w, map[string]any{"type": "result", "provider": p, "model": "", "ok": false, "error": "no API key configured"})
+			continue
+		}
+
+		for _, m := range models {
+			if ctx.Err() != nil {
+				break outer
+			}
+			texts, _, err := fn(m)
+			entry := extract(texts, nil, err, map[string]any{
+				"type": "result", "provider": p, "model": m, "ok": false,
+			})
+			writeNDJSON(w, entry)
+			if entry["ok"] == true {
+				success = true
+				break outer
 			}
 		}
 	}
 
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	okCount := 0
-	for e := range results {
-		if e["ok"] == true {
-			okCount++
-		}
-		writeNDJSON(w, e)
-	}
-
-	writeNDJSON(w, map[string]any{"type": "done", "success": okCount > 0})
+	writeNDJSON(w, map[string]any{"type": "done", "success": success})
 }
 
 func writeNDJSON(w http.ResponseWriter, v any) {

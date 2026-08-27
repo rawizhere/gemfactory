@@ -737,58 +737,59 @@ footer {
 
 /* General Translation Settings */
 .trans-general-card {
+  padding: 1rem 1.25rem;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 1rem 1.25rem;
-  margin-bottom: 1.25rem;
+  margin-bottom: 1rem;
 }
-.trans-general-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
+.trans-general-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
   gap: 1.25rem;
+  align-items: start;
 }
-.trans-field-col {
+@media (max-width: 768px) {
+  .trans-general-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.trans-col {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  flex: 1;
-  min-width: 180px;
 }
-.trans-field-col.trans-field-toggle {
-  flex: 0 0 auto;
-  min-width: auto;
-  align-self: center;
-  padding-bottom: 0.15rem;
-}
-.trans-field-label {
-  font-size: 0.78rem;
-  font-weight: 500;
-  color: var(--muted);
+.trans-col-head {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-}
-.trans-field-label-toggle {
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  color: var(--muted);
+}
+.trans-col-head.trans-toggle {
+  color: var(--ink);
+  font-size: 0.82rem;
   cursor: pointer;
   user-select: none;
+  min-height: 1.4rem;
 }
-.trans-field-input {
+.trans-col-head.trans-toggle input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+.trans-col input[type="text"],
+.trans-col input[type="number"] {
   width: 100%;
+  box-sizing: border-box;
 }
 
 /* Master-Detail Pipeline Layout */
 .pipeline-layout {
   display: grid;
-  grid-template-columns: 360px 1fr;
-  gap: 1.25rem;
-  align-items: start;
+  grid-template-columns: 320px 1fr;
+  align-items: stretch;
+  gap: 1rem;
   margin-bottom: 1.25rem;
 }
 @media (max-width: 960px) {
@@ -797,10 +798,12 @@ footer {
   }
 }
 
-.pipeline-master {
+.pipeline-master,
+.pipeline-detail {
+  height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  box-sizing: border-box;
 }
 
 .pipeline-card {
@@ -808,6 +811,10 @@ footer {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
 }
 
 .pipeline-card-header {
@@ -827,6 +834,8 @@ footer {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  flex: 1;
+  overflow-y: auto;
 }
 
 .pipeline-prov-item {
@@ -1025,11 +1034,6 @@ footer {
 }
 
 /* Detail pane */
-.pipeline-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
 .pipeline-detail-card {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -1038,6 +1042,8 @@ footer {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+  height: 100%;
+  box-sizing: border-box;
 }
 .pipeline-detail-head {
   display: flex;
