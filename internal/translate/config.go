@@ -34,6 +34,7 @@ var DefaultNvidiaModels = []string{
 // DefaultOpenRouterModels is the free-model chain on OpenRouter.
 var DefaultOpenRouterModels = []string{
 	"minimax/minimax-m3:free",
+	"deepseek/deepseek-v4-flash-0731",
 	"nvidia/nemotron-3.5-lightning:free",
 	"dots-studio/dots-3-note-preview:free",
 }
@@ -93,7 +94,6 @@ var DefaultGeminiModels = []string{
 }
 
 var DefaultGroqModels = []string{
-	"groq/compound",
 	"openai/gpt-oss-120b",
 }
 
@@ -191,5 +191,5 @@ func BuildFallbackChain(cfg Config) []string {
 			return chain
 		}
 	}
-	return []string{ProviderGemini, ProviderNvidia, ProviderGroq, ProviderOpencode, ProviderOpenRouter}
+	return []string{ProviderOpenRouter, ProviderOpencode, ProviderNvidia, ProviderGroq}
 }

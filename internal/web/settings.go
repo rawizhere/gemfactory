@@ -99,7 +99,7 @@ func settingRegistry() []settingSpec {
 		{key: "CLIP_DELETE_STATUS", def: "false", validate: boolSpec()},
 		{key: "TRANSLATION_TIMEOUT", def: "180", validate: intRange(10, 600)},
 		{key: "SUBS_GOOGLE_ONLY", def: "false", validate: boolSpec()},
-		{key: "TRANSLATION_FALLBACK_ORDER", def: "gemini,nvidia,groq,opencode,openrouter",
+		{key: "TRANSLATION_FALLBACK_ORDER", def: "openrouter,opencode,nvidia,groq",
 			validate: csvOf(translate.ProviderGoogle, translate.ProviderGemini, translate.ProviderNvidia, translate.ProviderGroq, translate.ProviderOpencode, translate.ProviderOpenRouter)},
 		{key: "SUBS_SOURCE_PREF_RU", def: "en,ko"},
 		{key: "TRANSLATION_PROMPT", def: translate.DefaultTranslationPrompt},

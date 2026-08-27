@@ -255,7 +255,7 @@ function getEffectiveFallbackChain() {
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
   if (items.length > 0) return items;
-  return ['gemini', 'nvidia', 'groq', 'opencode', 'openrouter'];
+  return ['openrouter', 'opencode', 'nvidia', 'groq'];
 }
 
 function setEffectiveFallbackChain(chain) {

@@ -11,7 +11,7 @@ func TestBuildFallbackChain(t *testing.T) {
 		cfg  Config
 		want []string
 	}{
-		{Config{}, []string{ProviderGemini, ProviderNvidia, ProviderGroq, ProviderOpencode, ProviderOpenRouter}},
+		{Config{}, []string{ProviderOpenRouter, ProviderOpencode, ProviderNvidia, ProviderGroq}},
 		{Config{FallbackOrder: []string{"nvidia", "gemini", "groq", "opencode"}}, []string{"nvidia", "gemini", "groq", "opencode"}},
 		{Config{FallbackOrder: []string{"groq", "gemini"}}, []string{"groq", "gemini"}},
 		{Config{FallbackOrder: []string{"openrouter", "gemini", "garbage", "groq"}}, []string{"openrouter", "gemini", "groq"}},
