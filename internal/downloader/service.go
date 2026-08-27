@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,7 +23,7 @@ type ClipRequest struct {
 	End       string `json:"end,omitempty"`
 	SubsLang  string `json:"subs_lang,omitempty"`   // empty = no subs
 	SubsNoLLM bool   `json:"subs_no_llm,omitempty"` // translate via Google Translate only
-	Quality   int    `json:"quality,omitempty"`     // max height, default 1080
+	Quality   string `json:"quality,omitempty"`     // e.g. "720p", "720", "1080p"
 	HQ        bool   `json:"hq,omitempty"`          // up to 2K
 	GIF       bool   `json:"gif,omitempty"`         // drop audio track
 	Shorts    bool   `json:"shorts,omitempty"`      // download whole short, best quality
@@ -157,8 +158,8 @@ func (s *Service) SubmitWithCallbacks(ctx context.Context, req ClipRequest, cbs 
 	if err != nil {
 		return nil, err
 	}
-	if req.Quality == 0 && !req.HQ && !req.Shorts {
-		req.Quality = 1080
+	if req.Quality == "" && !req.HQ && !req.Shorts {
+		req.Quality = "1080p"
 	}
 
 	variant := variantSuffix(req)
@@ -394,8 +395,17 @@ func (s *Service) run(ctx context.Context, job *Job) {
 			if err := s.downloadSegment(ctx, job.Request, clipPath, cookieFile, startMs, endMs, meta.IsVertical(), func(p ProgressUpdate) {
 				s.reportProgress(job, p)
 			}); err != nil {
-				s.fail(job, "download failed: "+err.Error())
-				return
+				if errors.Is(err, ErrIncompleteStream) {
+					s.logger.Warn("incomplete stream detected, retrying download once", zap.String("job", job.ID), zap.Error(err))
+					_ = os.Remove(clipPath)
+					err = s.downloadSegment(ctx, job.Request, clipPath, cookieFile, startMs, endMs, meta.IsVertical(), func(p ProgressUpdate) {
+						s.reportProgress(job, p)
+					})
+				}
+				if err != nil {
+					s.fail(job, "download failed: "+err.Error())
+					return
+				}
 			}
 		}
 

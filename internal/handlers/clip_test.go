@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"gemfactory/internal/downloader"
 )
 
 func TestRenderStatusCard(t *testing.T) {
@@ -49,4 +51,16 @@ func TestRenderStatusCardWorking(t *testing.T) {
 		"<b>Download:</b> 50%"
 
 	require.Equal(t, expected, got, "renderStatusCard working mismatch")
+}
+
+func TestFormatMode(t *testing.T) {
+	require.Equal(t, "Clip", formatMode(downloader.ClipRequest{}))
+	require.Equal(t, "Clip (720p)", formatMode(downloader.ClipRequest{Quality: "720p"}))
+	require.Equal(t, "Clip (HQ 2K)", formatMode(downloader.ClipRequest{HQ: true}))
+	require.Equal(t, "GIF", formatMode(downloader.ClipRequest{GIF: true}))
+	require.Equal(t, "GIF (720p)", formatMode(downloader.ClipRequest{GIF: true, Quality: "720p"}))
+	require.Equal(t, "Subtitles (ru)", formatMode(downloader.ClipRequest{SubsLang: "ru"}))
+	require.Equal(t, "Subtitles (ru, 720p)", formatMode(downloader.ClipRequest{SubsLang: "ru", Quality: "720p"}))
+	require.Equal(t, "Subtitles (ru, HQ)", formatMode(downloader.ClipRequest{SubsLang: "ru", HQ: true}))
+	require.Equal(t, "MP3", formatMode(downloader.ClipRequest{AudioOnly: true}))
 }

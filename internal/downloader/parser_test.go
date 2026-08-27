@@ -45,6 +45,18 @@ func TestParseClipArgsSecondsMsAndFlags(t *testing.T) {
 	require.Equal(t, "872.40", p.Intervals[0].End, "intervals = %+v", p.Intervals)
 }
 
+func TestParseClipArgsQualityFlags(t *testing.T) {
+	for _, flag := range []string{"720p", "-720p", "-720", "720"} {
+		p, err := ParseClipArgs([]string{"https://youtu.be/DaLioUGhHZo", "0:10", "0:20", flag})
+		require.NoError(t, err, "flag %s", flag)
+		require.Equal(t, "720p", p.Quality, "flag %s", flag)
+	}
+
+	p, err := ParseClipArgs([]string{"https://youtu.be/DaLioUGhHZo", "-q", "720", "0:10", "0:20"})
+	require.NoError(t, err)
+	require.Equal(t, "720", p.Quality)
+}
+
 func TestParseClipArgsShorts(t *testing.T) {
 	p, err := ParseClipArgs([]string{"https://www.youtube.com/shorts/abc123XYZ_-"})
 	require.NoError(t, err)
@@ -184,4 +196,21 @@ func TestFormatHumanSize(t *testing.T) {
 	for _, c := range cases {
 		require.Equal(t, c.want, FormatHumanSize(c.in), "FormatHumanSize(%q)", c.in)
 	}
+}
+
+func TestVariantSuffixQuality(t *testing.T) {
+	req1080 := ClipRequest{Quality: "1080p"}
+	require.Equal(t, "", variantSuffix(req1080))
+
+	req720 := ClipRequest{Quality: "720p"}
+	require.Equal(t, "-720p", variantSuffix(req720))
+
+	req720Raw := ClipRequest{Quality: "720"}
+	require.Equal(t, "-720", variantSuffix(req720Raw))
+
+	req720Subs := ClipRequest{Quality: "720p", SubsLang: "ru"}
+	require.Equal(t, "-720p-ru", variantSuffix(req720Subs))
+
+	reqHQ := ClipRequest{HQ: true, Quality: "720p"}
+	require.Equal(t, "-hq", variantSuffix(reqHQ))
 }

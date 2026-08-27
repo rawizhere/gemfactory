@@ -37,6 +37,7 @@ type ParsedCommand struct {
 	URL       string
 	Intervals []TimeInterval
 	SubsLang  string // empty when not requested
+	Quality   string // e.g. "720p"
 	HQ        bool
 	Meta      bool
 	NoLLM     bool // translate subs via Google Translate only
@@ -50,17 +51,31 @@ func ParseClipArgs(args []string) (*ParsedCommand, error) {
 	var (
 		url             string
 		lang            string
+		quality         string
 		hq, meta, noLLM bool
 		rest            []string
 	)
 
-	for _, arg := range args {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		switch {
 		case strings.Contains(arg, "http"):
 			if url == "" {
 				url = strings.TrimSpace(arg)
 			}
 			// Extra URL-like tokens (e.g. Telegram link previews) are ignored.
+		case arg == "-q" || arg == "-quality":
+			if i+1 < len(args) {
+				next := strings.TrimSpace(args[i+1])
+				if next == "720" || next == "720p" || next == "1080" || next == "1080p" {
+					quality = next
+					i++
+					continue
+				}
+			}
+			rest = append(rest, arg)
+		case arg == "720p" || arg == "-720p" || arg == "720" || arg == "-720":
+			quality = "720p"
 		case commandFlags[arg]:
 			switch arg {
 			case "hq":
@@ -93,6 +108,7 @@ func ParseClipArgs(args []string) (*ParsedCommand, error) {
 			URL:       url,
 			Intervals: []TimeInterval{{Start: "", End: ""}},
 			SubsLang:  lang,
+			Quality:   quality,
 			HQ:        hq,
 			Meta:      meta,
 			NoLLM:     noLLM,
@@ -124,6 +140,7 @@ func ParseClipArgs(args []string) (*ParsedCommand, error) {
 		URL:       url,
 		Intervals: intervals,
 		SubsLang:  lang,
+		Quality:   quality,
 		HQ:        hq,
 		Meta:      meta,
 		NoLLM:     noLLM,

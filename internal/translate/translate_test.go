@@ -108,9 +108,9 @@ func TestStripMarkdownBold(t *testing.T) {
 func TestBuildSystemInstruction(t *testing.T) {
 	base := "rules"
 	require.Equal(t, base, BuildSystemInstruction(base, "en"), "want base without addendum")
-	ruInstruction := BuildSystemInstruction(base, "ru")
-	require.Contains(t, ruInstruction, ruAddendum, "ru instruction must include addendum")
-	require.Contains(t, ruInstruction, base, "ru instruction must include prompt")
+	require.Equal(t, base, BuildSystemInstruction(base, "ru"), "custom prompt must not append ruAddendum")
+	require.Equal(t, ruAddendum, BuildSystemInstruction("", "ru"), "empty prompt with ru target must use ruAddendum")
+	require.Equal(t, "", BuildSystemInstruction("", "en"), "empty prompt with non-ru target returns empty")
 }
 
 func TestSanitizeKeepsEmojiSequences(t *testing.T) {

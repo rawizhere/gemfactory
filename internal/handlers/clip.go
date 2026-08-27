@@ -69,25 +69,27 @@ func (h *ClipHandlers) Help(ctx context.Context, message *telego.Message) {
 		switch topic {
 		case "clip":
 			text = "<b>/clip</b> — Cut video clip\n\n" +
-				"<code>/clip &lt;url&gt; &lt;start&gt; &lt;end&gt; [hq]</code>\n\n" +
+				"<code>/clip &lt;url&gt; &lt;start&gt; &lt;end&gt; [720p] [hq]</code>\n\n" +
 				"• Timecodes: <code>SS.ms</code>, <code>MM:SS</code>, <code>MM:SS.ms</code>, <code>HH:MM:SS</code>\n" +
+				"• <code>720p</code> — Limit quality to 720p (smaller file size)\n" +
 				"• <code>hq</code> — Quality up to 2K, max " + fmt.Sprintf("%.0f", h.maxSeconds(ctx, true)) + "s\n" +
 				"• Standard quality — Up to " + fmt.Sprintf("%.0f", h.maxSeconds(ctx, false)/60) + " minutes per clip\n" +
 				"• An end beyond the video length means \"to the end\"\n" +
 				"• Direct links: Send YouTube Shorts or TikTok directly without commands\n" +
-				"Example: <code>/clip https://youtu.be/X56FLo6qslE 0:26 0:32</code>"
+				"Example: <code>/clip https://youtu.be/X56FLo6qslE 0:26 0:32 720p</code>"
 		case "gif":
 			text = "<b>/gif</b> — Cut clip without audio\n\n" +
-				"<code>/gif &lt;url&gt; &lt;start&gt; &lt;end&gt; [hq]</code>\n\n" +
+				"<code>/gif &lt;url&gt; &lt;start&gt; &lt;end&gt; [720p] [hq]</code>\n\n" +
 				"Same as /clip, but the audio track is removed.\n" +
 				"Example: <code>/gif https://youtu.be/dQw4w9WgXcQ 0:43 0:48</code>"
 		case "subs":
 			text = "<b>/subs</b> — Cut clip with burned-in subtitles\n\n" +
-				"<code>/subs &lt;url&gt; &lt;start&gt; &lt;end&gt; [...] [lang] [hq] [nollm]</code>\n\n" +
+				"<code>/subs &lt;url&gt; &lt;start&gt; &lt;end&gt; [...] [lang] [720p] [hq] [nollm]</code>\n\n" +
 				"• Multiple timecode pairs produce multiple clips in one command\n" +
 				"• Default language is en; auto-translated if not available\n" +
+				"• <code>720p</code> — Limit quality to 720p (smaller file size)\n" +
 				"• <code>nollm</code> — translate via Google Translate, skipping AI providers\n" +
-				"Example: <code>/subs https://youtu.be/r0u5URS3VXE 4:00 4:01 4:02 4:04 ru nollm</code>"
+				"Example: <code>/subs https://youtu.be/r0u5URS3VXE 4:00 4:01 4:02 4:04 ru 720p nollm</code>"
 		case "mp3":
 			text = "<b>/mp3</b> — Extract audio track from video\n\n" +
 				"<code>/mp3 &lt;url&gt; [start] [end]</code>\n\n" +
@@ -131,6 +133,7 @@ func (h *ClipHandlers) handleClipCommand(ctx context.Context, message *telego.Me
 			URL:       parsed.URL,
 			Start:     interval.Start,
 			End:       interval.End,
+			Quality:   parsed.Quality,
 			HQ:        parsed.HQ,
 			GIF:       parsed.GIF,
 			Shorts:    parsed.Shorts,
@@ -434,6 +437,10 @@ func progressBar(percent, length int) string {
 	return "[" + strings.Repeat("█", filled) + strings.Repeat("░", empty) + "]"
 }
 func formatMode(req downloader.ClipRequest) string {
+	qSuffix := ""
+	if req.Quality == "720p" || req.Quality == "720" {
+		qSuffix = " (720p)"
+	}
 	switch {
 	case req.AudioOnly:
 		return "MP3"
@@ -441,10 +448,16 @@ func formatMode(req downloader.ClipRequest) string {
 		if req.HQ {
 			return "GIF (HQ)"
 		}
+		if qSuffix != "" {
+			return "GIF" + qSuffix
+		}
 		return "GIF"
 	case req.SubsLang != "":
 		if req.HQ {
 			return fmt.Sprintf("Subtitles (%s, HQ)", req.SubsLang)
+		}
+		if qSuffix != "" {
+			return fmt.Sprintf("Subtitles (%s, 720p)", req.SubsLang)
 		}
 		return fmt.Sprintf("Subtitles (%s)", req.SubsLang)
 	case req.HQ:
@@ -452,6 +465,9 @@ func formatMode(req downloader.ClipRequest) string {
 	case req.Shorts:
 		return ""
 	default:
+		if qSuffix != "" {
+			return "Clip" + qSuffix
+		}
 		return "Clip"
 	}
 }

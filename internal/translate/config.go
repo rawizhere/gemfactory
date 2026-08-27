@@ -31,38 +31,38 @@ var DefaultNvidiaModels = []string{
 	"stepfun-ai/step-3.7-flash",
 }
 
-// DefaultOpenRouterModels is the free-model chain on OpenRouter.
+// DefaultOpenRouterModels is the fallback model chain on OpenRouter.
 var DefaultOpenRouterModels = []string{
+	"google/gemini-2.5-flash-lite",
+	"mistralai/mistral-small-24b-instruct-2501",
+	"meta-llama/llama-3.3-70b-instruct",
 	"minimax/minimax-m3:free",
-	"deepseek/deepseek-v4-flash-0731",
-	"nvidia/nemotron-3.5-lightning:free",
-	"dots-studio/dots-3-note-preview:free",
 }
 
 const translatorRole = "You are a professional video subtitle translator."
 
 const DefaultTranslationPrompt = `Translate subtitles for entertainment videos: variety shows, vlogs, livestreams, song lyrics. The source language varies — detect it from the lines themselves.
 1. Meaning over words: natural spoken register matching the original's energy; never wooden literalism or calques.
-2. Names: personal, stage and group names, fandoms and products are names — transliterate them by sound into the target script; if translating a token yields a common word, it is a name. Acronyms (MBTI, TMI, PPL) and stylized brand/model names stay in Latin script.
-3. Formatting: keep speaker tags ([ALL], Host:) and multi-speaker dash structure intact; translate bracketed notes naturally inside the brackets; preserve ♪, emojis, tildes, asterisks and Asian brackets.
-4. Song lyrics: translate the thought and rhythm, not word-by-word.
-5. Silently fix obvious ASR/speech-recognition errors from context.`
+2. Names: personal, stage and group names, fandoms and products are names — transliterate them by sound into the target script (YE-ON / YEEUN -> Йеон / Йеын, NAYEON -> Наён, WONYOUNG -> Вонён, CHAEWON -> Чэвон, YUJIN -> Юджин, JI-HYO -> Джихё, JAE-SUK -> Джэсок); if translating a token yields a common word, it is a name. Acronyms (MBTI, TMI, PPL) and stylized brand/model names stay in Latin script.
+3. Formatting: keep speaker tags ([ALL], Host:) intact. Preserve leading dashes for simultaneous speech of two speakers (- Реплика 1 - Реплика 2); never merge phrases of different speakers. Translate bracketed notes naturally inside the brackets; preserve ♪, emojis, tildes, asterisks and Asian brackets.
+4. Output rules: return numbered lines only. Do not use markdown code blocks (NO ` + "```" + `).
+5. Song lyrics: translate the thought and rhythm, not word-by-word.
+6. Silently fix obvious ASR/speech-recognition errors from context.`
 
 const ruAddendum = `For Russian: informal "ты", lively youth phrasing; transliterate Korean honorifics (онни, оппа, макнэ, хён); names transliterate by sound (Liv -> Лив, May -> Мэй), a common noun next to a name stays a common word (리브 미모 = красота Лив, not "Liv Mimo"); bracketed notes translate naturally ([Laughter] -> [Смех]).`
 
 // DefaultSourcePrefRU is the fallback source-language order for ru subtitles.
 const DefaultSourcePrefRU = "en,ko"
 
-// BuildSystemInstruction combines the configured prompt with target-language rules.
+// BuildSystemInstruction returns prompt or falls back to ruAddendum when prompt is empty.
 func BuildSystemInstruction(prompt, targetLang string) string {
-	s := prompt
-	if targetLang == "ru" {
-		if s != "" {
-			s += "\n"
-		}
-		s += ruAddendum
+	if prompt != "" {
+		return prompt
 	}
-	return s
+	if targetLang == "ru" {
+		return ruAddendum
+	}
+	return ""
 }
 
 // Config holds the provider fallback order, API keys, models, custom prompt and LLM request timeout.

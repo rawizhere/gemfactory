@@ -3,8 +3,10 @@ package downloader
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +19,8 @@ import (
 	ytdlp "github.com/lrstanley/go-ytdlp"
 	"go.uber.org/zap"
 )
+
+var ErrIncompleteStream = errors.New("incomplete stream: video duration is shorter than expected")
 
 var ytDlpProgressRe = regexp.MustCompile(`\[download\]\s+(\d+(?:\.\d+)?)%(?:\s+of\s+~?\s*([^\s]+))?(?:\s+at\s+([^\s]+))?(?:\s+ETA\s+([^\s]+))?`)
 var ffmpegSectionTimeRe = regexp.MustCompile(`time=(\d{2}:\d{2}:\d{2}(?:\.\d+)?)`)
@@ -59,7 +63,7 @@ func FormatHumanSize(raw string) string {
 
 // formatSelector picks the yt-dlp -f expression for the given quality tier.
 // Vertical videos are capped by width so their full height fits the tier.
-func formatSelector(maxHeight int, hq, shorts, audioOnly, vertical bool) string {
+func formatSelector(quality string, hq, shorts, audioOnly, vertical bool) string {
 	if audioOnly {
 		return "bestaudio/best"
 	}
@@ -72,9 +76,12 @@ func formatSelector(maxHeight int, hq, shorts, audioOnly, vertical bool) string 
 		return "bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
 	case hq:
 		return fmt.Sprintf("bestvideo[%s<=1440]+bestaudio/best[%s<=1440]", dim, dim)
+	case quality == "720p" || quality == "720":
+		return fmt.Sprintf("bestvideo[%s<=720]+bestaudio/best[%s<=720]", dim, dim)
 	default:
-		if maxHeight <= 0 {
-			maxHeight = 1080
+		maxHeight := 1080
+		if q, err := strconv.Atoi(strings.TrimSuffix(quality, "p")); err == nil && q > 0 {
+			maxHeight = q
 		}
 		return fmt.Sprintf("bestvideo[%s<=%d]+bestaudio/best[%s<=%d]", dim, maxHeight, dim, maxHeight)
 	}
@@ -269,15 +276,31 @@ func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookie
 		for _, probeExt := range []string{".mp4", ".mkv", ".webm", ".m4a", ".opus", ".mp3"} {
 			alt := baseOut + probeExt
 			if _, err := os.Stat(alt); err == nil {
-				return os.Rename(alt, outPath)
+				if renErr := os.Rename(alt, outPath); renErr != nil {
+					return fmt.Errorf("rename %s to %s: %w", alt, outPath, renErr)
+				}
+				break
 			}
 		}
-		return fmt.Errorf("segment output not found at %s: %s", outPath, truncate(errText, 500))
+		if _, err := os.Stat(outPath); err != nil {
+			return fmt.Errorf("segment output not found at %s: %s", outPath, truncate(errText, 500))
+		}
+	}
+
+	if withSections && expectedDurationMS > 0 && !req.AudioOnly {
+		videoDur, audioDur, err := probeStreamDurations(outPath)
+		if err == nil && videoDur > 0 {
+			expectedDurSec := expectedDurationMS / 1000.0
+			if expectedDurSec-videoDur > 2.0 || (expectedDurSec > 5.0 && audioDur > 0 && math.Abs(videoDur-audioDur) > 2.0) {
+				_ = os.Remove(outPath)
+				return fmt.Errorf("%w (video: %.2fs, audio: %.2fs, expected: %.2fs)", ErrIncompleteStream, videoDur, audioDur, expectedDurSec)
+			}
+		}
 	}
 	return nil
 }
 
-// variantSuffix builds "-mp3", "-hq", "-gif", "-ru" etc. so variants of one interval never collide.
+// variantSuffix builds "-mp3", "-hq", "-720p", "-gif", "-ru" etc. so variants of one interval never collide.
 func variantSuffix(req ClipRequest) string {
 	var parts []string
 	if req.AudioOnly {
@@ -285,6 +308,8 @@ func variantSuffix(req ClipRequest) string {
 	}
 	if req.HQ {
 		parts = append(parts, "hq")
+	} else if req.Quality != "" && req.Quality != "1080p" && req.Quality != "1080" {
+		parts = append(parts, sanitizeName(req.Quality))
 	}
 	if req.GIF {
 		parts = append(parts, "gif")
@@ -579,6 +604,45 @@ func probeMediaCodecs(filePath string) (vCodec, pixFmt, aCodec string) {
 		}
 	}
 	return vCodec, pixFmt, aCodec
+}
+
+func probeStreamDurations(filePath string) (videoDur, audioDur float64, err error) {
+	out, err := exec.Command("ffprobe", "-v", "error", "-show_entries", "stream=codec_type,duration:format=duration", "-of", "csv=p=0", filePath).Output()
+	if err != nil {
+		return 0, 0, err
+	}
+	var fmtDur float64
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for _, line := range lines {
+		parts := strings.Split(strings.TrimSpace(line), ",")
+		if len(parts) == 1 && parts[0] != "" {
+			if d, perr := strconv.ParseFloat(parts[0], 64); perr == nil && d > 0 {
+				fmtDur = d
+			}
+		} else if len(parts) >= 2 {
+			d, perr := strconv.ParseFloat(parts[1], 64)
+			if perr != nil || d <= 0 {
+				continue
+			}
+			switch parts[0] {
+			case "video":
+				if videoDur == 0 {
+					videoDur = d
+				}
+			case "audio":
+				if audioDur == 0 {
+					audioDur = d
+				}
+			}
+		}
+	}
+	if videoDur == 0 && fmtDur > 0 {
+		videoDur = fmtDur
+	}
+	if audioDur == 0 && fmtDur > 0 {
+		audioDur = fmtDur
+	}
+	return videoDur, audioDur, nil
 }
 
 func (s *Service) ExtractAudioMP3(ctx context.Context, inputPath, outMP3Path string, expectedDurationMS float64, onProgress func(ProgressUpdate)) error {
