@@ -35,12 +35,7 @@ func (h *Handlers) RegisterBotCommands() []telego.BotCommand {
 	return []telego.BotCommand{
 		{Command: "start", Description: "Start the bot"},
 		{Command: "help", Description: "Show help and command usage"},
-		{Command: "clip", Description: "Cut video clip"},
-		{Command: "gif", Description: "Cut video clip without audio"},
-		{Command: "subs", Description: "Cut clip with burned-in subtitles"},
-		{Command: "mp3", Description: "Extract audio track as MP3"},
 		{Command: "month", Description: "View releases for a month"},
-		{Command: "search", Description: "Search releases by artist"},
 		{Command: "artists", Description: "List tracked artists"},
 		{Command: "metrics", Description: "Show system metrics"},
 	}

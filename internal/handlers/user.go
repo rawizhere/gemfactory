@@ -23,12 +23,12 @@ func (h *UserHandlers) Start(ctx context.Context, message *telego.Message) {
 
 func (h *UserHandlers) Help(ctx context.Context, message *telego.Message) {
 	text := "<b>Commands:</b>\n\n" +
-		"/clip &lt;url&gt; &lt;start&gt; &lt;end&gt; [hq] - Cut video clip\n" +
-		"/gif &lt;url&gt; &lt;start&gt; &lt;end&gt; [hq] - Cut clip without audio\n" +
-		"/subs &lt;url&gt; &lt;start&gt; &lt;end&gt; [lang] [hq] - Cut clip with subtitles\n" +
-		"/mp3 &lt;url&gt; [start] [end] - Extract audio track\n" +
+		"<code>/clip</code> &lt;url&gt; &lt;start&gt; &lt;end&gt; [720p] [hq] - Cut video clip\n" +
+		"<code>/gif</code> &lt;url&gt; &lt;start&gt; &lt;end&gt; [720p] [hq] - Cut clip without audio\n" +
+		"<code>/subs</code> &lt;url&gt; &lt;start&gt; &lt;end&gt; [lang] [720p] [hq] [nollm] - Cut clip with subtitles\n" +
+		"<code>/mp3</code> &lt;url&gt; [start] [end] - Extract audio track\n" +
 		"/month [month] [year] [-f|-m] - Releases for a month\n" +
-		"/search &lt;artist&gt; - Search releases by artist\n" +
+		"<code>/search</code> &lt;artist&gt; - Search releases by artist\n" +
 		"/artists - List tracked artists\n" +
 		"/metrics - Show system metrics\n" +
 		"\nDirect links: Send TikTok or YouTube Shorts directly.\n" +
