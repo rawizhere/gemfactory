@@ -18,14 +18,17 @@ const (
 
 // DefaultOpencodeModels is the free-model fallback chain on OpenCode Zen.
 var DefaultOpencodeModels = []string{
-	"x-preview-f-free",
-	"nemotron-3-ultra-free",
-	"big-pickle",
+	"laguna-s-2.1-free",
+	"nemotron-3.5-lightning-free",
+	"hy3-free",
 }
 
 // DefaultNvidiaModels is the free-model chain on NVIDIA NIM.
 var DefaultNvidiaModels = []string{
 	"minimaxai/minimax-m3",
+	"openai/gpt-oss-120b",
+	"meta/muse-glimmer-30b",
+	"stepfun-ai/step-3.7-flash",
 }
 
 // DefaultOpenRouterModels is the free-model chain on OpenRouter.
