@@ -62,6 +62,8 @@ const state = {
   system: [],
   advancedRows: [],
   active: 'downloads',
+  selectedProvider: 'gemini',
+  brokenKeys: {},
 };
 
 function entryOf(key) {
@@ -238,13 +240,6 @@ function renderStorageCard(root) {
   loadStorageUsage();
 }
 
-let testResultEl = null;
-
-// Test-translation model picker state: null = probe the full fallback chain.
-let selectedTestModel = null;
-let modelPickerCache = null;
-let modelPickerOutsideBound = false;
-
 function collectProviderOverrides() {
   const overrides = {};
   PROVIDERS.forEach((p) => {
@@ -256,181 +251,51 @@ function collectProviderOverrides() {
   return overrides;
 }
 
-// Aggregates model catalogs across every LLM provider into a flat
-// [{provider, model}] list used by the test-translation model picker.
-async function loadAllModels() {
-  if (modelPickerCache) return modelPickerCache;
-  const items = [];
-  await Promise.all(PROVIDERS.map(async (p) => {
-    try {
-      const data = await api('GET', `/api/translation/models?provider=${encodeURIComponent(p.id)}`);
-      const models = Array.isArray(data) ? data : (data && data.models) ? data.models : [];
-      models.forEach((m) => { if (m.id) items.push({ provider: p.id, model: m.id }); });
-    } catch (_) {
-      // Skip providers whose catalog is unavailable right now.
-    }
-  }));
-  modelPickerCache = { items };
-  return modelPickerCache;
+function getProvider(id) {
+  return PROVIDERS.find((p) => p.id === id) || { id, label: id, keyPlaceholder: 'API key' };
 }
 
-function renderModelPickerList(filter, status, list, btn, panel) {
-  return loadAllModels().then(({ items }) => {
-    list.textContent = '';
-    const q = filter.trim().toLowerCase();
-    const matches = (it) =>
-      !q || `${it.provider}/${it.model}`.toLowerCase().includes(q) ||
-      it.provider.toLowerCase().includes(q) || it.model.toLowerCase().includes(q);
-    const filtered = items.filter(matches);
-
-    const addItem = (label, value, highlight) => {
-      const li = el('li', {
-        class: 'model-picker-item' + (selectedTestModel === value ? ' selected' : ''),
-      }, highlight ? el('span', { class: 'prov' }, '★ ') : null);
-      li.appendChild(el('span', { class: 'mid' }, label));
-      li.addEventListener('click', (e) => {
-        e.stopPropagation();
-        selectedTestModel = value || null;
-        btn.textContent = selectedTestModel || 'Any model (test full chain)';
-        panel.hidden = true;
-      });
-      list.appendChild(li);
-    };
-
-    addItem('Any model (test full chain)', '', true);
-    if (!filtered.length) {
-      list.appendChild(el('li', { class: 'model-picker-empty' }, 'No models match your filter'));
-    }
-    filtered.forEach((it) => addItem(`${it.provider}/${it.model}`, `${it.provider}/${it.model}`, false));
-    status.textContent = filtered.length
-      ? `${filtered.length} model${filtered.length === 1 ? '' : 's'} across ${new Set(filtered.map((x) => x.provider)).size} providers`
-      : 'No matches';
-  });
+function getEffectiveFallbackChain() {
+  const raw = effectiveValue('TRANSLATION_FALLBACK_ORDER');
+  const items = (raw || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (items.length > 0) return items;
+  return ['gemini', 'nvidia', 'groq', 'opencode', 'openrouter'];
 }
 
-function buildModelPicker() {
-  const wrap = el('div', { class: 'model-picker', id: 'translation-model-picker' });
-  const btn = el('button', {
-    class: 'btn btn-ghost btn-sm model-picker-btn',
-    type: 'button',
-    id: 'translation-model-btn',
-  }, selectedTestModel || 'Any model (test full chain)');
-  const panel = el('div', { class: 'model-picker-panel', id: 'translation-model-panel', hidden: true });
-  const search = el('input', {
-    type: 'text',
-    class: 'model-picker-search',
-    placeholder: 'Filter by provider or model…',
-    autocomplete: 'off',
-  });
-  const list = el('ul', { class: 'model-picker-list', id: 'translation-model-list' });
-  const status = el('div', { class: 'model-picker-status' }, 'Loading models…');
-  panel.appendChild(search);
-  panel.appendChild(list);
-  panel.appendChild(status);
-  wrap.appendChild(btn);
-  wrap.appendChild(panel);
-
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const open = panel.hidden;
-    panel.hidden = !open;
-    if (open) {
-      search.focus();
-      if (!list.childElementCount) renderModelPickerList(search.value, status, list, btn, panel);
-    }
-  });
-
-  search.addEventListener('input', () => renderModelPickerList(search.value, status, list, btn, panel));
-
-  if (!modelPickerOutsideBound) {
-    modelPickerOutsideBound = true;
-    document.addEventListener('click', (e) => {
-      const p = document.getElementById('translation-model-panel');
-      const b = document.getElementById('translation-model-btn');
-      if (p && !p.hidden && b && !b.contains(e.target) && !p.contains(e.target)) p.hidden = true;
-    });
-  }
-
-  return wrap;
+function setEffectiveFallbackChain(chain) {
+  const val = chain.join(',');
+  state.edited.set('TRANSLATION_FALLBACK_ORDER', val);
+  updateSaveBar();
 }
 
-async function testTranslation() {
-  const btn = $('#translation-test-btn');
-  const input = $('#translation-test-input');
-  const text = input && input.value.trim() ? input.value.trim() : '리브 미모 난리도 아니야';
-
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = 'Testing...';
+function getProviderModelIds(providerId) {
+  const key = providerId.toUpperCase() + '_MODELS';
+  const val = effectiveValue(key);
+  if (val !== undefined && val !== null && String(val).trim() !== '') {
+    return String(val).split(',').map((s) => s.trim()).filter(Boolean);
   }
-  if (testResultEl) {
-    testResultEl.textContent = selectedTestModel
-      ? `Testing ${selectedTestModel}…`
-      : 'Probing fallback chain...';
-    testResultEl.style.color = '';
+  const def = entryOf(key).default;
+  if (def) {
+    return String(def).split(',').map((s) => s.trim()).filter(Boolean);
   }
-
-  const appendRow = (e) => {
-    if (!testResultEl) return;
-    const row = document.createElement('div');
-    row.style.marginBottom = '0.35rem';
-    row.style.wordBreak = 'break-word';
-    const name = e.provider === 'google' ? 'Google Translate' : `${e.provider}/${e.model || '?'}`;
-    if (e.ok) {
-      row.style.color = '#4caf50';
-      row.textContent = `${name}: ${e.result ?? ''}`;
-    } else {
-      row.style.color = '#f44336';
-      row.textContent = `${name}: FAIL — ${e.error ?? 'unknown error'}${e.result ? ` | Raw: ${e.result}` : ''}`;
-    }
-    testResultEl.appendChild(row);
-  };
-
-  try {
-    const res = await fetch('/api/translation/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, target_lang: 'ru', model: selectedTestModel || '', ...collectProviderOverrides() }),
-    });
-    if (!res.ok) throw new Error((await res.text()) || res.statusText);
-    if (testResultEl) testResultEl.textContent = '';
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let idx;
-      while ((idx = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, idx).trim();
-        buffer = buffer.slice(idx + 1);
-        if (!line) continue;
-        const event = JSON.parse(line);
-        if (event.type === 'result') appendRow(event);
-        if (event.type === 'done' && !event.success && testResultEl && !testResultEl.hasChildNodes()) {
-          testResultEl.textContent = 'No provider succeeded';
-          testResultEl.style.color = '#f44336';
-        }
-      }
-    }
-  } catch (err) {
-    if (testResultEl) {
-      testResultEl.textContent = `Error: ${err.message}`;
-      testResultEl.style.color = '#f44336';
-    }
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Test Translation';
-    }
-  }
+  return [];
 }
 
-// ---------------------------------------------------------------------------
-// Provider model catalog and fallback-chain drag & drop
-// ---------------------------------------------------------------------------
+function setProviderModelIds(providerId, models) {
+  const key = providerId.toUpperCase() + '_MODELS';
+  state.edited.set(key, models.join(','));
+  updateSaveBar();
+}
+
+function getProviderStatus(providerId) {
+  const key = effectiveValue(providerId.toUpperCase() + '_API_KEY');
+  if (!key) return 'none';
+  if (state.brokenKeys && state.brokenKeys[providerId]) return 'broken';
+  return 'ok';
+}
 
 function fmtContext(n) {
   const v = typeof n === 'string' ? parseInt(n, 10) : n;
@@ -452,24 +317,6 @@ function availabilityInfo(avail) {
   }
 }
 
-// Rank from availabilityInfo: ok first, then warn, dead, unknown last.
-function availabilityRank(avail) {
-  switch (availabilityInfo(avail).cls) {
-    case 'ok': return 0;
-    case 'warn': return 1;
-    case 'dead': return 2;
-    default: return 3;
-  }
-}
-
-// Stable sort: group by status rank, preserve original order within a group.
-function sortCatalogByStatus(models) {
-  return models
-    .map((m, i) => ({ m, i }))
-    .sort((a, b) => availabilityRank(a.m.status) - availabilityRank(b.m.status) || a.i - b.i)
-    .map((x) => x.m);
-}
-
 function getDragAfter(container, selector, y) {
   const els = [...container.querySelectorAll(selector + ':not(.dragging)')];
   let closest = { offset: -Infinity, element: null };
@@ -481,379 +328,682 @@ function getDragAfter(container, selector, y) {
   return closest.element;
 }
 
-function findModelsInput(providerId) {
-  return document.getElementById('model-input-' + providerId);
+function showAddProviderDialog(onAdded) {
+  const chain = getEffectiveFallbackChain();
+  const available = PROVIDERS.filter((p) => !chain.includes(p.id));
+  const options = available.length ? available : PROVIDERS;
+
+  const dlg = el('dialog', { class: 'add-provider-dialog' });
+  const title = el('h3', { style: 'margin:0 0 0.85rem; font-size:1rem; font-weight:600;' }, 'Add Provider to Chain');
+  const form = el('form', { class: 'add-provider-form', method: 'dialog' });
+
+  const provLabel = el('label', null, 'Provider');
+  const provSelect = el('select', { style: 'width:100%' });
+  options.forEach((p) => {
+    provSelect.appendChild(el('option', { value: p.id }, p.label));
+  });
+  provLabel.appendChild(provSelect);
+
+  const keyLabel = el('label', null, 'API Key (optional)');
+  const keyInput = el('input', {
+    type: 'text',
+    placeholder: getProvider(provSelect.value).keyPlaceholder,
+    style: 'width:100%; font-family:monospace;',
+  });
+  keyLabel.appendChild(keyInput);
+
+  provSelect.addEventListener('change', () => {
+    keyInput.placeholder = getProvider(provSelect.value).keyPlaceholder;
+  });
+
+  const actions = el('div', { class: 'add-provider-actions' });
+  const cancelBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Cancel');
+  const addBtn = el('button', { class: 'btn btn-primary btn-sm', type: 'submit' }, 'Add Provider');
+
+  cancelBtn.addEventListener('click', () => dlg.close());
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const pid = provSelect.value;
+    const keyVal = keyInput.value.trim();
+    if (keyVal) {
+      state.edited.set(pid.toUpperCase() + '_API_KEY', keyVal);
+    }
+    const curChain = getEffectiveFallbackChain();
+    if (!curChain.includes(pid)) {
+      curChain.push(pid);
+      setEffectiveFallbackChain(curChain);
+    }
+    state.selectedProvider = pid;
+    dlg.close();
+    toast(`Added ${getProvider(pid).label} to fallback chain`, 'success');
+    if (onAdded) onAdded();
+  });
+
+  actions.appendChild(cancelBtn);
+  actions.appendChild(addBtn);
+  form.appendChild(provLabel);
+  form.appendChild(keyLabel);
+  form.appendChild(actions);
+
+  dlg.appendChild(title);
+  dlg.appendChild(form);
+  dlg.addEventListener('close', () => dlg.remove());
+  document.body.appendChild(dlg);
+  dlg.showModal();
 }
 
-// Tracks a model id being dragged from the provider catalog into a chain.
-let draggedCatalogModel = null;
-
-function renderModelChain(providerId) {
-  const ul = document.getElementById('model-chain-' + providerId);
-  if (!ul) return;
-  const key = providerId.toUpperCase() + '_MODELS';
-  const ids = (effectiveValue(key) || '').split(',').map((s) => s.trim()).filter(Boolean);
-  ul.textContent = '';
-  if (!ids.length) {
-    ul.appendChild(el('li', { class: 'model-chain-empty' }, 'No models yet — use + in the catalog below.'));
-    return;
+async function runChainTest(text, timeline, btn) {
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Testing...';
   }
-  ids.forEach((id) => ul.appendChild(modelChainItem(providerId, id)));
-}
+  timeline.textContent = '';
 
-function modelChainItem(providerId, id) {
-  const li = el('li', { class: 'model-chain-item', draggable: 'true', 'data-model': id });
-  li.appendChild(el('span', { class: 'drag-handle' }, '\u280F'));
-  li.appendChild(el('span', { class: 'model-id' }, id));
-  const rm = el('button', { class: 'model-remove', type: 'button', title: 'Remove from chain' }, '\u00D7');
-  rm.addEventListener('click', () => removeModelFromChain(providerId, id));
-  li.appendChild(rm);
-  li.addEventListener('dragstart', (e) => {
-    if (e.target.closest('.model-remove')) { e.preventDefault(); return; }
-    li.classList.add('dragging');
-    e.dataTransfer.effectAllowed = 'move';
-    try { e.dataTransfer.setData('text/plain', id); } catch (_) {}
-  });
-  li.addEventListener('dragend', () => {
-    li.classList.remove('dragging');
-    commitModelOrder(providerId);
-  });
-  return li;
-}
+  const sample = text.trim() || '대박! 오늘 무대 진짜 레전드였어!';
+  const startTime = performance.now();
 
-function commitModelOrder(providerId) {
-  const ul = document.getElementById('model-chain-' + providerId);
-  if (!ul) return;
-  const key = providerId.toUpperCase() + '_MODELS';
-  const ids = [...ul.querySelectorAll('.model-chain-item')].map((li) => li.dataset.model);
-  state.edited.set(key, ids.join(','));
-  const input = findModelsInput(providerId);
-  if (input && input.value !== ids.join(',')) input.value = ids.join(',');
-  updateSaveBar();
-}
-
-function removeModelFromChain(providerId, id) {
-  const key = providerId.toUpperCase() + '_MODELS';
-  const ids = (effectiveValue(key) || '').split(',').map((s) => s.trim()).filter(Boolean).filter((x) => x !== id);
-  state.edited.set(key, ids.join(','));
-  const input = findModelsInput(providerId);
-  if (input) input.value = ids.join(',');
-  updateSaveBar();
-  renderModelChain(providerId);
-}
-
-function addModelToChain(providerId, id) {
-  const key = providerId.toUpperCase() + '_MODELS';
-  const ids = (effectiveValue(key) || '').split(',').map((s) => s.trim()).filter(Boolean);
-  if (ids.includes(id)) { toast(`${id} is already in the ${providerId} chain`, 'info'); return; }
-  ids.push(id);
-  state.edited.set(key, ids.join(','));
-  const input = findModelsInput(providerId);
-  if (input) input.value = ids.join(',');
-  updateSaveBar();
-  renderModelChain(providerId);
-  toast(`Added ${id} to ${providerId} chain`, 'success');
-}
-
-// Insert a catalog model into the chain at the drop position (before beforeId, or at the end).
-function insertModelIntoChain(providerId, modelId, beforeId) {
-  const key = providerId.toUpperCase() + '_MODELS';
-  const ids = (effectiveValue(key) || '').split(',').map((s) => s.trim()).filter(Boolean);
-  const existed = ids.includes(modelId);
-  if (existed) ids.splice(ids.indexOf(modelId), 1);
-  let pos = beforeId == null ? ids.length : ids.indexOf(beforeId);
-  if (pos < 0) pos = ids.length;
-  ids.splice(pos, 0, modelId);
-  state.edited.set(key, ids.join(','));
-  const input = findModelsInput(providerId);
-  if (input) input.value = ids.join(',');
-  updateSaveBar();
-  renderModelChain(providerId);
-  toast(`${existed ? 'Moved' : 'Added'} ${modelId} ${existed ? 'in' : 'to'} ${providerId} chain`, 'success');
-}
-
-function catalogRow(providerId, m) {
-  const tr = el('tr', { draggable: 'true' });
-  const tdModel = el('td');
-  tdModel.appendChild(el('span', { class: 'drag-handle', title: 'Drag into the chain' }, '⠏'));
-  tdModel.appendChild(el('code', { class: 'mono' }, m.id || '—'));
-  if (m.reasoning) tdModel.appendChild(el('span', { class: 'tag tag-reason' }, 'reasoning'));
-  tr.appendChild(tdModel);
-  tr.appendChild(el('td', null, m.free ? el('span', { class: 'free-badge' }, 'Free') : ''));
-  tr.appendChild(el('td', null, fmtContext(m.context_length)));
-  const info = availabilityInfo(m.status);
-  tr.appendChild(el('td', null, el('span', { class: `status-badge status-${info.cls}` }, info.label)));
-  const tdAct = el('td', { style: 'text-align:right; white-space:nowrap;' });
-  const add = el('button', { class: 'btn btn-ghost btn-sm', type: 'button', title: 'Add to chain' }, '+');
-  add.addEventListener('click', () => addModelToChain(providerId, m.id));
-  tdAct.appendChild(add);
-  tr.appendChild(tdAct);
-  tr.addEventListener('dragstart', (e) => {
-    if (e.target.closest('.btn')) { e.preventDefault(); return; }
-    draggedCatalogModel = { id: m.id, provider: providerId };
-    tr.classList.add('dragging');
-    e.dataTransfer.effectAllowed = 'copy';
-    try { e.dataTransfer.setData('text/plain', m.id); } catch (_) {}
-  });
-  tr.addEventListener('dragend', () => {
-    tr.classList.remove('dragging');
-    draggedCatalogModel = null;
-    const ph = document.querySelector('.model-chain-placeholder');
-    if (ph) ph.remove();
-    renderModelChain(providerId);
-  });
-  return tr;
-}
-
-const catalogExpanded = new Set();
-
-function renderCatalogTable(providerId, box, models) {
-  box.textContent = '';
-  const sorted = sortCatalogByStatus(models);
-  if (!sorted.length) {
-    box.appendChild(el('p', { class: 'empty' }, 'No models returned by the provider catalog.'));
-    return;
-  }
-  const sorted = sortCatalogByStatus(models);
-  const free = sorted.filter((m) => m.free);
-  const paid = sorted.filter((m) => !m.free);
-  const expanded = catalogExpanded.has(providerId);
-  const visible = expanded ? sorted : free;
-
-  if (!visible.length) {
-    box.appendChild(el('p', { class: 'empty' }, 'No models returned by the provider catalog.'));
-  } else {
-    const table = el('table', { class: 'catalog-table' });
-    const thead = el('thead');
-    const hr = el('tr');
-    ['Model', 'Free', 'Context', 'Status', ''].forEach((h) => hr.appendChild(el('th', null, h)));
-    thead.appendChild(hr);
-    table.appendChild(thead);
-    const tbody = el('tbody');
-    visible.forEach((m) => tbody.appendChild(catalogRow(providerId, m)));
-    table.appendChild(tbody);
-    box.appendChild(tableWrap(table));
-  }
-
-  if (paid.length) {
-    const label = expanded ? 'Show less' : `Show more (${paid.length})`;
-    const more = el('button', { class: 'btn btn-ghost btn-sm catalog-more', type: 'button' }, label);
-    more.addEventListener('click', () => {
-      if (expanded) catalogExpanded.delete(providerId);
-      else catalogExpanded.add(providerId);
-      renderCatalogTable(providerId, box, models);
+  try {
+    const res = await fetch('/api/translation/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: sample,
+        target_lang: 'ru',
+        ...collectProviderOverrides(),
+      }),
     });
-    box.appendChild(more);
-  }
-}
+    if (!res.ok) throw new Error((await res.text()) || res.statusText);
 
-async function loadModelCatalog(providerId, box, status, refresh) {
-  try {
-    const url = `/api/translation/models?provider=${encodeURIComponent(providerId)}${refresh ? '&refresh=true' : ''}`;
-    const data = await api('GET', url);
-    const models = Array.isArray(data) ? data : (data && data.models) ? data.models : [];
-    renderCatalogTable(providerId, box, models);
-    if (status) { status.textContent = `${models.length} models`; status.className = 'catalog-status ok'; }
-  } catch (err) {
-    box.textContent = '';
-    box.appendChild(el('p', { class: 'empty' }, `Model catalog unavailable: ${err.message}`));
-    if (status) { status.textContent = 'unavailable'; status.className = 'catalog-status err'; }
-  }
-}
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let stepIndex = 0;
 
-async function checkModels(providerId, box, status) {
-  if (status) { status.textContent = 'Checking\u2026'; status.className = 'catalog-status'; }
-  try {
-    const data = await api('GET', `/api/translation/models?provider=${encodeURIComponent(providerId)}&refresh=true`);
-    const models = Array.isArray(data) ? data : (data && data.models) ? data.models : [];
-    let ids = models.filter((m) => m.free).map((m) => m.id);
-    if (!ids.length) {
-      const key = providerId.toUpperCase() + '_MODELS';
-      ids = (effectiveValue(key) || '').split(',').map((s) => s.trim()).filter(Boolean);
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, idx).trim();
+        buffer = buffer.slice(idx + 1);
+        if (!line) continue;
+        const event = JSON.parse(line);
+        if (event.type === 'result') {
+          stepIndex++;
+          const latency = Math.round(performance.now() - startTime);
+          const stepEl = el('div', { class: `timeline-step ${event.ok ? 'ok' : 'err'}` });
+
+          const head = el('div', { class: 'timeline-step-head' });
+          const provLabel = PROVIDERS.find((p) => p.id === event.provider)?.label || event.provider;
+          const modelLabel = event.model ? `${provLabel} / ${event.model}` : provLabel;
+
+          const title = el('span', { class: 'timeline-step-title' }, [
+            el('strong', null, `#${stepIndex}`),
+            el('span', null, modelLabel),
+          ]);
+
+          const meta = el('span', { class: 'timeline-step-meta' }, [
+            el('span', { class: 'timeline-latency' }, `${latency}ms`),
+            el('span', { class: `timeline-status-badge ${event.ok ? 'ok' : 'err'}` }, event.ok ? 'OK' : 'FAIL'),
+          ]);
+
+          head.appendChild(title);
+          head.appendChild(meta);
+          stepEl.appendChild(head);
+
+          const body = el('div', { class: 'timeline-step-body' },
+            event.ok
+              ? (event.result || 'Empty result')
+              : (event.error || 'Unknown error') + (event.result ? ` (Raw: ${event.result})` : '')
+          );
+          stepEl.appendChild(body);
+          timeline.appendChild(stepEl);
+        } else if (event.type === 'done' && !event.success && !timeline.hasChildNodes()) {
+          const emptyStep = el('div', { class: 'timeline-step err' }, [
+            el('div', { class: 'timeline-step-head' }, [
+              el('span', { class: 'timeline-step-title' }, 'Pipeline execution completed'),
+              el('span', { class: 'timeline-status-badge err' }, 'FAIL'),
+            ]),
+            el('div', { class: 'timeline-step-body' }, 'No provider in the fallback chain succeeded.'),
+          ]);
+          timeline.appendChild(emptyStep);
+        }
+      }
     }
-    if (!ids.length) {
-      toast('No models to check for this provider', 'info');
-      if (status) { status.textContent = 'no models'; status.className = 'catalog-status'; }
-      return;
-    }
-    await api('POST', '/api/translation/models/check', { provider: providerId, models: ids });
-    await loadModelCatalog(providerId, box, status, true);
   } catch (err) {
-    toast(`Check failed: ${err.message}`, 'error');
-    if (status) { status.textContent = 'check failed'; status.className = 'catalog-status err'; }
+    const errStep = el('div', { class: 'timeline-step err' }, [
+      el('div', { class: 'timeline-step-head' }, [
+        el('span', { class: 'timeline-step-title' }, 'Test Error'),
+        el('span', { class: 'timeline-status-badge err' }, 'FAIL'),
+      ]),
+      el('div', { class: 'timeline-step-body' }, err.message),
+    ]);
+    timeline.appendChild(errStep);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Test Chain';
+    }
   }
 }
 
-function setupProviderDrag(card, handle) {
-  handle.addEventListener('mousedown', () => { card.draggable = true; });
-  handle.addEventListener('mouseup', () => { card.draggable = false; });
-  card.addEventListener('dragstart', (e) => {
-    card.classList.add('dragging');
-    e.dataTransfer.effectAllowed = 'move';
-    try { e.dataTransfer.setData('text/plain', card.dataset.provider); } catch (_) {}
-  });
-  card.addEventListener('dragend', () => {
-    card.classList.remove('dragging');
-    card.draggable = false;
-    commitProviderOrder();
-  });
-}
+function renderPipelineMaster(masterContainer, refresh) {
+  masterContainer.textContent = '';
 
-function commitProviderOrder() {
-  const host = document.getElementById('providers-chain');
-  if (!host) return;
-  const ids = [...host.querySelectorAll('.provider-card')].map((c) => c.dataset.provider);
-  const order = ids.join(',');
-  state.edited.set('TRANSLATION_FALLBACK_ORDER', order);
-  syncFieldInput('TRANSLATION_FALLBACK_ORDER', order);
-  updateProviderOrderBadges();
-  updateSaveBar();
-}
+  const chain = getEffectiveFallbackChain();
 
-function syncFieldInput(key, value) {
-  const input = document.querySelector(`#settings-body [data-key="${key}"]`);
-  if (input && input.value !== value) input.value = value;
-}
+  const card = el('div', { class: 'pipeline-card' });
+  const head = el('div', { class: 'pipeline-card-header' });
+  head.appendChild(el('h3', null, 'Provider Fallback Chain'));
 
-function updateProviderOrderBadges() {
-  const host = document.getElementById('providers-chain');
-  if (!host) return;
-  [...host.querySelectorAll('.provider-card')].forEach((card, i) => {
-    const ord = document.querySelector(`[data-provider-order="${card.dataset.provider}"]`);
-    if (ord) ord.value = String(i + 1);
-  });
-}
-
-function buildProviderCard(p) {
-  const card = el('div', { class: 'provider-card', 'data-provider': p.id });
-
-  const head = el('div', { class: 'provider-card-head' });
-  const handle = el('span', { class: 'drag-handle', title: 'Drag to reorder providers' }, '\u280F');
-  head.appendChild(handle);
-  head.appendChild(el('span', { class: 'provider-name' }, p.label));
-  const ordInput = el('input', { class: 'provider-order', type: 'text', readonly: 'readonly', 'data-provider-order': p.id, 'aria-label': 'Fallback chain position' });
-  head.appendChild(ordInput);
+  const addBtn = el('button', { class: 'btn btn-primary btn-sm', type: 'button' }, '+ Add Provider');
+  addBtn.addEventListener('click', () => showAddProviderDialog(refresh));
+  head.appendChild(addBtn);
   card.appendChild(head);
 
-  const apiRow = fieldRow(
-    FIELD(p.id.toUpperCase() + '_API_KEY', 'API Key', 'password'),
-    { placeholder: p.keyPlaceholder, toggle: true });
-  const modelsRow = fieldRow(FIELD(p.id.toUpperCase() + '_MODELS', 'Models Fallback Chain', 'text', { mono: true }));
-  const modelsInput = modelsRow.querySelector('input');
-  modelsInput.id = 'model-input-' + p.id;
-  modelsInput.addEventListener('input', () => renderModelChain(p.id));
-  card.appendChild(fieldsTable([apiRow, modelsRow]));
+  const list = el('div', { class: 'pipeline-prov-list' });
 
-  const chainWrap = el('div', { class: 'model-chain-wrap' });
-  chainWrap.appendChild(el('div', { class: 'subhead' }, 'Chain order — drag to reorder'));
-  const ul = el('ul', { class: 'model-chain', id: 'model-chain-' + p.id, 'data-provider': p.id });
-  ul.addEventListener('dragover', (e) => {
-    const reordering = ul.querySelector('.model-chain-item.dragging');
-    if (reordering) {
-      e.preventDefault();
-      const after = getDragAfter(ul, '.model-chain-item', e.clientY);
-      if (after == null) ul.appendChild(reordering);
-      else ul.insertBefore(reordering, after);
+  list.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    const dragging = list.querySelector('.pipeline-prov-item.dragging');
+    if (!dragging) return;
+    const after = getDragAfter(list, '.pipeline-prov-item', e.clientY);
+    if (after == null) list.appendChild(dragging);
+    else list.insertBefore(dragging, after);
+  });
+
+  list.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const ids = [...list.querySelectorAll('.pipeline-prov-item')].map((node) => node.dataset.provider);
+    setEffectiveFallbackChain(ids);
+    refresh();
+  });
+
+  chain.forEach((pId, i) => {
+    const p = getProvider(pId);
+    const status = getProviderStatus(pId);
+    const modelCount = getProviderModelIds(pId).length;
+
+    const item = el('div', {
+      class: `pipeline-prov-item${pId === state.selectedProvider ? ' active' : ''}`,
+      'data-provider': pId,
+      draggable: 'true',
+    });
+
+    const handle = el('span', { class: 'drag-handle', title: 'Drag to reorder' }, '⠿');
+    const dot = el('span', { class: `status-dot ${status}`, title: status === 'ok' ? 'Configured' : (status === 'broken' ? 'Key rejected' : 'No API key') });
+    const name = el('span', { class: 'pipeline-prov-name' }, p.label);
+    const badge = el('span', { class: 'pipeline-prov-badge' }, `${modelCount} model${modelCount === 1 ? '' : 's'}`);
+
+    const orderBtns = el('div', { class: 'pipeline-order-btns' });
+    const btnUp = el('button', { class: 'btn-icon', type: 'button', title: 'Move up' }, '↑');
+    const btnDown = el('button', { class: 'btn-icon', type: 'button', title: 'Move down' }, '↓');
+
+    if (i === 0) btnUp.disabled = true;
+    if (i === chain.length - 1) btnDown.disabled = true;
+
+    btnUp.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (i > 0) {
+        const next = [...chain];
+        [next[i - 1], next[i]] = [next[i], next[i - 1]];
+        setEffectiveFallbackChain(next);
+        refresh();
+      }
+    });
+
+    btnDown.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (i < chain.length - 1) {
+        const next = [...chain];
+        [next[i], next[i + 1]] = [next[i + 1], next[i]];
+        setEffectiveFallbackChain(next);
+        refresh();
+      }
+    });
+
+    item.addEventListener('dragstart', (e) => {
+      if (e.target.closest('.btn-icon')) { e.preventDefault(); return; }
+      item.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', pId); } catch (_) {}
+    });
+
+    item.addEventListener('dragend', () => {
+      item.classList.remove('dragging');
+      const ids = [...list.querySelectorAll('.pipeline-prov-item')].map((node) => node.dataset.provider);
+      setEffectiveFallbackChain(ids);
+      refresh();
+    });
+
+    item.addEventListener('click', () => {
+      state.selectedProvider = pId;
+      refresh();
+    });
+
+    orderBtns.appendChild(btnUp);
+    orderBtns.appendChild(btnDown);
+
+    item.appendChild(handle);
+    item.appendChild(dot);
+    item.appendChild(name);
+    item.appendChild(badge);
+    item.appendChild(orderBtns);
+
+    list.appendChild(item);
+  });
+
+  card.appendChild(list);
+  masterContainer.appendChild(card);
+
+  const testCard = el('div', { class: 'pipeline-test-card' });
+  const testHead = el('div', { class: 'pipeline-card-header' });
+  testHead.appendChild(el('h3', null, 'Test Fallback Chain'));
+  testCard.appendChild(testHead);
+
+  const testForm = el('div', { class: 'pipeline-test-form' });
+  const testRow = el('div', { class: 'pipeline-test-row' });
+  const testInput = el('input', {
+    type: 'text',
+    class: 'pipeline-test-input',
+    id: 'translation-test-input',
+    placeholder: 'Enter text to test fallback chain...',
+    value: '대박! 오늘 무대 진짜 레전드였어!',
+  });
+  const testBtn = el('button', {
+    class: 'btn btn-ghost btn-sm',
+    type: 'button',
+    id: 'translation-test-btn',
+  }, 'Test Chain');
+
+  testRow.appendChild(testInput);
+  testRow.appendChild(testBtn);
+  testForm.appendChild(testRow);
+
+  const timeline = el('div', { class: 'chain-timeline', id: 'translation-timeline' });
+  testForm.appendChild(timeline);
+  testCard.appendChild(testForm);
+
+  testBtn.addEventListener('click', () => runChainTest(testInput.value, timeline, testBtn));
+
+  masterContainer.appendChild(testCard);
+}
+
+const catalogCache = new Map();
+
+function renderPipelineDetail(detailContainer, refresh) {
+  detailContainer.textContent = '';
+
+  const chain = getEffectiveFallbackChain();
+  const pid = state.selectedProvider;
+  if (!pid || !chain.includes(pid)) {
+    if (chain.length > 0) {
+      state.selectedProvider = chain[0];
+      return renderPipelineDetail(detailContainer, refresh);
+    }
+    const emptyCard = el('div', { class: 'pipeline-detail-card' }, [
+      el('p', { class: 'empty' }, 'No providers in the fallback chain. Click "+ Add Provider" on the left to add one.')
+    ]);
+    detailContainer.appendChild(emptyCard);
+    return;
+  }
+
+  const p = getProvider(pid);
+  const status = getProviderStatus(pid);
+
+  const card = el('div', { class: 'pipeline-detail-card' });
+
+  const head = el('div', { class: 'pipeline-detail-head' });
+  const titleWrap = el('div', { class: 'pipeline-detail-title-wrap' });
+  titleWrap.appendChild(el('h3', { class: 'pipeline-detail-title' }, p.label));
+
+  let statusBadge;
+  if (status === 'ok') {
+    statusBadge = el('span', { class: 'badge on' }, 'Configured');
+  } else if (status === 'broken') {
+    statusBadge = el('span', { class: 'badge expired' }, 'Key Broken');
+  } else {
+    statusBadge = el('span', { class: 'badge' }, 'No Key');
+  }
+  titleWrap.appendChild(statusBadge);
+  head.appendChild(titleWrap);
+
+  const removeBtn = el('button', { class: 'btn btn-danger btn-sm', type: 'button' }, 'Remove from Chain');
+  removeBtn.addEventListener('click', () => {
+    const next = chain.filter((x) => x !== pid);
+    setEffectiveFallbackChain(next);
+    state.selectedProvider = next[0] || null;
+    toast(`Removed ${p.label} from fallback chain`, 'info');
+    refresh();
+  });
+  head.appendChild(removeBtn);
+  card.appendChild(head);
+
+  const keySection = el('div', { class: 'pipeline-key-section' });
+  keySection.appendChild(el('div', { class: 'pipeline-section-title' }, 'API Key'));
+  keySection.appendChild(el('div', { class: 'pipeline-section-desc' }, `Secret authentication key for ${p.label}`));
+
+  const keyRow = el('div', { class: 'pipeline-key-row' });
+  const keyInput = el('input', {
+    type: 'password',
+    placeholder: p.keyPlaceholder,
+    value: effectiveValue(pid.toUpperCase() + '_API_KEY'),
+    autocomplete: 'off',
+  });
+
+  const showBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Show');
+  showBtn.addEventListener('click', () => {
+    const isPass = keyInput.type === 'password';
+    keyInput.type = isPass ? 'text' : 'password';
+    showBtn.textContent = isPass ? 'Hide' : 'Show';
+  });
+
+  const checkBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Check Key');
+  checkBtn.addEventListener('click', async () => {
+    checkBtn.disabled = true;
+    checkBtn.textContent = 'Checking...';
+    try {
+      await api('GET', `/api/translation/models?provider=${encodeURIComponent(pid)}&refresh=true`);
+      state.brokenKeys[pid] = false;
+      toast(`API key for ${p.label} is valid`, 'success');
+    } catch (err) {
+      state.brokenKeys[pid] = true;
+      toast(`Key check failed: ${err.message}`, 'error');
+    } finally {
+      checkBtn.disabled = false;
+      checkBtn.textContent = 'Check Key';
+      refresh();
+    }
+  });
+
+  keyInput.addEventListener('input', () => {
+    state.edited.set(pid.toUpperCase() + '_API_KEY', keyInput.value);
+    delete state.brokenKeys[pid];
+    updateSaveBar();
+  });
+
+  keyRow.appendChild(keyInput);
+  keyRow.appendChild(showBtn);
+  keyRow.appendChild(checkBtn);
+  keySection.appendChild(keyRow);
+  card.appendChild(keySection);
+
+  const modelsSection = el('div', { class: 'pipeline-models-section' });
+  const modelsHead = el('div', { class: 'model-chain-header' });
+  const modelsTitleWrap = el('div');
+  modelsTitleWrap.appendChild(el('div', { class: 'pipeline-section-title' }, 'Active Models Chain'));
+  modelsTitleWrap.appendChild(el('div', { class: 'pipeline-section-desc', style: 'margin:0' }, 'Models are attempted sequentially until one succeeds'));
+  modelsHead.appendChild(modelsTitleWrap);
+
+  const popoverWrap = el('div', { class: 'model-chain-popover-wrap' });
+  const addModelBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, '+ Add Model');
+  popoverWrap.appendChild(addModelBtn);
+
+  const popover = el('div', { class: 'model-search-popover', hidden: true });
+  const searchInput = el('input', {
+    type: 'text',
+    class: 'model-search-input',
+    placeholder: 'Search models...',
+    autocomplete: 'off',
+  });
+  const filterRow = el('div', { class: 'model-filter-row' });
+  const freeLabel = el('label', { style: 'display:flex; align-items:center; gap:0.35rem; cursor:pointer;' });
+  const freeCb = el('input', { type: 'checkbox' });
+  freeLabel.appendChild(freeCb);
+  freeLabel.appendChild(document.createTextNode('Free only'));
+  const statusLabel = el('span', null, 'Loading...');
+  filterRow.appendChild(freeLabel);
+  filterRow.appendChild(statusLabel);
+
+  const catalogList = el('ul', { class: 'model-catalog-list' });
+  popover.appendChild(searchInput);
+  popover.appendChild(filterRow);
+  popover.appendChild(catalogList);
+  popoverWrap.appendChild(popover);
+
+  const updatePopoverList = (catalog) => {
+    catalogList.textContent = '';
+    const q = searchInput.value.trim().toLowerCase();
+    const freeOnly = freeCb.checked;
+    const activeIds = getProviderModelIds(pid);
+
+    const filtered = catalog.filter((m) => {
+      if (freeOnly && !m.free) return false;
+      if (q && !m.id.toLowerCase().includes(q)) return false;
+      return true;
+    });
+
+    statusLabel.textContent = `${filtered.length} model${filtered.length === 1 ? '' : 's'}`;
+
+    if (!filtered.length) {
+      catalogList.appendChild(el('li', { class: 'empty', style: 'padding:1rem 0; font-size:0.8rem;' }, 'No models match filter'));
       return;
     }
-    if (draggedCatalogModel && draggedCatalogModel.provider === providerId) {
-      e.preventDefault();
-      const empty = ul.querySelector('.model-chain-empty');
-      if (empty) empty.remove();
-      const after = getDragAfter(ul, '.model-chain-item', e.clientY);
-      let ph = ul.querySelector('.model-chain-placeholder');
-      if (!ph) ph = el('li', { class: 'model-chain-placeholder' });
-      if (after == null) ul.appendChild(ph);
-      else ul.insertBefore(ph, after);
+
+    filtered.forEach((m) => {
+      const inChain = activeIds.includes(m.id);
+      const row = el('li', { class: 'model-catalog-item' });
+      const main = el('div', { class: 'model-catalog-item-main' });
+      main.appendChild(el('span', { class: 'model-catalog-item-id' }, m.id));
+
+      const meta = el('div', { class: 'model-catalog-item-meta' });
+      if (m.free) meta.appendChild(el('span', { class: 'free-badge' }, 'Free'));
+      if (m.context_length) meta.appendChild(el('span', { style: 'color:var(--muted)' }, fmtContext(m.context_length)));
+      const info = availabilityInfo(m.status);
+      meta.appendChild(el('span', { class: `status-badge status-${info.cls}` }, info.label));
+      main.appendChild(meta);
+      row.appendChild(main);
+
+      if (inChain) {
+        row.appendChild(el('span', { class: 'badge on', style: 'font-size:0.68rem;' }, 'Added'));
+      } else {
+        const add = el('button', { class: 'btn btn-ghost btn-sm', type: 'button', style: 'padding:0.1rem 0.4rem; font-size:0.75rem;' }, '+ Add');
+        add.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const current = getProviderModelIds(pid);
+          if (!current.includes(m.id)) {
+            current.push(m.id);
+            setProviderModelIds(pid, current);
+            toast(`Added ${m.id} to ${p.label} chain`, 'success');
+            refresh();
+          }
+        });
+        row.appendChild(add);
+      }
+
+      row.addEventListener('click', () => {
+        const current = getProviderModelIds(pid);
+        if (!current.includes(m.id)) {
+          current.push(m.id);
+          setProviderModelIds(pid, current);
+          toast(`Added ${m.id} to ${p.label} chain`, 'success');
+          refresh();
+        }
+      });
+
+      catalogList.appendChild(row);
+    });
+  };
+
+  const loadCatalog = async () => {
+    statusLabel.textContent = 'Loading models...';
+    try {
+      let catalog = catalogCache.get(pid);
+      if (!catalog) {
+        const data = await api('GET', `/api/translation/models?provider=${encodeURIComponent(pid)}`);
+        catalog = Array.isArray(data) ? data : (data && data.models) ? data.models : [];
+        catalogCache.set(pid, catalog);
+      }
+      updatePopoverList(catalog);
+    } catch (err) {
+      catalogList.textContent = '';
+      catalogList.appendChild(el('li', { class: 'empty', style: 'padding:1rem 0; font-size:0.8rem;' }, `Error loading models: ${err.message}`));
+      statusLabel.textContent = 'Error';
+    }
+  };
+
+  addModelBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = popover.hidden;
+    popover.hidden = !open;
+    if (open) {
+      searchInput.value = '';
+      freeCb.checked = false;
+      searchInput.focus();
+      loadCatalog();
     }
   });
-  ul.addEventListener('drop', (e) => {
-    const reordering = ul.querySelector('.model-chain-item.dragging');
-    if (reordering) { e.preventDefault(); return; }
-    if (!draggedCatalogModel || draggedCatalogModel.provider !== providerId) return;
-    e.preventDefault();
-    const modelId = draggedCatalogModel.id;
-    const after = getDragAfter(ul, '.model-chain-item', e.clientY);
-    const ph = ul.querySelector('.model-chain-placeholder');
-    if (ph) ph.remove();
-    insertModelIntoChain(providerId, modelId, after ? after.dataset.model : null);
-    draggedCatalogModel = null;
+
+  searchInput.addEventListener('input', () => {
+    const catalog = catalogCache.get(pid) || [];
+    updatePopoverList(catalog);
   });
-  chainWrap.appendChild(ul);
-  card.appendChild(chainWrap);
-  renderModelChain(p.id);
 
-  const catWrap = el('div', { class: 'model-catalog-wrap' });
-  const toolbar = el('div', { class: 'catalog-toolbar' });
-  const refreshBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Refresh');
-  const checkBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Check availability');
-  const status = el('span', { class: 'catalog-status' });
-  toolbar.appendChild(refreshBtn);
-  toolbar.appendChild(checkBtn);
-  toolbar.appendChild(status);
-  catWrap.appendChild(toolbar);
-  const catBox = el('div', { class: 'catalog-box', id: 'catalog-' + p.id });
-  catWrap.appendChild(catBox);
-  card.appendChild(catWrap);
+  freeCb.addEventListener('change', () => {
+    const catalog = catalogCache.get(pid) || [];
+    updatePopoverList(catalog);
+  });
 
-  refreshBtn.addEventListener('click', () => loadModelCatalog(p.id, catBox, status, true));
-  checkBtn.addEventListener('click', () => checkModels(p.id, catBox, status));
-  loadModelCatalog(p.id, catBox, status, false);
+  document.addEventListener('click', (e) => {
+    if (!popover.hidden && !popoverWrap.contains(e.target)) {
+      popover.hidden = true;
+    }
+  });
 
-  setupProviderDrag(card, handle);
-  return card;
+  modelsHead.appendChild(popoverWrap);
+  modelsSection.appendChild(modelsHead);
+
+  const ul = el('ul', { class: 'model-chain' });
+  const modelIds = getProviderModelIds(pid);
+
+  if (!modelIds.length) {
+    ul.appendChild(el('li', { class: 'model-chain-empty' }, 'No active models in chain. Click "+ Add Model" above.'));
+  } else {
+    modelIds.forEach((mId, idx) => {
+      const li = el('li', { class: 'model-chain-item', draggable: 'true', 'data-model': mId });
+      li.appendChild(el('span', { class: 'drag-handle', title: 'Drag to reorder' }, '⠿'));
+      li.appendChild(el('span', { class: 'model-id' }, mId));
+
+      const btns = el('div', { class: 'pipeline-order-btns' });
+      const btnUp = el('button', { class: 'btn-icon', type: 'button', title: 'Move up' }, '↑');
+      const btnDown = el('button', { class: 'btn-icon', type: 'button', title: 'Move down' }, '↓');
+      const btnRm = el('button', { class: 'btn-icon btn-remove', type: 'button', title: 'Remove model' }, '×');
+
+      if (idx === 0) btnUp.disabled = true;
+      if (idx === modelIds.length - 1) btnDown.disabled = true;
+
+      btnUp.addEventListener('click', () => {
+        if (idx > 0) {
+          const next = [...modelIds];
+          [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+          setProviderModelIds(pid, next);
+          refresh();
+        }
+      });
+
+      btnDown.addEventListener('click', () => {
+        if (idx < modelIds.length - 1) {
+          const next = [...modelIds];
+          [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+          setProviderModelIds(pid, next);
+          refresh();
+        }
+      });
+
+      btnRm.addEventListener('click', () => {
+        const next = modelIds.filter((x) => x !== mId);
+        setProviderModelIds(pid, next);
+        toast(`Removed ${mId}`, 'info');
+        refresh();
+      });
+
+      btns.appendChild(btnUp);
+      btns.appendChild(btnDown);
+      btns.appendChild(btnRm);
+      li.appendChild(btns);
+
+      li.addEventListener('dragstart', (e) => {
+        if (e.target.closest('.btn-icon')) { e.preventDefault(); return; }
+        li.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', mId); } catch (_) {}
+      });
+
+      li.addEventListener('dragend', () => {
+        li.classList.remove('dragging');
+        const ids = [...ul.querySelectorAll('.model-chain-item')].map((node) => node.dataset.model);
+        setProviderModelIds(pid, ids);
+        refresh();
+      });
+
+      ul.appendChild(li);
+    });
+
+    ul.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      const dragging = ul.querySelector('.model-chain-item.dragging');
+      if (!dragging) return;
+      const after = getDragAfter(ul, '.model-chain-item', e.clientY);
+      if (after == null) ul.appendChild(dragging);
+      else ul.insertBefore(dragging, after);
+    });
+
+    ul.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const ids = [...ul.querySelectorAll('.model-chain-item')].map((node) => node.dataset.model);
+      setProviderModelIds(pid, ids);
+      refresh();
+    });
+  }
+
+  modelsSection.appendChild(ul);
+  card.appendChild(modelsSection);
+
+  detailContainer.appendChild(card);
 }
 
 function renderProvidersSection(root) {
-  // Sort providers by the effective fallback chain, unknown ones go last.
-  const chain = (effectiveValue('TRANSLATION_FALLBACK_ORDER') || '')
-    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-  const ordered = [...PROVIDERS].sort((a, b) => {
-    const ia = chain.indexOf(a.id); const ib = chain.indexOf(b.id);
-    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  root.textContent = '';
+
+  const chain = getEffectiveFallbackChain();
+  if (!state.selectedProvider || !chain.includes(state.selectedProvider)) {
+    state.selectedProvider = chain[0] || 'gemini';
+  }
+
+  const pipeline = el('div', { class: 'pipeline-layout' });
+  const master = el('div', { class: 'pipeline-master' });
+  const detail = el('div', { class: 'pipeline-detail' });
+
+  const refresh = () => {
+    renderPipelineMaster(master, refresh);
+    renderPipelineDetail(detail, refresh);
+  };
+
+  renderPipelineMaster(master, refresh);
+  renderPipelineDetail(detail, refresh);
+
+  pipeline.appendChild(master);
+  pipeline.appendChild(detail);
+  root.appendChild(pipeline);
+
+  const promptCard = el('div', { class: 'pipeline-prompt-card' });
+  const promptTitle = el('h3', { class: 'pipeline-section-title' }, 'AI Translation System Prompt');
+  const promptDesc = el('div', { class: 'pipeline-section-desc' }, 'Instructions and guidelines passed to all LLM translation providers.');
+  const promptArea = el('textarea', {
+    rows: 6,
+    style: 'width:100%; font-family:monospace; font-size:0.82rem; line-height:1.4; resize:vertical; padding:0.6rem;',
+    placeholder: 'Enter translation system prompt...',
   });
-
-  const chainHost = el('div', { class: 'prov-chain', id: 'providers-chain' });
-  chainHost.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    const dragging = chainHost.querySelector('.provider-card.dragging');
-    if (!dragging) return;
-    const after = getDragAfter(chainHost, '.provider-card', e.clientY);
-    if (after == null) chainHost.appendChild(dragging);
-    else chainHost.insertBefore(dragging, after);
+  promptArea.value = effectiveValue('TRANSLATION_PROMPT');
+  promptArea.addEventListener('input', () => {
+    state.edited.set('TRANSLATION_PROMPT', promptArea.value);
+    updateSaveBar();
   });
-  chainHost.addEventListener('drop', (e) => e.preventDefault());
-  ordered.forEach((p, i) => {
-    const card = buildProviderCard(p);
-    const ord = card.querySelector('[data-provider-order]');
-    if (ord) ord.value = String(i + 1);
-    chainHost.appendChild(card);
-  });
-  root.appendChild(chainHost);
-
-  // Prompt shapes LLM output for every provider.
-  const promptRows = [
-    el('tr', { class: 'prov-head' }, el('td', { colspan: '3' }, 'Prompt')),
-    fieldRow(FIELD('TRANSLATION_PROMPT', 'AI Translation System Prompt', 'textarea', { rows: 6 })),
-  ];
-  root.appendChild(fieldsTable(promptRows));
-
-  const pickerRow = el('div', { class: 'settings-row' });
-  pickerRow.appendChild(el('label', { class: 'field-label', for: 'translation-model-btn' }, 'Test model'));
-  pickerRow.appendChild(buildModelPicker());
-  pickerRow.appendChild(el('span', { class: 'hint', style: 'margin:0' }, 'Pick one model, or leave as “Any” to probe the whole chain'));
-  root.appendChild(pickerRow);
-
-  const row = el('div', { class: 'settings-row' });
-  const input = el('input', { type: 'text', id: 'translation-test-input', placeholder: 'Test text...', style: 'flex:1; font-size:0.85rem;' });
-  const tbtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button', id: 'translation-test-btn' }, 'Test Translation');
-  tbtn.addEventListener('click', testTranslation);
-  row.appendChild(input);
-  row.appendChild(tbtn);
-  root.appendChild(row);
-
-  testResultEl = el('div', { style: 'font-size:0.85rem; color:var(--muted); word-break:break-word;' });
-  root.appendChild(testResultEl);
+  promptCard.appendChild(promptTitle);
+  promptCard.appendChild(promptDesc);
+  promptCard.appendChild(promptArea);
+  root.appendChild(promptCard);
 }
 
 // ---------------------------------------------------------------------------
@@ -1003,13 +1153,17 @@ function renderSubtabs() {
 
 export async function loadConfig() {
   try {
-    const [data, configRows] = await Promise.all([
+    const [data, configRows, transConfig] = await Promise.all([
       api('GET', '/api/settings'),
       api('GET', '/api/config').catch(() => []),
+      api('GET', '/api/translation?health=1').catch(() => null),
     ]);
     state.entries = new Map(data.settings.map((e) => [e.key, e]));
     state.system = data.system || [];
     state.advancedRows = configRows.filter((c) => c.source === 'db');
+    if (transConfig && transConfig.broken_keys) {
+      state.brokenKeys = transConfig.broken_keys;
+    }
     if (state.active === 'advanced' && !state.advancedRows.length) {
       state.active = SECTIONS[0].id;
     }
@@ -1044,6 +1198,6 @@ export function initSettings() {
     renderSectionBody(state.active);
   });
   window.addEventListener('mouseup', () => {
-    document.querySelectorAll('.provider-card[draggable="true"]').forEach((c) => { c.draggable = false; });
+    document.querySelectorAll('.pipeline-prov-item[draggable="true"], .model-chain-item[draggable="true"]').forEach((c) => { c.draggable = false; });
   });
 }

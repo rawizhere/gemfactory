@@ -18,7 +18,7 @@ func TestGetTranslationConfigBrokenKeys(t *testing.T) {
 	require.Equal(t, 200, rec.Code)
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.NotContains(t, resp, "broken_keys")
+	require.Nil(t, resp["broken_keys"])
 
 	recHealth := httptest.NewRecorder()
 	reqHealth := httptest.NewRequest("GET", "/api/translation?health=1", nil)
@@ -26,6 +26,5 @@ func TestGetTranslationConfigBrokenKeys(t *testing.T) {
 	require.Equal(t, 200, recHealth.Code)
 	var respHealth map[string]any
 	require.NoError(t, json.Unmarshal(recHealth.Body.Bytes(), &respHealth))
-	_, ok := respHealth["broken_keys"]
-	require.True(t, ok)
+	require.NotNil(t, respHealth["broken_keys"])
 }

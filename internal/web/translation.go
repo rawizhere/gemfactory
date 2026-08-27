@@ -21,7 +21,7 @@ type translationConfigResponse struct {
 	OpencodeMasked          string          `json:"opencode_masked"`
 	NvidiaMasked            string          `json:"nvidia_masked"`
 	OpenRouterMasked        string          `json:"openrouter_masked"`
-	BrokenKeys              map[string]bool `json:"broken_keys,omitempty"`
+	BrokenKeys              map[string]bool `json:"broken_keys"`
 	GeminiModels            string          `json:"gemini_models"`
 	GroqModels              string          `json:"groq_models"`
 	OpencodeModels          string          `json:"opencode_models"`
