@@ -15,6 +15,7 @@ type Handlers struct {
 	User  *UserHandlers
 	Admin *AdminHandlers
 	Clip  *ClipHandlers
+	Grok  *GrokHandlers
 }
 
 func New(services *service.Services, config *config.Config, keyboard *keyboard.Manager, logger *zap.Logger, tg *telegram.Client, downloads *downloader.Service) *Handlers {
@@ -23,11 +24,13 @@ func New(services *service.Services, config *config.Config, keyboard *keyboard.M
 	user := NewUserHandlers(base)
 	admin := NewAdminHandlers(base)
 	clip := NewClipHandlers(base, downloads, user)
+	grok := NewGrokHandlers(base)
 
 	return &Handlers{
 		User:  user,
 		Admin: admin,
 		Clip:  clip,
+		Grok:  grok,
 	}
 }
 

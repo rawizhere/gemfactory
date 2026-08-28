@@ -566,3 +566,162 @@ func parseNumberedLines(raw string, expectedCount int) ([]string, error) {
 
 	return nil, fmt.Errorf("translated line count mismatch: expected %d, got %d numbered lines", expectedCount, foundCount)
 }
+
+// Complete walks the fallback chain for a free-form chat completion.
+func Complete(ctx context.Context, systemPrompt, userMsg string, cfg Config) (string, string, error) {
+	chain := BuildFallbackChain(cfg)
+	var lastErr error
+	for _, provider := range chain {
+		switch provider {
+		case ProviderOpenRouter:
+			if cfg.OpenRouterKey == "" {
+				continue
+			}
+			text, model, err := completeOpenAICompatible(ctx, ProviderOpenRouter, openRouterBaseURL, cfg.OpenRouterKey, cfg.OpenRouterModels, systemPrompt, userMsg, cfg.Timeout)
+			if err == nil && strings.TrimSpace(text) != "" {
+				return text, ProviderOpenRouter + "/" + model, nil
+			}
+			lastErr = err
+
+		case ProviderOpencode:
+			if cfg.OpencodeKey == "" {
+				continue
+			}
+			text, model, err := completeOpenAICompatible(ctx, ProviderOpencode, opencodeBaseURL, cfg.OpencodeKey, cfg.OpencodeModels, systemPrompt, userMsg, cfg.Timeout)
+			if err == nil && strings.TrimSpace(text) != "" {
+				return text, ProviderOpencode + "/" + model, nil
+			}
+			lastErr = err
+
+		case ProviderNvidia:
+			if cfg.NvidiaKey == "" {
+				continue
+			}
+			text, model, err := completeOpenAICompatible(ctx, ProviderNvidia, nvidiaBaseURL, cfg.NvidiaKey, cfg.NvidiaModels, systemPrompt, userMsg, cfg.Timeout)
+			if err == nil && strings.TrimSpace(text) != "" {
+				return text, ProviderNvidia + "/" + model, nil
+			}
+			lastErr = err
+
+		case ProviderGroq:
+			if cfg.GroqKey == "" {
+				continue
+			}
+			text, model, err := completeOpenAICompatible(ctx, ProviderGroq, groqBaseURL, cfg.GroqKey, cfg.GroqModels, systemPrompt, userMsg, cfg.Timeout)
+			if err == nil && strings.TrimSpace(text) != "" {
+				return text, ProviderGroq + "/" + model, nil
+			}
+			lastErr = err
+
+		case ProviderGemini:
+			if cfg.GeminiKey == "" {
+				continue
+			}
+			text, model, err := completeGemini(ctx, cfg.GeminiKey, cfg.GeminiModels, systemPrompt, userMsg, cfg.Timeout)
+			if err == nil && strings.TrimSpace(text) != "" {
+				return text, ProviderGemini + "/" + model, nil
+			}
+			lastErr = err
+		}
+	}
+	if lastErr != nil {
+		return "", "", lastErr
+	}
+	return "", "", fmt.Errorf("all LLM providers failed or unconfigured")
+}
+
+func completeOpenAICompatible(ctx context.Context, provider, baseURL, apiKey string, models []string, systemPrompt, userMsg string, timeout time.Duration) (string, string, error) {
+	cfg := openai.DefaultConfig(apiKey)
+	cfg.BaseURL = baseURL
+	cfg.HTTPClient = &http.Client{Timeout: requestTimeout(timeout)}
+	client := openai.NewClientWithConfig(cfg)
+
+	var lastErr error
+	for _, model := range models {
+		req := openai.ChatCompletionRequest{
+			Model: model,
+			Messages: []openai.ChatCompletionMessage{
+				{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
+				{Role: openai.ChatMessageRoleUser, Content: userMsg},
+			},
+			Temperature: 0.7,
+		}
+		if isReasoningModel(model) {
+			req.ReasoningEffort = "low"
+		}
+		if kwargs := reasoningDisableKwargs(provider, model); kwargs != nil {
+			req.ChatTemplateKwargs = kwargs
+		}
+
+		resp, err := createChatCompletionWithRetry(ctx, client, req)
+		if err != nil {
+			lastErr = fmt.Errorf("%s (%s): %w", provider, model, err)
+			continue
+		}
+
+		if len(resp.Choices) > 0 {
+			out := strings.TrimSpace(thinkTagRe.ReplaceAllString(resp.Choices[0].Message.Content, ""))
+			if out != "" {
+				return out, model, nil
+			}
+		}
+		lastErr = fmt.Errorf("%s (%s): empty response", provider, model)
+	}
+	return "", "", lastErr
+}
+
+func completeGemini(ctx context.Context, apiKey string, models []string, systemPrompt, userMsg string, timeout time.Duration) (string, string, error) {
+	geminiModels := firstModels([]([]string){models}, DefaultGeminiModels)
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey:     apiKey,
+		Backend:    genai.BackendGeminiAPI,
+		HTTPClient: &http.Client{Timeout: requestTimeout(timeout)},
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("gemini client: %w", err)
+	}
+
+	temp := float32(0.7)
+	var lastErr error
+	for _, model := range geminiModels {
+		withSafety, withThinking := true, true
+		for attempt := 0; attempt < 3; attempt++ {
+			config := &genai.GenerateContentConfig{
+				SystemInstruction: &genai.Content{
+					Parts: []*genai.Part{genai.NewPartFromText(systemPrompt)},
+				},
+				Temperature: &temp,
+			}
+			if withThinking {
+				budget := int32(0)
+				config.ThinkingConfig = &genai.ThinkingConfig{ThinkingBudget: &budget}
+			}
+			if withSafety {
+				config.SafetySettings = geminiSafetySettings()
+			}
+
+			resp, cerr := client.Models.GenerateContent(ctx, model, genai.Text(userMsg), config)
+			if cerr != nil {
+				lastErr = fmt.Errorf("gemini (%s): %w", model, cerr)
+				code, _ := geminiAPIErrorDetails(cerr)
+				switch {
+				case code == http.StatusBadRequest && withThinking:
+					withThinking = false
+					continue
+				case code == http.StatusBadRequest && withSafety:
+					withSafety = false
+					continue
+				}
+				break
+			}
+
+			out := strings.TrimSpace(thinkTagRe.ReplaceAllString(resp.Text(), ""))
+			if out != "" {
+				return out, model, nil
+			}
+			lastErr = fmt.Errorf("empty response from gemini (%s)", model)
+			break
+		}
+	}
+	return "", "", lastErr
+}
