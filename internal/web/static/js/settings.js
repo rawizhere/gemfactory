@@ -33,6 +33,16 @@ const SECTIONS = [
       FIELD('CLIP_AUDIO_BITRATE', 'Audio Bitrate', 'select', { options: [['128k', '128k'], ['192k', '192k'], ['256k', '256k'], ['320k', '320k']], hint: 'AAC audio encoding bitrate' }),
     ],
   },
+  {
+    id: 'grok',
+    title: 'Grok Factchecker',
+    fields: [
+      FIELD('GROK_ENABLED', 'Enable @grok factchecker', 'bool', { hint: 'Enable @grok factchecking via Grok' }),
+      FIELD('GROK_RATE_LIMIT', 'Rate Limit (requests per min)', 'number', { min: 1, max: 1000, unit: 'req/min', hint: 'Maximum allowed Grok calls per minute' }),
+      FIELD('GROK_MAX_CHARS', 'Max Target Text Length (chars)', 'number', { min: 100, max: 50000, unit: 'chars', hint: 'Max input character length for verification' }),
+    ],
+    extra: 'grok',
+  },
   { id: 'translation', title: 'Translation', extra: 'translation' },
   { id: 'advanced', title: 'Advanced', extra: 'advanced' },
   { id: 'system', title: 'System Info', extra: 'system' },
@@ -1183,6 +1193,41 @@ function renderSystemSection(root) {
 // Page assembly, load and save
 // ---------------------------------------------------------------------------
 
+function renderGrokPrompt(root) {
+  const details = el('details', { class: 'pipeline-prompt-details' });
+  const summary = el('summary', { class: 'pipeline-prompt-summary' }, 'Grok System Prompt');
+  const body = el('div', { class: 'pipeline-prompt-body' });
+  const desc = el('div', { class: 'pipeline-section-desc' }, 'Instructions and guidelines passed to Grok factchecker.');
+  const promptArea = el('textarea', {
+    rows: 6,
+    class: 'pipeline-prompt-textarea',
+    placeholder: 'Enter Grok system prompt (leave empty for default)...',
+  });
+  promptArea.value = effectiveValue('GROK_PROMPT');
+  promptArea.addEventListener('input', () => {
+    state.edited.set('GROK_PROMPT', promptArea.value);
+    updateSaveBar();
+  });
+
+  const actions = el('div', { style: 'display:flex; justify-content:flex-end; margin-top:0.5rem;' });
+  const resetBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Reset to Default');
+  resetBtn.addEventListener('click', () => {
+    const def = entryOf('GROK_PROMPT').default || '';
+    promptArea.value = def;
+    state.edited.set('GROK_PROMPT', def);
+    updateSaveBar();
+    toast('Prompt reset to default', 'info');
+  });
+  actions.appendChild(resetBtn);
+
+  body.appendChild(desc);
+  body.appendChild(promptArea);
+  body.appendChild(actions);
+  details.appendChild(summary);
+  details.appendChild(body);
+  root.appendChild(details);
+}
+
 function renderSectionBody(sectionId) {
   const body = $('#settings-body');
   if (!body) return;
@@ -1196,6 +1241,11 @@ function renderSectionBody(sectionId) {
       renderStorageCard(body);
       renderSectionFields(section, card);
       body.appendChild(card);
+      break;
+    case 'grok':
+      renderSectionFields(section, card);
+      body.appendChild(card);
+      renderGrokPrompt(body);
       break;
     case 'translation':
       renderTranslationSection(body);

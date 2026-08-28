@@ -76,6 +76,11 @@ func (r *Router) RegisterRoutes(bh *th.BotHandler) {
 		return nil
 	}, th.CommandEqual("help"))
 
+	bh.HandleMessage(func(ctx *th.Context, m telego.Message) error {
+		r.handlers.Grok.FactCheck(ctx, &m)
+		return nil
+	}, grokFactCheckPredicate())
+
 	// Non-command messages containing a URL start a direct download; registered last so commands win.
 	bh.HandleMessage(func(ctx *th.Context, m telego.Message) error {
 		r.handlers.Clip.DirectLink(ctx, &m, downloader.ExtractFirstURL(m.Text))
@@ -116,6 +121,30 @@ func clipHandler(h *handlers.Handlers, command string) th.MessageHandler {
 		}
 		return nil
 	}
+}
+
+func grokFactCheckPredicate() th.Predicate {
+	return func(_ context.Context, update telego.Update) bool {
+		return isGrokFactCheck(update.Message)
+	}
+}
+
+func isGrokFactCheck(m *telego.Message) bool {
+	if m == nil || m.ReplyToMessage == nil || m.Text == "" {
+		return false
+	}
+	replacer := strings.NewReplacer(",", " ", ":", " ", "?", " ")
+	words := strings.Fields(replacer.Replace(strings.ToLower(m.Text)))
+	if len(words) < 3 {
+		return false
+	}
+	if words[0] != "@grok" {
+		return false
+	}
+	if words[1] == "это" && words[2] == "правда" {
+		return true
+	}
+	return words[1] == "is" && words[2] == "this" && len(words) >= 4 && words[3] == "true"
 }
 
 // messageWithURL matches non-command text messages carrying a downloadable URL.

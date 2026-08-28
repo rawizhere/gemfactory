@@ -103,6 +103,10 @@ func settingRegistry() []settingSpec {
 			validate: csvOf(translate.ProviderGoogle, translate.ProviderGemini, translate.ProviderNvidia, translate.ProviderGroq, translate.ProviderOpencode, translate.ProviderOpenRouter)},
 		{key: "SUBS_SOURCE_PREF_RU", def: "en,ko"},
 		{key: "TRANSLATION_PROMPT", def: translate.DefaultTranslationPrompt},
+		{key: "GROK_ENABLED", def: "true", validate: boolSpec()},
+		{key: "GROK_RATE_LIMIT", def: "30", validate: intRange(1, 1000)},
+		{key: "GROK_MAX_CHARS", def: "4000", validate: intRange(100, 50000)},
+		{key: "GROK_PROMPT", def: translate.DefaultGrokPrompt},
 		{key: "GEMINI_API_KEY", masked: true},
 		{key: "GROQ_API_KEY", masked: true},
 		{key: "OPENCODE_API_KEY", masked: true},
@@ -215,7 +219,7 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if spec.key == "CLIP_DELETE_STATUS" || spec.key == "SUBS_GOOGLE_ONLY" {
+		if spec.key == "CLIP_DELETE_STATUS" || spec.key == "SUBS_GOOGLE_ONLY" || spec.key == "GROK_ENABLED" {
 			v = normalizeBool(v)
 		}
 		updates = append(updates, pending{spec: spec, val: v})

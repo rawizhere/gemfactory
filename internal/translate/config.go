@@ -3,6 +3,7 @@ package translate
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -48,6 +49,23 @@ const DefaultTranslationPrompt = `Translate subtitles for entertainment videos: 
 4. Output rules: return numbered lines only. Do not use markdown code blocks (NO ` + "```" + `).
 5. Song lyrics: translate the thought and rhythm, not word-by-word.
 6. Silently fix obvious ASR/speech-recognition errors from context.`
+
+const DefaultGrokPrompt = `Ты — Grok, остроумный и прямолинейный фактчекер в Telegram. Твоя задача — проверить утверждение пользователя, оценить его достоверность и выдать краткий, точный вердикт.
+
+Принципы:
+1. Истина превыше всего: факты и логика железные. Никогда не выдумывай вымышленные события, даты, цитаты или имена.
+2. Тон: лаконичный, уверенный, с сухим юмором и здоровым скептицизмом.
+3. СТРОГИЙ ЗАПРЕТ НА ЭМОДЗИ: Не используй абсолютно никаких эмодзи и смайлов в ответе.
+4. Категории вердиктов:
+   - Объективный факт -> База
+   - Прямая ложь -> Фейк или Вброс
+   - Субъективное мнение -> Субъектив
+   - Слух без подтверждений -> Не подтверждено
+
+Формат ответа (строго 3 блока):
+- 1-я строка: Вердикт: [выбери категорию]
+- Основная часть: 1–2 емких предложения с сутью дела без лишней воды.
+- Финальная строка: [Достоверность: X/10]`
 
 const ruAddendum = `For Russian: informal "ты", lively youth phrasing; transliterate Korean honorifics (онни, оппа, макнэ, хён); names transliterate by sound (Liv -> Лив, May -> Мэй), a common noun next to a name stays a common word (리브 미모 = красота Лив, not "Liv Mimo"); bracketed notes translate naturally ([Laughter] -> [Смех]).`
 
@@ -135,6 +153,62 @@ func DefaultConfig() Config {
 		SourcePrefRU:     ParseCSV(os.Getenv("SUBS_SOURCE_PREF_RU")),
 	}
 	cfg.GoogleOnly = IsTruthy(os.Getenv("SUBS_GOOGLE_ONLY"))
+	return ApplyDefaults(cfg)
+}
+
+// ResolveConfig layers DB-backed settings on top of env defaults.
+func ResolveConfig(getter func(string) (string, bool)) Config {
+	cfg := DefaultConfig()
+	if getter == nil {
+		return cfg
+	}
+	if v, ok := getter("GEMINI_API_KEY"); ok {
+		cfg.GeminiKey = v
+	}
+	if v, ok := getter("GROQ_API_KEY"); ok {
+		cfg.GroqKey = v
+	}
+	if v, ok := getter("OPENCODE_API_KEY"); ok {
+		cfg.OpencodeKey = v
+	}
+	if v, ok := getter("NVIDIA_API_KEY"); ok {
+		cfg.NvidiaKey = v
+	}
+	if v, ok := getter("OPENROUTER_API_KEY"); ok {
+		cfg.OpenRouterKey = v
+	}
+	if v, ok := getter("GEMINI_MODELS"); ok {
+		cfg.GeminiModels = ParseCSV(v)
+	}
+	if v, ok := getter("GROQ_MODELS"); ok {
+		cfg.GroqModels = ParseCSV(v)
+	}
+	if v, ok := getter("OPENCODE_MODELS"); ok {
+		cfg.OpencodeModels = ParseCSV(v)
+	}
+	if v, ok := getter("NVIDIA_MODELS"); ok {
+		cfg.NvidiaModels = ParseCSV(v)
+	}
+	if v, ok := getter("OPENROUTER_MODELS"); ok {
+		cfg.OpenRouterModels = ParseCSV(v)
+	}
+	if v, ok := getter("TRANSLATION_FALLBACK_ORDER"); ok {
+		cfg.FallbackOrder = ParseCSV(v)
+	}
+	if v, ok := getter("TRANSLATION_PROMPT"); ok {
+		cfg.Prompt = v
+	}
+	if v, ok := getter("SUBS_SOURCE_PREF_RU"); ok {
+		cfg.SourcePrefRU = ParseCSV(v)
+	}
+	if v, ok := getter("SUBS_GOOGLE_ONLY"); ok {
+		cfg.GoogleOnly = IsTruthy(v)
+	}
+	if v, ok := getter("TRANSLATION_TIMEOUT"); ok {
+		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
+			cfg.Timeout = time.Duration(sec) * time.Second
+		}
+	}
 	return ApplyDefaults(cfg)
 }
 
