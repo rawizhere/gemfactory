@@ -211,13 +211,13 @@ func TranslateWithGemini(ctx context.Context, texts []string, targetLang, source
 			resp, cerr := client.Models.GenerateContent(ctx, model, genai.Text(userMsg), config)
 			if cerr != nil {
 				lastErr = fmt.Errorf("gemini (%s): %w", model, cerr)
-				code, msg := geminiAPIErrorDetails(cerr)
+				code, _ := geminiAPIErrorDetails(cerr)
 				switch {
-				case code == http.StatusBadRequest && withSafety && strings.Contains(msg, "safety"):
-					withSafety = false
-					continue
-				case code == http.StatusBadRequest && withThinking && strings.Contains(msg, "thinking"):
+				case code == http.StatusBadRequest && withThinking:
 					withThinking = false
+					continue
+				case code == http.StatusBadRequest && withSafety:
+					withSafety = false
 					continue
 				}
 				break
