@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	cookiemonster "github.com/MercuryEngineering/CookieMonster"
@@ -117,6 +119,51 @@ func (s *Service) subtitlesForClip(
 	return trimmedPath, nil
 }
 
+var (
+	potMu    sync.Mutex
+	potCache = map[string]string{}
+)
+
+// bgutilPOToken asks the local bgutil provider for a PO token bound to the video.
+func bgutilPOToken(ctx context.Context, videoID string) string {
+	base := strings.TrimRight(os.Getenv("BGUTIL_POT_URL"), "/")
+	if base == "" || videoID == "" {
+		return ""
+	}
+	potMu.Lock()
+	tok, ok := potCache[videoID]
+	potMu.Unlock()
+	if ok {
+		return tok
+	}
+
+	body, _ := json.Marshal(map[string]string{"video_id": videoID})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/get_pot", bytes.NewReader(body))
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var out struct {
+		PoToken string `json:"poToken"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || out.PoToken == "" {
+		return ""
+	}
+	potMu.Lock()
+	potCache[videoID] = out.PoToken
+	potMu.Unlock()
+	return out.PoToken
+}
+
 func downloadSubtitlesDirect(ctx context.Context, rawURL, cookieFile, outPath string) error {
 	if strings.Contains(rawURL, "fmt=") {
 		re := regexp.MustCompile(`fmt=[^&]+`)
@@ -126,6 +173,12 @@ func downloadSubtitlesDirect(ctx context.Context, rawURL, cookieFile, outPath st
 			rawURL += "&fmt=vtt"
 		} else {
 			rawURL += "?fmt=vtt"
+		}
+	}
+
+	if m := regexp.MustCompile(`[?&]v=([^&]+)`).FindStringSubmatch(rawURL); m != nil {
+		if pot := bgutilPOToken(ctx, m[1]); pot != "" {
+			rawURL += "&pot=" + pot
 		}
 	}
 
