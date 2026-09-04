@@ -51,29 +51,8 @@ func (s *Service) subtitlesForClip(
 
 	fullVTT := filepath.Join(workbench, "fullsubs_"+videoID+"."+res.SourceLang+".vtt")
 	if _, err := os.Stat(fullVTT); os.IsNotExist(err) {
-		var dlErr error
-		for attempt := 1; attempt <= subtitleDownloadAttempts; attempt++ {
-			dlErr = downloadSubtitlesDirect(ctx, res.TrackURL, cookieFile, fullVTT)
-			if dlErr == nil {
-				break
-			}
-			// YouTube currently serves empty timedtext bodies intermittently, a repeat often works.
-			s.logger.Warn("direct subtitle download attempt failed",
-				zap.String("video_id", videoID), zap.Int("attempt", attempt),
-				zap.Int("of", subtitleDownloadAttempts), zap.Error(dlErr))
-			if attempt < subtitleDownloadAttempts {
-				select {
-				case <-ctx.Done():
-				case <-time.After(time.Duration(attempt) * 2 * time.Second):
-				}
-			}
-		}
-		if dlErr != nil {
-			s.logger.Warn("direct subtitle download failed, falling back to yt-dlp",
-				zap.String("video_id", videoID), zap.Error(dlErr))
-			if fbErr := s.downloadSubtitlesWithRetry(ctx, job, res.SourceLang, cookieFile, fullVTT); fbErr != nil {
-				return "", fmt.Errorf("failed to download subtitles: direct: %v; yt-dlp fallback: %v", dlErr, fbErr)
-			}
+		if err := s.fetchFullVTT(ctx, job, videoID, res.TrackURL, res.SourceLang, cookieFile, fullVTT); err != nil {
+			return "", err
 		}
 	}
 	if _, err := os.Stat(fullVTT); err != nil {
@@ -162,6 +141,51 @@ func bgutilPOToken(ctx context.Context, videoID string) string {
 	potCache[videoID] = out.PoToken
 	potMu.Unlock()
 	return out.PoToken
+}
+
+// fetchFullVTT downloads the full subtitle track: direct timedtext first, then yt-dlp,
+// both retried without cookies as a last resort since YouTube serves captions more
+// readily to anonymous clients.
+func (s *Service) fetchFullVTT(ctx context.Context, job *Job, videoID, trackURL, lang, cookieFile, fullVTT string) error {
+	var dlErr error
+	for attempt := 1; attempt <= subtitleDownloadAttempts; attempt++ {
+		dlErr = downloadSubtitlesDirect(ctx, trackURL, cookieFile, fullVTT)
+		if dlErr == nil {
+			return nil
+		}
+		// YouTube currently serves empty timedtext bodies intermittently, a repeat often works.
+		s.logger.Warn("direct subtitle download attempt failed",
+			zap.String("video_id", videoID), zap.Int("attempt", attempt),
+			zap.Int("of", subtitleDownloadAttempts), zap.Error(dlErr))
+		if attempt < subtitleDownloadAttempts {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt) * 2 * time.Second):
+			}
+		}
+	}
+
+	s.logger.Warn("direct subtitle download failed, falling back to yt-dlp",
+		zap.String("video_id", videoID), zap.Error(dlErr))
+	fbErr := s.downloadSubtitlesWithRetry(ctx, job, lang, cookieFile, fullVTT)
+	if fbErr == nil {
+		return nil
+	}
+
+	if cookieFile == "" {
+		return fmt.Errorf("failed to download subtitles: direct: %v; yt-dlp fallback: %v", dlErr, fbErr)
+	}
+
+	s.logger.Warn("subtitle download with cookies failed, retrying without cookies",
+		zap.String("video_id", videoID))
+	if err := downloadSubtitlesDirect(ctx, trackURL, "", fullVTT); err == nil {
+		return nil
+	}
+	if err := s.downloadSubtitlesWithRetry(ctx, job, lang, "", fullVTT); err == nil {
+		return nil
+	}
+	return fmt.Errorf("failed to download subtitles: direct: %v; yt-dlp fallback: %v", dlErr, fbErr)
 }
 
 func downloadSubtitlesDirect(ctx context.Context, rawURL, cookieFile, outPath string) error {
