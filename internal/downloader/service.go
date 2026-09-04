@@ -825,6 +825,14 @@ func FriendlyError(raw string) string {
 		strings.Contains(raw, "removed by the uploader"):
 		return "Video is unavailable or removed."
 
+	case strings.Contains(raw, "invalid vtt content"),
+		strings.Contains(raw, "Did not get any data blocks"):
+		return "YouTube is temporarily not serving subtitles for this video. Please try again later."
+
+	case strings.Contains(raw, "Too Many Requests"),
+		strings.Contains(raw, "HTTP 429"):
+		return "YouTube rate limit reached. Please try again later."
+
 	default:
 		msg := strings.TrimSpace(raw)
 		if len(msg) > 300 {

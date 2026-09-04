@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	cookiemonster "github.com/MercuryEngineering/CookieMonster"
@@ -20,6 +22,9 @@ import (
 
 	"gemfactory/internal/translate"
 )
+
+// timedtext track URLs inside info.json expire after a few hours.
+const metadataCacheTTL = time.Hour
 
 // vttTagReplacer strips YouTube auto-caption styling tags.
 var vttTagReplacer = strings.NewReplacer("<c>", "", "</c>", "")
@@ -46,13 +51,8 @@ func (s *Service) subtitlesForClip(
 
 	fullVTT := filepath.Join(workbench, "fullsubs_"+videoID+"."+res.SourceLang+".vtt")
 	if _, err := os.Stat(fullVTT); os.IsNotExist(err) {
-		dlErr := downloadSubtitlesDirect(ctx, res.TrackURL, cookieFile, fullVTT)
-		if dlErr != nil {
-			s.logger.Warn("direct subtitle download failed, falling back to yt-dlp",
-				zap.String("video_id", videoID), zap.Error(dlErr))
-			if fbErr := s.downloadSubtitlesWithRetry(ctx, job, res.SourceLang, cookieFile, fullVTT); fbErr != nil {
-				return "", fmt.Errorf("failed to download subtitles: %w", dlErr)
-			}
+		if err := s.fetchFullVTT(ctx, job, videoID, res.TrackURL, res.SourceLang, cookieFile, fullVTT); err != nil {
+			return "", err
 		}
 	}
 	if _, err := os.Stat(fullVTT); err != nil {
@@ -98,6 +98,96 @@ func (s *Service) subtitlesForClip(
 	return trimmedPath, nil
 }
 
+var (
+	potMu    sync.Mutex
+	potCache = map[string]string{}
+)
+
+// bgutilPOToken asks the local bgutil provider for a PO token bound to the video.
+func bgutilPOToken(ctx context.Context, videoID string) string {
+	base := strings.TrimRight(os.Getenv("BGUTIL_POT_URL"), "/")
+	if base == "" || videoID == "" {
+		return ""
+	}
+	potMu.Lock()
+	tok, ok := potCache[videoID]
+	potMu.Unlock()
+	if ok {
+		return tok
+	}
+
+	body, _ := json.Marshal(map[string]string{"video_id": videoID})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/get_pot", bytes.NewReader(body))
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var out struct {
+		PoToken string `json:"poToken"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || out.PoToken == "" {
+		return ""
+	}
+	potMu.Lock()
+	potCache[videoID] = out.PoToken
+	potMu.Unlock()
+	return out.PoToken
+}
+
+// fetchFullVTT downloads the full subtitle track: direct timedtext first, then yt-dlp,
+// both retried without cookies as a last resort since YouTube serves captions more
+// readily to anonymous clients.
+func (s *Service) fetchFullVTT(ctx context.Context, job *Job, videoID, trackURL, lang, cookieFile, fullVTT string) error {
+	var dlErr error
+	for attempt := 1; attempt <= subtitleDownloadAttempts; attempt++ {
+		dlErr = downloadSubtitlesDirect(ctx, trackURL, cookieFile, fullVTT)
+		if dlErr == nil {
+			return nil
+		}
+		// YouTube currently serves empty timedtext bodies intermittently, a repeat often works.
+		s.logger.Warn("direct subtitle download attempt failed",
+			zap.String("video_id", videoID), zap.Int("attempt", attempt),
+			zap.Int("of", subtitleDownloadAttempts), zap.Error(dlErr))
+		if attempt < subtitleDownloadAttempts {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt) * 2 * time.Second):
+			}
+		}
+	}
+
+	s.logger.Warn("direct subtitle download failed, falling back to yt-dlp",
+		zap.String("video_id", videoID), zap.Error(dlErr))
+	fbErr := s.downloadSubtitlesWithRetry(ctx, job, lang, cookieFile, fullVTT)
+	if fbErr == nil {
+		return nil
+	}
+
+	if cookieFile == "" {
+		return fmt.Errorf("failed to download subtitles: direct: %v; yt-dlp fallback: %v", dlErr, fbErr)
+	}
+
+	s.logger.Warn("subtitle download with cookies failed, retrying without cookies",
+		zap.String("video_id", videoID))
+	if err := downloadSubtitlesDirect(ctx, trackURL, "", fullVTT); err == nil {
+		return nil
+	}
+	if err := s.downloadSubtitlesWithRetry(ctx, job, lang, "", fullVTT); err == nil {
+		return nil
+	}
+	return fmt.Errorf("failed to download subtitles: direct: %v; yt-dlp fallback: %v", dlErr, fbErr)
+}
+
 func downloadSubtitlesDirect(ctx context.Context, rawURL, cookieFile, outPath string) error {
 	if strings.Contains(rawURL, "fmt=") {
 		re := regexp.MustCompile(`fmt=[^&]+`)
@@ -107,6 +197,12 @@ func downloadSubtitlesDirect(ctx context.Context, rawURL, cookieFile, outPath st
 			rawURL += "&fmt=vtt"
 		} else {
 			rawURL += "?fmt=vtt"
+		}
+	}
+
+	if m := regexp.MustCompile(`[?&]v=([^&]+)`).FindStringSubmatch(rawURL); m != nil {
+		if pot := bgutilPOToken(ctx, m[1]); pot != "" {
+			rawURL += "&pot=" + pot
 		}
 	}
 
@@ -585,7 +681,7 @@ func htmlEscape(s string) string {
 
 func (s *Service) ExtractMetadata(ctx context.Context, url, videoID, cookieFile string) (*SourceMeta, error) {
 	metaPath := filepath.Join(s.workbenchDir(videoID), videoID+".info.json")
-	if _, err := os.Stat(metaPath); err == nil {
+	if info, err := os.Stat(metaPath); err == nil && time.Since(info.ModTime()) < metadataCacheTTL {
 		s.logger.Info("metadata cache hit", zap.String("video_id", videoID))
 		return readSourceMeta(metaPath)
 	}
