@@ -14,6 +14,20 @@ import (
 	"gemfactory/internal/translate"
 )
 
+// GrokMode is one @grok command: which prompt to load and how to frame the input text.
+type GrokMode struct {
+	promptKey  string
+	defPrompt  string
+	inputLabel string
+	quoteLabel string
+}
+
+var (
+	GrokFactCheck = GrokMode{"GROK_PROMPT", translate.DefaultGrokPrompt, "Текст для проверки", "Проверяемая цитата"}
+	GrokRetell    = GrokMode{"GROK_RETELL_PROMPT", translate.DefaultGrokRetellPrompt, "Текст для пересказа", "Пересказываемая цитата"}
+	GrokOpinion   = GrokMode{"GROK_OPINION_PROMPT", translate.DefaultGrokOpinionPrompt, "Текст для оценки", "Цитата для оценки"}
+)
+
 type GrokHandlers struct {
 	*BaseHandler
 	limiter *middleware.GrokLimiter
@@ -26,7 +40,7 @@ func NewGrokHandlers(base *BaseHandler) *GrokHandlers {
 	}
 }
 
-func (h *GrokHandlers) FactCheck(ctx context.Context, message *telego.Message) {
+func (h *GrokHandlers) Run(ctx context.Context, message *telego.Message, mode GrokMode) {
 	if message == nil || message.ReplyToMessage == nil {
 		return
 	}
@@ -67,12 +81,13 @@ func (h *GrokHandlers) FactCheck(ctx context.Context, message *telego.Message) {
 
 	var targetText string
 	if message.Quote != nil && strings.TrimSpace(message.Quote.Text) != "" {
-		targetText = "Проверяемая цитата:\n\"" + message.Quote.Text + "\"\n\nКонтекст исходного сообщения:\n\"" + replyText + "\""
+		targetText = mode.quoteLabel + ":\n\"" + message.Quote.Text + "\"\n\nКонтекст исходного сообщения:\n\"" + replyText + "\""
 	} else {
-		targetText = "Текст для проверки:\n\"" + replyText + "\""
+		targetText = mode.inputLabel + ":\n\"" + replyText + "\""
 	}
 
 	if strings.TrimSpace(replyText) == "" && (message.Quote == nil || strings.TrimSpace(message.Quote.Text) == "") {
+		_, _ = h.TG.SendMessageRaw(ctx, message.Chat.ID, "не коменчу фотки", message.ReplyToMessage.MessageID)
 		return
 	}
 
@@ -91,9 +106,9 @@ func (h *GrokHandlers) FactCheck(ctx context.Context, message *telego.Message) {
 		return
 	}
 
-	prompt, err := h.Services.Config.Get(ctx, "GROK_PROMPT")
+	prompt, err := h.Services.Config.Get(ctx, mode.promptKey)
 	if err != nil || strings.TrimSpace(prompt) == "" {
-		prompt = translate.DefaultGrokPrompt
+		prompt = mode.defPrompt
 	}
 
 	cfg := translate.ResolveConfig(func(k string) (string, bool) {
@@ -109,9 +124,9 @@ func (h *GrokHandlers) FactCheck(ctx context.Context, message *telego.Message) {
 
 	resp, _, err := translate.Complete(ctx, prompt, targetText, cfg)
 	if err != nil {
-		h.Logger.Error("grok factcheck failed", zap.Error(err))
+		h.Logger.Error("grok request failed", zap.Error(err), zap.String("mode", mode.promptKey))
 		return
 	}
 
-	_, _ = h.TG.SendMessageRaw(ctx, message.Chat.ID, html.EscapeString(resp), message.MessageID)
+	_, _ = h.TG.SendMessageRaw(ctx, message.Chat.ID, html.EscapeString(resp), message.ReplyToMessage.MessageID)
 }

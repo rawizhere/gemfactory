@@ -531,7 +531,8 @@ func (s *Server) listConfig(w http.ResponseWriter, r *http.Request) {
 			"NVIDIA_API_KEY", "NVIDIA_MODELS",
 			"DOWNLOAD_RETENTION_HOURS", "TRANSLATION_TIMEOUT", "SUBS_GOOGLE_ONLY",
 			"TG_FILE_LIMIT_MB", "YTDLP_PROXY",
-			"GROK_ENABLED", "GROK_RATE_LIMIT", "GROK_MAX_CHARS", "GROK_PROMPT":
+			"GROK_ENABLED", "GROK_RATE_LIMIT", "GROK_MAX_CHARS",
+			"GROK_PROMPT", "GROK_RETELL_PROMPT", "GROK_OPINION_PROMPT":
 			return true
 		default:
 			return false

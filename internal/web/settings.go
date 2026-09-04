@@ -107,6 +107,8 @@ func settingRegistry() []settingSpec {
 		{key: "GROK_RATE_LIMIT", def: "30", validate: intRange(1, 1000)},
 		{key: "GROK_MAX_CHARS", def: "4000", validate: intRange(100, 50000)},
 		{key: "GROK_PROMPT", def: translate.DefaultGrokPrompt},
+		{key: "GROK_RETELL_PROMPT", def: translate.DefaultGrokRetellPrompt},
+		{key: "GROK_OPINION_PROMPT", def: translate.DefaultGrokOpinionPrompt},
 		{key: "GEMINI_API_KEY", masked: true},
 		{key: "GROQ_API_KEY", masked: true},
 		{key: "OPENCODE_API_KEY", masked: true},

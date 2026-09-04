@@ -77,9 +77,11 @@ func (r *Router) RegisterRoutes(bh *th.BotHandler) {
 	}, th.CommandEqual("help"))
 
 	bh.HandleMessage(func(ctx *th.Context, m telego.Message) error {
-		r.handlers.Grok.FactCheck(ctx, &m)
+		if mode, ok := detectGrokMode(&m); ok {
+			r.handlers.Grok.Run(ctx, &m, mode)
+		}
 		return nil
-	}, grokFactCheckPredicate())
+	}, grokPredicate())
 
 	// Non-command messages containing a URL start a direct download; registered last so commands win.
 	bh.HandleMessage(func(ctx *th.Context, m telego.Message) error {
@@ -123,28 +125,43 @@ func clipHandler(h *handlers.Handlers, command string) th.MessageHandler {
 	}
 }
 
-func grokFactCheckPredicate() th.Predicate {
+func grokPredicate() th.Predicate {
 	return func(_ context.Context, update telego.Update) bool {
-		return isGrokFactCheck(update.Message)
+		_, ok := detectGrokMode(update.Message)
+		return ok
 	}
 }
 
-func isGrokFactCheck(m *telego.Message) bool {
+// detectGrokMode matches an @grok reply against the known commands; factcheck is tested first.
+func detectGrokMode(m *telego.Message) (handlers.GrokMode, bool) {
 	if m == nil || m.ReplyToMessage == nil || m.Text == "" {
-		return false
+		return handlers.GrokMode{}, false
 	}
-	replacer := strings.NewReplacer(",", " ", ":", " ", "?", " ")
+	replacer := strings.NewReplacer(",", " ", ":", " ", "?", " ", "!", " ", ";", " ")
 	words := strings.Fields(replacer.Replace(strings.ToLower(m.Text)))
-	if len(words) < 3 {
-		return false
+	if len(words) < 2 || words[0] != "@grok" {
+		return handlers.GrokMode{}, false
 	}
-	if words[0] != "@grok" {
-		return false
+
+	if len(words) >= 3 {
+		if words[1] == "это" && words[2] == "правда" {
+			return handlers.GrokFactCheck, true
+		}
+		if words[1] == "is" && words[2] == "this" && len(words) >= 4 && words[3] == "true" {
+			return handlers.GrokFactCheck, true
+		}
 	}
-	if words[1] == "это" && words[2] == "правда" {
-		return true
+
+	switch {
+	case strings.HasPrefix(words[1], "переска"),
+		words[1] == "retell", words[1] == "summarize", words[1] == "summary", words[1] == "tldr":
+		return handlers.GrokRetell, true
+	case strings.HasPrefix(words[1], "мнен"),
+		words[1] == "opinion", words[1] == "thoughts", words[1] == "think", words[1] == "take":
+		return handlers.GrokOpinion, true
 	}
-	return words[1] == "is" && words[2] == "this" && len(words) >= 4 && words[3] == "true"
+
+	return handlers.GrokMode{}, false
 }
 
 // messageWithURL matches non-command text messages carrying a downloadable URL.

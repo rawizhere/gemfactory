@@ -35,11 +35,11 @@ const SECTIONS = [
   },
   {
     id: 'grok',
-    title: 'Grok Factchecker',
+    title: 'Grok',
     fields: [
-      FIELD('GROK_ENABLED', 'Enable @grok factchecker', 'bool', { hint: 'Enable @grok factchecking via Grok' }),
-      FIELD('GROK_RATE_LIMIT', 'Rate Limit (requests per min)', 'number', { min: 1, max: 1000, unit: 'req/min', hint: 'Maximum allowed Grok calls per minute' }),
-      FIELD('GROK_MAX_CHARS', 'Max Target Text Length (chars)', 'number', { min: 100, max: 50000, unit: 'chars', hint: 'Max input character length for verification' }),
+      FIELD('GROK_ENABLED', 'Enable @grok commands', 'bool', { hint: 'Enable @grok это правда / перескажи / мнение in replies' }),
+      FIELD('GROK_RATE_LIMIT', 'Rate Limit (requests per min)', 'number', { min: 1, max: 1000, unit: 'req/min', hint: 'Maximum allowed Grok calls per minute, shared across all @grok commands' }),
+      FIELD('GROK_MAX_CHARS', 'Max Target Text Length (chars)', 'number', { min: 100, max: 50000, unit: 'chars', hint: 'Max input character length passed to Grok' }),
     ],
     extra: 'grok',
   },
@@ -1193,34 +1193,34 @@ function renderSystemSection(root) {
 // Page assembly, load and save
 // ---------------------------------------------------------------------------
 
-function renderGrokPrompt(root) {
+function renderPromptEditor(root, key, title, desc) {
   const details = el('details', { class: 'pipeline-prompt-details' });
-  const summary = el('summary', { class: 'pipeline-prompt-summary' }, 'Grok System Prompt');
+  const summary = el('summary', { class: 'pipeline-prompt-summary' }, title);
   const body = el('div', { class: 'pipeline-prompt-body' });
-  const desc = el('div', { class: 'pipeline-section-desc' }, 'Instructions and guidelines passed to Grok factchecker.');
+  const descEl = el('div', { class: 'pipeline-section-desc' }, desc);
   const promptArea = el('textarea', {
     rows: 6,
     class: 'pipeline-prompt-textarea',
-    placeholder: 'Enter Grok system prompt (leave empty for default)...',
+    placeholder: `Enter ${title} (leave empty for default)...`,
   });
-  promptArea.value = effectiveValue('GROK_PROMPT');
+  promptArea.value = effectiveValue(key);
   promptArea.addEventListener('input', () => {
-    state.edited.set('GROK_PROMPT', promptArea.value);
+    state.edited.set(key, promptArea.value);
     updateSaveBar();
   });
 
   const actions = el('div', { style: 'display:flex; justify-content:flex-end; margin-top:0.5rem;' });
   const resetBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Reset to Default');
   resetBtn.addEventListener('click', () => {
-    const def = entryOf('GROK_PROMPT').default || '';
+    const def = entryOf(key).default || '';
     promptArea.value = def;
-    state.edited.set('GROK_PROMPT', def);
+    state.edited.set(key, def);
     updateSaveBar();
     toast('Prompt reset to default', 'info');
   });
   actions.appendChild(resetBtn);
 
-  body.appendChild(desc);
+  body.appendChild(descEl);
   body.appendChild(promptArea);
   body.appendChild(actions);
   details.appendChild(summary);
@@ -1245,7 +1245,9 @@ function renderSectionBody(sectionId) {
     case 'grok':
       renderSectionFields(section, card);
       body.appendChild(card);
-      renderGrokPrompt(body);
+      renderPromptEditor(body, 'GROK_PROMPT', 'Grok Factcheck Prompt', 'Instructions passed to Grok on "@grok это правда".');
+      renderPromptEditor(body, 'GROK_RETELL_PROMPT', 'Grok Retell Prompt', 'Instructions passed to Grok on "@grok перескажи".');
+      renderPromptEditor(body, 'GROK_OPINION_PROMPT', 'Grok Opinion Prompt', 'Instructions passed to Grok on "@grok мнение".');
       break;
     case 'translation':
       renderTranslationSection(body);
