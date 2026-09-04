@@ -21,6 +21,9 @@ import (
 	"gemfactory/internal/translate"
 )
 
+// timedtext track URLs inside info.json expire after a few hours.
+const metadataCacheTTL = time.Hour
+
 // vttTagReplacer strips YouTube auto-caption styling tags.
 var vttTagReplacer = strings.NewReplacer("<c>", "", "</c>", "")
 
@@ -585,7 +588,7 @@ func htmlEscape(s string) string {
 
 func (s *Service) ExtractMetadata(ctx context.Context, url, videoID, cookieFile string) (*SourceMeta, error) {
 	metaPath := filepath.Join(s.workbenchDir(videoID), videoID+".info.json")
-	if _, err := os.Stat(metaPath); err == nil {
+	if info, err := os.Stat(metaPath); err == nil && time.Since(info.ModTime()) < metadataCacheTTL {
 		s.logger.Info("metadata cache hit", zap.String("video_id", videoID))
 		return readSourceMeta(metaPath)
 	}
