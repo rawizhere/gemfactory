@@ -105,9 +105,20 @@ jobs:
         with:
           image-ref: gemfactory-ci:scan
           format: table
-          exit-code: '1'
+          output: trivy-report.txt
+          exit-code: '0'
           ignore-unfixed: true
           severity: CRITICAL,HIGH
+      - name: fail on HIGH/CRITICAL vulnerabilities
+        if: always()
+        run: |
+          [ -f trivy-report.txt ] || { echo "::error::trivy scan produced no report"; exit 1; }
+          cat trivy-report.txt
+          cat trivy-report.txt >> "$GITHUB_STEP_SUMMARY"
+          if grep -qE '^Total: ([1-9][0-9]*)' trivy-report.txt; then
+            echo "::error::Trivy found HIGH/CRITICAL vulnerabilities in gemfactory-ci:scan — bump the dependency shown in the table above"
+            exit 1
+          fi
       - name: build and push image
         uses: docker/build-push-action@v7
         with:
