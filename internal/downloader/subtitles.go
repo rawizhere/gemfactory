@@ -49,7 +49,23 @@ func (s *Service) subtitlesForClip(
 
 	fullVTT := filepath.Join(workbench, "fullsubs_"+videoID+"."+res.SourceLang+".vtt")
 	if _, err := os.Stat(fullVTT); os.IsNotExist(err) {
-		dlErr := downloadSubtitlesDirect(ctx, res.TrackURL, cookieFile, fullVTT)
+		var dlErr error
+		for attempt := 1; attempt <= subtitleDownloadAttempts; attempt++ {
+			dlErr = downloadSubtitlesDirect(ctx, res.TrackURL, cookieFile, fullVTT)
+			if dlErr == nil {
+				break
+			}
+			// YouTube currently serves empty timedtext bodies intermittently, a repeat often works.
+			s.logger.Warn("direct subtitle download attempt failed",
+				zap.String("video_id", videoID), zap.Int("attempt", attempt),
+				zap.Int("of", subtitleDownloadAttempts), zap.Error(dlErr))
+			if attempt < subtitleDownloadAttempts {
+				select {
+				case <-ctx.Done():
+				case <-time.After(time.Duration(attempt) * 2 * time.Second):
+				}
+			}
+		}
 		if dlErr != nil {
 			s.logger.Warn("direct subtitle download failed, falling back to yt-dlp",
 				zap.String("video_id", videoID), zap.Error(dlErr))
