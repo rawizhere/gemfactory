@@ -51,7 +51,7 @@ func (s *Service) subtitlesForClip(
 			s.logger.Warn("direct subtitle download failed, falling back to yt-dlp",
 				zap.String("video_id", videoID), zap.Error(dlErr))
 			if fbErr := s.downloadSubtitlesWithRetry(ctx, job, res.SourceLang, cookieFile, fullVTT); fbErr != nil {
-				return "", fmt.Errorf("failed to download subtitles: %w", dlErr)
+				return "", fmt.Errorf("failed to download subtitles: direct: %v; yt-dlp fallback: %v", dlErr, fbErr)
 			}
 		}
 	}
