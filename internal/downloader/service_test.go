@@ -90,6 +90,16 @@ func TestFriendlyError(t *testing.T) {
 			want: "Video is private or members-only. Cookies from an authorized account are required.",
 		},
 		{
+			name: "empty timedtext",
+			raw:  "failed to download subtitles: direct: invalid vtt content: ; yt-dlp fallback: Did not get any data blocks",
+			want: "YouTube is temporarily not serving subtitles for this video. Please try again later.",
+		},
+		{
+			name: "rate limited",
+			raw:  "yt-dlp fallback: HTTP Error 429: Too Many Requests",
+			want: "YouTube rate limit reached. Please try again later.",
+		},
+		{
 			name: "generic truncated",
 			raw:  strings.Repeat("x", 500),
 			want: "Error: " + strings.Repeat("x", 300) + "...",
