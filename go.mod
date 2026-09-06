@@ -4,7 +4,7 @@ go 1.27
 
 require (
 	github.com/MercuryEngineering/CookieMonster v0.0.0-20180304172713-1584578b3403
-	github.com/PuerkitoBio/goquery v1.12.0
+	github.com/PuerkitoBio/goquery v1.13.0
 	github.com/agnivade/levenshtein v1.2.1
 	github.com/avast/retry-go/v4 v4.7.0
 	github.com/caarlos0/env/v11 v11.4.1
@@ -13,7 +13,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/joho/godotenv v1.5.1
 	github.com/lrstanley/go-ytdlp v1.3.6
-	github.com/mymmrac/telego v1.11.2
+	github.com/mymmrac/telego v1.12.1
 	github.com/prometheus/client_golang v1.24.1
 	github.com/sashabaranov/go-openai v1.42.0
 	github.com/stretchr/testify v1.12.1
@@ -24,7 +24,7 @@ require (
 	go.uber.org/zap v1.28.0
 	golang.org/x/text v0.41.0
 	golang.org/x/time v0.15.0
-	google.golang.org/genai v1.69.0
+	google.golang.org/genai v1.71.0
 )
 
 require (
@@ -36,7 +36,7 @@ require (
 	github.com/andybalholm/cascadia v1.3.4 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bytedance/gopkg v0.1.4 // indirect
-	github.com/bytedance/sonic v1.15.2 // indirect
+	github.com/bytedance/sonic v1.15.3 // indirect
 	github.com/bytedance/sonic/loader v0.5.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudflare/circl v1.6.5 // indirect
