@@ -347,31 +347,34 @@ func invalidatePOToken() {
 func downloadSubtitlesDirect(ctx context.Context, rawURL, cookieFile, outPath string) error {
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
-		pot := bgutilPOToken(ctx)
-
-		body, err := fetchTimedtext(ctx, buildTimedtextURL(rawURL, pot, "vtt"), cookieFile)
-		switch {
-		case err != nil:
-			lastErr = err
-		case isVTT(body):
-			return os.WriteFile(outPath, body, 0644)
-		default:
-			lastErr = fmt.Errorf("invalid vtt content: %s", truncate(string(body), 200))
+		lastErr = trySubtitleFetch(ctx, rawURL, bgutilPOToken(ctx), cookieFile, outPath)
+		if lastErr == nil {
+			return nil
 		}
-
-		body, err = fetchTimedtext(ctx, buildTimedtextURL(rawURL, pot, "json3"), cookieFile)
-		switch vtt, cerr := json3ToVTT(body); {
-		case err != nil:
-			lastErr = err
-		case cerr == nil:
-			return os.WriteFile(outPath, vtt, 0644)
-		default:
-			lastErr = fmt.Errorf("invalid vtt content: %s (%v)", truncate(string(body), 200), cerr)
-		}
-
 		invalidatePOToken()
 	}
 	return lastErr
+}
+
+// trySubtitleFetch tries the track as vtt, then as json3 converted to vtt.
+func trySubtitleFetch(ctx context.Context, rawURL, pot, cookieFile, outPath string) error {
+	vttBody, err := fetchTimedtext(ctx, buildTimedtextURL(rawURL, pot, "vtt"), cookieFile)
+	if err == nil && isVTT(vttBody) {
+		return os.WriteFile(outPath, vttBody, 0644)
+	}
+	body, jerr := fetchTimedtext(ctx, buildTimedtextURL(rawURL, pot, "json3"), cookieFile)
+	vtt, cerr := json3ToVTT(body)
+	switch {
+	case jerr != nil && err != nil:
+		return err
+	case jerr != nil:
+		return fmt.Errorf("invalid vtt content: %s", truncate(string(vttBody), 200))
+	case cerr != nil && err != nil:
+		return err
+	case cerr != nil:
+		return fmt.Errorf("invalid vtt content: %s (%v)", truncate(string(vttBody), 200), cerr)
+	}
+	return os.WriteFile(outPath, vtt, 0644)
 }
 
 func (s *Service) translateVTTFile(ctx context.Context, vttPath, targetLang, sourceLang, videoTitle string, noLLM bool, onAttempt func(string)) (string, error) {
