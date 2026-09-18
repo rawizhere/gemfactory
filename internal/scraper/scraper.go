@@ -4,18 +4,15 @@ import (
 	"go.uber.org/zap"
 )
 
-type fetcherImpl struct {
-	config     Config
+// Fetcher parses release calendars from kpopofficial.com.
+type Fetcher struct {
 	logger     *zap.Logger
 	httpClient *HTTPClient
 }
 
-func NewFetcher(config Config, logger *zap.Logger) Fetcher {
-	httpClient := NewHTTPClient(config.UserAgent, logger)
-
-	return &fetcherImpl{
-		config:     config,
+func NewFetcher(userAgent string, logger *zap.Logger) *Fetcher {
+	return &Fetcher{
 		logger:     logger,
-		httpClient: httpClient,
+		httpClient: NewHTTPClient(userAgent, logger),
 	}
 }

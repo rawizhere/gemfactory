@@ -13,7 +13,7 @@ import (
 var domainRe = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`)
 
 func (s *Server) listCookies(w http.ResponseWriter, r *http.Request) {
-	cookies, err := s.cookies.GetAll(r.Context())
+	cookies, err := s.Cookies.GetAll(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -31,7 +31,7 @@ func (s *Server) listCookies(w http.ResponseWriter, r *http.Request) {
 	out := make([]cookieItem, 0, len(cookies))
 
 	for _, c := range cookies {
-		rec, err := s.cookies.GetByDomain(r.Context(), c.Domain)
+		rec, err := s.Cookies.GetByDomain(r.Context(), c.Domain)
 		if err != nil || rec == nil {
 			out = append(out, cookieItem{
 				Domain:    c.Domain,
@@ -104,7 +104,7 @@ func (s *Server) getCookie(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid domain", http.StatusBadRequest)
 		return
 	}
-	cookie, err := s.cookies.GetByDomain(r.Context(), domain)
+	cookie, err := s.Cookies.GetByDomain(r.Context(), domain)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -144,7 +144,7 @@ func (s *Server) upsertCookie(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid domain", http.StatusBadRequest)
 			return
 		}
-		if err := s.cookies.Upsert(r.Context(), domain, content); err != nil {
+		if err := s.Cookies.Upsert(r.Context(), domain, content); err != nil {
 			s.fail(w, err)
 			return
 		}
@@ -158,7 +158,7 @@ func (s *Server) upsertCookie(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, d := range domains {
-		if err := s.cookies.Upsert(r.Context(), d, content); err != nil {
+		if err := s.Cookies.Upsert(r.Context(), d, content); err != nil {
 			s.fail(w, err)
 			return
 		}
@@ -210,7 +210,7 @@ func (s *Server) deleteCookie(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid domain", http.StatusBadRequest)
 		return
 	}
-	n, err := s.cookies.Delete(r.Context(), domain)
+	n, err := s.Cookies.Delete(r.Context(), domain)
 	if err != nil {
 		s.fail(w, err)
 		return

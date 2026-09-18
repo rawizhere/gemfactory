@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	cookiemonster "github.com/MercuryEngineering/CookieMonster"
 	"go.uber.org/zap"
 
+	"gemfactory/internal/settings"
 	"gemfactory/internal/translate"
 )
 
@@ -99,24 +101,71 @@ func (s *Service) subtitlesForClip(
 }
 
 var (
-	potMu    sync.Mutex
-	potCache = map[string]string{}
+	potMu        sync.Mutex
+	potCache     = map[string]string{}
+	visitorCache = map[string]string{}
 )
 
-// bgutilPOToken asks the local bgutil provider for a PO token bound to the video.
-func bgutilPOToken(ctx context.Context, videoID string) string {
-	base := strings.TrimRight(os.Getenv("BGUTIL_POT_URL"), "/")
-	if base == "" || videoID == "" {
+// innertubeVisitorData fetches a session visitorData via an anonymous innertube player call.
+func innertubeVisitorData(ctx context.Context) string {
+	potMu.Lock()
+	vd, ok := visitorCache["current"]
+	potMu.Unlock()
+	if ok {
+		return vd
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"context": map[string]any{"client": map[string]string{
+			"clientName":    "WEB",
+			"clientVersion": "2.20260918.00.00",
+			"hl":            "en",
+		}},
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
+		bytes.NewReader(payload))
+	if err != nil {
+		return ""
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var out struct {
+		ResponseContext struct {
+			VisitorData string `json:"visitorData"`
+		} `json:"responseContext"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&out) != nil || out.ResponseContext.VisitorData == "" {
 		return ""
 	}
 	potMu.Lock()
-	tok, ok := potCache[videoID]
+	visitorCache["current"] = out.ResponseContext.VisitorData
+	potMu.Unlock()
+	return out.ResponseContext.VisitorData
+}
+
+// bgutilPOToken asks the local bgutil provider for a PO token bound to the session visitorData; a video-bound pot is rejected by timedtext (prod-verified).
+func bgutilPOToken(ctx context.Context) string {
+	base := strings.TrimRight(os.Getenv("BGUTIL_POT_URL"), "/")
+	if base == "" {
+		return ""
+	}
+	vd := innertubeVisitorData(ctx)
+	if vd == "" {
+		return ""
+	}
+	potMu.Lock()
+	tok, ok := potCache[vd]
 	potMu.Unlock()
 	if ok {
 		return tok
 	}
 
-	body, _ := json.Marshal(map[string]string{"video_id": videoID})
+	body, _ := json.Marshal(map[string]string{"content_binding": vd})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/get_pot", bytes.NewReader(body))
 	if err != nil {
 		return ""
@@ -138,14 +187,12 @@ func bgutilPOToken(ctx context.Context, videoID string) string {
 		return ""
 	}
 	potMu.Lock()
-	potCache[videoID] = out.PoToken
+	potCache[vd] = out.PoToken
 	potMu.Unlock()
 	return out.PoToken
 }
 
-// fetchFullVTT downloads the full subtitle track: direct timedtext first, then yt-dlp,
-// both retried without cookies as a last resort since YouTube serves captions more
-// readily to anonymous clients.
+// fetchFullVTT downloads the full subtitle track: direct timedtext first, then yt-dlp, both retried without cookies as a last resort.
 func (s *Service) fetchFullVTT(ctx context.Context, job *Job, videoID, trackURL, lang, cookieFile, fullVTT string) error {
 	var dlErr error
 	for attempt := 1; attempt <= subtitleDownloadAttempts; attempt++ {
@@ -188,27 +235,84 @@ func (s *Service) fetchFullVTT(ctx context.Context, job *Job, videoID, trackURL,
 	return fmt.Errorf("failed to download subtitles: direct: %v; yt-dlp fallback: %v", dlErr, fbErr)
 }
 
-func downloadSubtitlesDirect(ctx context.Context, rawURL, cookieFile, outPath string) error {
-	if strings.Contains(rawURL, "fmt=") {
-		re := regexp.MustCompile(`fmt=[^&]+`)
-		rawURL = re.ReplaceAllString(rawURL, "fmt=vtt")
-	} else {
-		if strings.Contains(rawURL, "?") {
-			rawURL += "&fmt=vtt"
-		} else {
-			rawURL += "?fmt=vtt"
-		}
+// timedtextPlayerParams are client params the real web player appends at request time; they sit outside the URL signature, and without them YouTube often returns an empty body.
+var timedtextPlayerParams = map[string]string{
+	"xorb": "2", "xobt": "3", "xovt": "3",
+	"c": "WEB", "cver": "2.20260918.00.00", "cplayer": "UNIPLAYER",
+	"cbr": "Firefox", "cbrver": "152.0",
+	"cos": "Windows", "cosver": "10.0", "cplatform": "DESKTOP",
+}
+
+// buildTimedtextURL appends PO token, fmt and player client params to a baseUrl; signature-covered params pass through untouched.
+func buildTimedtextURL(rawURL, pot, format string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	q := u.Query()
+	q.Del("fmt")
+	q.Del("pot")
+	q.Del("potc")
+	if pot != "" {
+		q.Set("pot", pot)
+		q.Set("potc", "1")
+	}
+	q.Set("fmt", format)
+	for k, v := range timedtextPlayerParams {
+		q.Set(k, v)
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// isVTT reports whether the payload looks like a WebVTT document.
+func isVTT(body []byte) bool {
+	return strings.HasPrefix(strings.TrimSpace(string(body)), "WEBVTT") || strings.Contains(string(body), "-->")
+}
+
+// json3ToVTT converts a YouTube json3 caption payload into a WebVTT document.
+func json3ToVTT(data []byte) ([]byte, error) {
+	var payload struct {
+		Events []struct {
+			TStartMs    float64 `json:"tStartMs"`
+			DDurationMs float64 `json:"dDurationMs"`
+			Segs        []struct {
+				UTF8 string `json:"utf8"`
+			} `json:"segs"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, fmt.Errorf("parse json3 captions: %w", err)
+	}
+	if len(payload.Events) == 0 {
+		return nil, fmt.Errorf("json3 captions contain no events")
 	}
 
-	if m := regexp.MustCompile(`[?&]v=([^&]+)`).FindStringSubmatch(rawURL); m != nil {
-		if pot := bgutilPOToken(ctx, m[1]); pot != "" {
-			rawURL += "&pot=" + pot
-		}
+	var b strings.Builder
+	for _, l := range vttHeaderLines {
+		b.WriteString(l)
+		b.WriteString("\n")
 	}
+	for _, ev := range payload.Events {
+		var text strings.Builder
+		for _, seg := range ev.Segs {
+			text.WriteString(seg.UTF8)
+		}
+		line := strings.TrimRight(text.String(), "\n")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		b.WriteString(FormatTimecode(ev.TStartMs) + " --> " + FormatTimecode(ev.TStartMs+ev.DDurationMs) + "\n")
+		b.WriteString(line + "\n\n")
+	}
+	return []byte(b.String()), nil
+}
 
+// fetchTimedtext GETs a timedtext URL and returns the raw body, failing on non-200 status.
+func fetchTimedtext(ctx context.Context, rawURL, cookieFile string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
@@ -221,27 +325,53 @@ func downloadSubtitlesDirect(ctx context.Context, rawURL, cookieFile, outPath st
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("http error: %w", err)
+		return nil, fmt.Errorf("http error: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("http %d: %s", resp.StatusCode, resp.Status)
+		return nil, fmt.Errorf("http %d: %s", resp.StatusCode, resp.Status)
 	}
+	return io.ReadAll(resp.Body)
+}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
-	}
+// invalidatePOToken drops cached PO tokens and visitorData so the next call fetches fresh ones.
+func invalidatePOToken() {
+	potMu.Lock()
+	potCache = map[string]string{}
+	visitorCache = map[string]string{}
+	potMu.Unlock()
+}
 
-	if !strings.HasPrefix(strings.TrimSpace(string(body)), "WEBVTT") && !strings.Contains(string(body), "-->") {
-		return fmt.Errorf("invalid vtt content: %s", truncate(string(body), 200))
-	}
+// downloadSubtitlesDirect fetches a timedtext track (vtt first, then json3->vtt), retrying once with a fresh pot on empty bodies.
+func downloadSubtitlesDirect(ctx context.Context, rawURL, cookieFile, outPath string) error {
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		pot := bgutilPOToken(ctx)
 
-	if err := os.WriteFile(outPath, body, 0644); err != nil {
-		return fmt.Errorf("write subtitle file: %w", err)
+		body, err := fetchTimedtext(ctx, buildTimedtextURL(rawURL, pot, "vtt"), cookieFile)
+		switch {
+		case err != nil:
+			lastErr = err
+		case isVTT(body):
+			return os.WriteFile(outPath, body, 0644)
+		default:
+			lastErr = fmt.Errorf("invalid vtt content: %s", truncate(string(body), 200))
+		}
+
+		body, err = fetchTimedtext(ctx, buildTimedtextURL(rawURL, pot, "json3"), cookieFile)
+		switch vtt, cerr := json3ToVTT(body); {
+		case err != nil:
+			lastErr = err
+		case cerr == nil:
+			return os.WriteFile(outPath, vtt, 0644)
+		default:
+			lastErr = fmt.Errorf("invalid vtt content: %s (%v)", truncate(string(body), 200), cerr)
+		}
+
+		invalidatePOToken()
 	}
-	return nil
+	return lastErr
 }
 
 func (s *Service) translateVTTFile(ctx context.Context, vttPath, targetLang, sourceLang, videoTitle string, noLLM bool, onAttempt func(string)) (string, error) {
@@ -887,7 +1017,7 @@ func (s *Service) ResolveTranslationConfig(ctx context.Context) translate.Config
 		cfg.SourcePrefRU = translate.ParseCSV(v)
 	}
 	if val, err := s.configs.Get(ctx, "SUBS_GOOGLE_ONLY"); err == nil && val != nil {
-		cfg.GoogleOnly = translate.IsTruthy(val.Value)
+		cfg.GoogleOnly = settings.IsTruthy(val.Value)
 	}
 	if v, ok := get("TRANSLATION_TIMEOUT"); ok {
 		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {

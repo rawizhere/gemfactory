@@ -240,6 +240,52 @@ func IsDirectDownloadURL(raw string) bool {
 	return IsTikTokURL(raw) || IsShortsURL(raw)
 }
 
+// IsYouTubeURL reports whether raw points to youtube.com or youtu.be.
+func IsYouTubeURL(raw string) bool {
+	return strings.Contains(raw, "youtube.com/") || strings.Contains(raw, "youtu.be/")
+}
+
+// parenLinkPattern matches parenthesized fragments containing a link, e.g. "(https://youtu.be/x?t=12)".
+var parenLinkPattern = regexp.MustCompile(`\([^()]*https?://[^()]*\)`)
+
+// DetectImplicitClips parses a command-less message into one ParsedCommand per YouTube URL; nil for commands or URLs without a valid interval.
+func DetectImplicitClips(text string) []*ParsedCommand {
+	text = strings.TrimSpace(text)
+	if text == "" || strings.HasPrefix(text, "/") {
+		return nil
+	}
+	fields := strings.Fields(parenLinkPattern.ReplaceAllString(text, " "))
+	var cmds []*ParsedCommand
+	lang := ""
+	for i := 0; i < len(fields); {
+		if !IsYouTubeURL(fields[i]) {
+			i++
+			continue
+		}
+		j := i + 1
+		for j < len(fields) && !IsYouTubeURL(fields[j]) {
+			j++
+		}
+		p, err := ParseClipArgs(fields[i:j])
+		if err != nil || p.Shorts || len(p.Intervals) == 0 {
+			return nil
+		}
+		if p.SubsLang != "" {
+			lang = p.SubsLang
+		}
+		cmds = append(cmds, p)
+		i = j
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	// A trailing lang tag applies to every job in the message.
+	for _, c := range cmds {
+		c.SubsLang = lang
+	}
+	return cmds
+}
+
 func ExtractFirstURL(text string) string {
 	for _, field := range strings.Fields(text) {
 		if strings.HasPrefix(field, "http://") || strings.HasPrefix(field, "https://") {

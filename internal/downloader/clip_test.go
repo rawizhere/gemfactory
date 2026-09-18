@@ -1,6 +1,7 @@
 package downloader
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -68,5 +69,19 @@ func TestCalculateBitrateCapKbps(t *testing.T) {
 				t.Fatalf("expected bitrate between %f and %f kbps, got %f", tt.minExpected, tt.maxExpected, got)
 			}
 		})
+	}
+}
+
+func TestFallbackFetchArgs(t *testing.T) {
+	args := fallbackFetchArgs()
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "youtube:player_client=web_safari,android") {
+		t.Fatalf("expected player_client override, got %q", joined)
+	}
+	if strings.Contains(joined, "mweb") {
+		t.Fatalf("fallback must not keep mweb client, got %q", joined)
+	}
+	if !strings.Contains(joined, "-N 1") {
+		t.Fatalf("expected concurrent fragments disabled (-N 1), got %q", joined)
 	}
 }

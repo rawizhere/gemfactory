@@ -126,22 +126,6 @@ func (r *ReleaseRepository) GetActive(ctx context.Context) ([]model.Release, err
 	return releases, nil
 }
 
-func (r *ReleaseRepository) GetByArtistAndTitle(ctx context.Context, artistID int, title string) (*model.Release, error) {
-	var release model.Release
-	err := r.db.NewSelect().
-		Model(&release).
-		Where("artist_id = ? AND title = ?", artistID, title).
-		Scan(ctx)
-
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to query release by artist and title: %w", err)
-	}
-	return &release, nil
-}
-
 func (r *ReleaseRepository) GetByArtistDateAndTrack(ctx context.Context, artistID int, date time.Time, titleTrack string) (*model.Release, error) {
 	var release model.Release
 	err := r.db.NewSelect().

@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gemfactory/internal/settings"
 )
 
 const (
@@ -136,15 +138,6 @@ func ParseCSV(s string) []string {
 	return res
 }
 
-func IsTruthy(s string) bool {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
-}
-
 // DefaultConfig resolves the translation config from env with built-in defaults.
 func DefaultConfig() Config {
 	cfg := Config{
@@ -162,7 +155,7 @@ func DefaultConfig() Config {
 		Prompt:           strings.TrimSpace(os.Getenv("TRANSLATION_PROMPT")),
 		SourcePrefRU:     ParseCSV(os.Getenv("SUBS_SOURCE_PREF_RU")),
 	}
-	cfg.GoogleOnly = IsTruthy(os.Getenv("SUBS_GOOGLE_ONLY"))
+	cfg.GoogleOnly = settings.IsTruthy(os.Getenv("SUBS_GOOGLE_ONLY"))
 	return ApplyDefaults(cfg)
 }
 
@@ -212,7 +205,7 @@ func ResolveConfig(getter func(string) (string, bool)) Config {
 		cfg.SourcePrefRU = ParseCSV(v)
 	}
 	if v, ok := getter("SUBS_GOOGLE_ONLY"); ok {
-		cfg.GoogleOnly = IsTruthy(v)
+		cfg.GoogleOnly = settings.IsTruthy(v)
 	}
 	if v, ok := getter("TRANSLATION_TIMEOUT"); ok {
 		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {

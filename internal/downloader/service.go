@@ -396,9 +396,9 @@ func (s *Service) run(ctx context.Context, job *Job) {
 				s.reportProgress(job, p)
 			}); err != nil {
 				if errors.Is(err, ErrIncompleteStream) {
-					s.logger.Warn("incomplete stream detected, retrying download once", zap.String("job", job.ID), zap.Error(err))
+					s.logger.Warn("incomplete stream detected, retrying with fallback fetch strategy", zap.String("job", job.ID), zap.Error(err))
 					_ = os.Remove(clipPath)
-					err = s.downloadSegment(ctx, job.Request, clipPath, cookieFile, startMs, endMs, meta.IsVertical(), func(p ProgressUpdate) {
+					err = s.downloadSegmentFallback(ctx, job.Request, clipPath, cookieFile, startMs, endMs, meta.IsVertical(), func(p ProgressUpdate) {
 						s.reportProgress(job, p)
 					})
 				}
@@ -805,9 +805,15 @@ func FriendlyError(raw string) string {
 	case strings.Contains(raw, "No supported JavaScript runtime"):
 		return "No JavaScript runtime (deno/node) available for yt-dlp. Rebuild the image: docker compose build."
 
+	case strings.Contains(raw, "invalid vtt content"),
+		strings.Contains(raw, "Did not get any data blocks"):
+		// Tracks were resolved from metadata, so this is a download failure, not a missing-subtitles case.
+		return "Subtitles exist for this video, but YouTube failed to serve them. Please try again later."
+
 	case strings.Contains(raw, "this video has no subtitles"),
 		strings.Contains(raw, "no subtitles available"),
-		strings.Contains(raw, "no subtitles found"):
+		strings.Contains(raw, "no subtitles found"),
+		strings.Contains(raw, "no usable subtitle track"):
 		return "This video has no subtitles."
 
 	case strings.Contains(raw, "is too long"):
@@ -824,10 +830,6 @@ func FriendlyError(raw string) string {
 	case strings.Contains(raw, "Video unavailable"),
 		strings.Contains(raw, "removed by the uploader"):
 		return "Video is unavailable or removed."
-
-	case strings.Contains(raw, "invalid vtt content"),
-		strings.Contains(raw, "Did not get any data blocks"):
-		return "YouTube is temporarily not serving subtitles for this video. Please try again later."
 
 	case strings.Contains(raw, "Too Many Requests"),
 		strings.Contains(raw, "HTTP 429"):

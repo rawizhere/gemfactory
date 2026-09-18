@@ -83,6 +83,12 @@ func (r *Router) RegisterRoutes(bh *th.BotHandler) {
 		return nil
 	}, grokPredicate())
 
+	// Implicit clip messages (URL + timecodes, no command) must win over the plain URL route.
+	bh.HandleMessage(func(ctx *th.Context, m telego.Message) error {
+		r.handlers.Clip.Implicit(ctx, &m)
+		return nil
+	}, messageWithImplicitClip())
+
 	// Non-command messages containing a URL start a direct download; registered last so commands win.
 	bh.HandleMessage(func(ctx *th.Context, m telego.Message) error {
 		r.handlers.Clip.DirectLink(ctx, &m, downloader.ExtractFirstURL(m.Text))
@@ -172,6 +178,17 @@ func messageWithURL() th.Predicate {
 			return false
 		}
 		return downloader.ExtractFirstURL(m.Text) != ""
+	}
+}
+
+// messageWithImplicitClip matches non-command messages that parse as implicit clip requests.
+func messageWithImplicitClip() th.Predicate {
+	return func(_ context.Context, update telego.Update) bool {
+		m := update.Message
+		if m == nil || m.Text == "" || telegram.MessageCommand(m) != "" {
+			return false
+		}
+		return downloader.DetectImplicitClips(m.Text) != nil
 	}
 }
 

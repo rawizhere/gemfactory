@@ -80,8 +80,8 @@ func settingRegistry() []settingSpec {
 	return []settingSpec{
 		{key: "DOWNLOAD_CONCURRENCY", def: "4", validate: intRange(1, 20),
 			apply: func(s *Server, v string) {
-				if n, err := strconv.Atoi(v); err == nil && s.downloads != nil {
-					s.downloads.SetConcurrency(n)
+				if n, err := strconv.Atoi(v); err == nil && s.Downloads != nil {
+					s.Downloads.SetConcurrency(n)
 				}
 			}},
 		{key: "DOWNLOAD_RETENTION_HOURS", def: "24", validate: intRange(1, 8760)},
@@ -124,8 +124,8 @@ func settingRegistry() []settingSpec {
 
 // resolveSetting returns the effective value and its source ("db", "env" or "default").
 func (s *Server) resolveSetting(ctx context.Context, spec settingSpec) (value, source string) {
-	if s.configs != nil {
-		if c, err := s.configs.Get(ctx, spec.key); err == nil && c != nil && strings.TrimSpace(c.Value) != "" {
+	if s.Configs != nil {
+		if c, err := s.Configs.Get(ctx, spec.key); err == nil && c != nil && strings.TrimSpace(c.Value) != "" {
 			return strings.TrimSpace(c.Value), "db"
 		}
 	}
@@ -163,17 +163,17 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	system := []map[string]string{}
-	if s.appCfg != nil {
+	if s.AppCfg != nil {
 		system = append(system,
-			map[string]string{"key": "WEB_PORT", "value": s.appCfg.WebPort},
-			map[string]string{"key": "HEALTH_PORT", "value": s.appCfg.HealthPort},
-			map[string]string{"key": "WEB_ENABLED", "value": strconv.FormatBool(s.appCfg.WebEnabled)},
-			map[string]string{"key": "HEALTH_CHECK_ENABLED", "value": strconv.FormatBool(s.appCfg.HealthCheckEnabled)},
-			map[string]string{"key": "LOG_LEVEL", "value": s.appCfg.LogLevel},
-			map[string]string{"key": "TIMEZONE", "value": s.appCfg.Timezone},
-			map[string]string{"key": "APP_DATA_DIR", "value": s.appCfg.AppDataDir},
-			map[string]string{"key": "SCRAPER_REQUEST_DELAY", "value": s.appCfg.ScraperDelay.String()},
-			map[string]string{"key": "RELEASE_CHECK_INTERVAL", "value": s.appCfg.ReleaseCheckInterval.String()},
+			map[string]string{"key": "WEB_PORT", "value": s.AppCfg.WebPort},
+			map[string]string{"key": "HEALTH_PORT", "value": s.AppCfg.HealthPort},
+			map[string]string{"key": "WEB_ENABLED", "value": strconv.FormatBool(s.AppCfg.WebEnabled)},
+			map[string]string{"key": "HEALTH_CHECK_ENABLED", "value": strconv.FormatBool(s.AppCfg.HealthCheckEnabled)},
+			map[string]string{"key": "LOG_LEVEL", "value": s.AppCfg.LogLevel},
+			map[string]string{"key": "TIMEZONE", "value": s.AppCfg.Timezone},
+			map[string]string{"key": "APP_DATA_DIR", "value": s.AppCfg.AppDataDir},
+			map[string]string{"key": "SCRAPER_REQUEST_DELAY", "value": s.AppCfg.ScraperDelay.String()},
+			map[string]string{"key": "RELEASE_CHECK_INTERVAL", "value": s.AppCfg.ReleaseCheckInterval.String()},
 			map[string]string{"key": "FFMPEG_BINARY", "value": os.Getenv("FFMPEG_BINARY")},
 		)
 	}
@@ -228,7 +228,7 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, u := range updates {
-		if err := s.configs.Set(ctx, u.spec.key, u.val); err != nil {
+		if err := s.Configs.Set(ctx, u.spec.key, u.val); err != nil {
 			s.fail(w, err)
 			return
 		}

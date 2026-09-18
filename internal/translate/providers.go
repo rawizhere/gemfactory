@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/avast/retry-go/v4"
 	"github.com/sashabaranov/go-openai"
 	"google.golang.org/genai"
 )
@@ -89,40 +88,42 @@ func translateWithGoogleBatch(ctx context.Context, texts []string, targetLang st
 	client := &http.Client{Timeout: 30 * time.Second}
 
 	var body []byte
-	err := retry.Do(
-		func() error {
-			req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
-			if reqErr != nil {
-				return retry.Unrecoverable(reqErr)
+	var err error
+	for attempt := 0; attempt < 4; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(3 * time.Second << (attempt - 1)):
 			}
-			req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+		}
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+		if reqErr != nil {
+			return nil, reqErr
+		}
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
 
-			resp, doErr := client.Do(req)
-			if doErr != nil {
-				return fmt.Errorf("google translate request failed: %w", doErr)
-			}
-			defer func() { _ = resp.Body.Close() }()
-
-			b, readErr := io.ReadAll(resp.Body)
-			if readErr != nil {
-				return readErr
-			}
-			if resp.StatusCode == http.StatusOK {
-				body = b
-				return nil
-			}
-			statusErr := fmt.Errorf("google translate returned status %d: %s", resp.StatusCode, truncate(string(b), 300))
-			if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode < 500 {
-				return retry.Unrecoverable(statusErr)
-			}
-			return statusErr
-		},
-		retry.Context(ctx),
-		retry.Attempts(4),
-		retry.DelayType(retry.BackOffDelay),
-		retry.Delay(3*time.Second),
-		retry.LastErrorOnly(true),
-	)
+		resp, doErr := client.Do(req)
+		if doErr != nil {
+			err = fmt.Errorf("google translate request failed: %w", doErr)
+			continue
+		}
+		b, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			err = readErr
+			continue
+		}
+		if resp.StatusCode == http.StatusOK {
+			body = b
+			err = nil
+			break
+		}
+		err = fmt.Errorf("google translate returned status %d: %s", resp.StatusCode, truncate(string(b), 300))
+		if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode < 500 {
+			return nil, err
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -376,25 +377,21 @@ func translateOpenAICompatible(ctx context.Context, provider, baseURL, apiKey st
 // createChatCompletionWithRetry sends the request, retrying once on 429/5xx.
 func createChatCompletionWithRetry(ctx context.Context, client *openai.Client, req openai.ChatCompletionRequest) (openai.ChatCompletionResponse, error) {
 	var resp openai.ChatCompletionResponse
-	err := retry.Do(
-		func() error {
-			r, cerr := client.CreateChatCompletion(ctx, req)
-			if cerr != nil {
-				return cerr
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return openai.ChatCompletionResponse{}, ctx.Err()
+			case <-time.After(3 * time.Second):
 			}
-			resp = r
-			return nil
-		},
-		retry.Context(ctx),
-		retry.Attempts(2),
-		retry.Delay(3*time.Second),
-		retry.RetryIf(isRetryableOpenAIError),
-		retry.LastErrorOnly(true),
-	)
-	if err != nil {
-		return openai.ChatCompletionResponse{}, err
+		}
+		resp, err = client.CreateChatCompletion(ctx, req)
+		if err == nil || !isRetryableOpenAIError(err) {
+			return resp, err
+		}
 	}
-	return resp, nil
+	return openai.ChatCompletionResponse{}, err
 }
 
 // isRetryableOpenAIError reports whether the request should be retried (rate limits and server errors).

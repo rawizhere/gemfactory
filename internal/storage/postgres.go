@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/avast/retry-go/v4"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
@@ -25,50 +24,55 @@ func NewPostgres(ctx context.Context, databaseURL string, logger *zap.Logger) (*
 
 	var db *bun.DB
 	var sqldb *sql.DB
-	err := retry.Do(
-		func() error {
-			sqldb = sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(databaseURL)))
-			sqldb.SetMaxOpenConns(25)
-			sqldb.SetMaxIdleConns(10)
-			sqldb.SetConnMaxLifetime(5 * time.Minute)
-			sqldb.SetConnMaxIdleTime(1 * time.Minute)
-
-			candidate := bun.NewDB(sqldb, pgdialect.New())
-
-			initCtx, initCancel := context.WithTimeout(ctx, 5*time.Second)
-			_, err := candidate.ExecContext(initCtx, "SET search_path TO gemfactory, public")
-			initCancel()
+	var err error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				err = ctx.Err()
+			case <-time.After(5 * time.Second):
+			}
 			if err != nil {
-				logger.Warn("Failed to set search_path", zap.Error(err))
+				break
 			}
+		}
+		sqldb = sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(databaseURL)))
+		sqldb.SetMaxOpenConns(25)
+		sqldb.SetMaxIdleConns(10)
+		sqldb.SetConnMaxLifetime(5 * time.Minute)
+		sqldb.SetConnMaxIdleTime(1 * time.Minute)
 
-			if logger.Core().Enabled(zap.DebugLevel) {
-				candidate.AddQueryHook(bundebug.NewQueryHook(
-					bundebug.WithVerbose(true),
-					bundebug.FromEnv("BUNDEBUG"),
-				))
-			}
+		candidate := bun.NewDB(sqldb, pgdialect.New())
 
-			pingCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
-			pingErr := candidate.PingContext(pingCtx)
-			pingCancel()
+		initCtx, initCancel := context.WithTimeout(ctx, 5*time.Second)
+		_, err = candidate.ExecContext(initCtx, "SET search_path TO gemfactory, public")
+		initCancel()
+		if err != nil {
+			logger.Warn("Failed to set search_path", zap.Error(err))
+		}
 
-			if pingErr != nil {
-				_ = candidate.Close()
-				return pingErr
-			}
+		if logger.Core().Enabled(zap.DebugLevel) {
+			candidate.AddQueryHook(bundebug.NewQueryHook(
+				bundebug.WithVerbose(true),
+				bundebug.FromEnv("BUNDEBUG"),
+			))
+		}
 
-			db = candidate
-			return nil
-		},
-		retry.Context(ctx),
-		retry.Attempts(maxRetries),
-		retry.Delay(5*time.Second),
-		retry.LastErrorOnly(true),
-		retry.OnRetry(func(n uint, err error) {
-			logger.Warn("Failed to connect to database", zap.Uint("attempt", n+1), zap.Error(err))
-		}),
-	)
+		pingCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
+		pingErr := candidate.PingContext(pingCtx)
+		pingCancel()
+
+		if pingErr != nil {
+			_ = candidate.Close()
+			err = pingErr
+			logger.Warn("Failed to connect to database", zap.Int("attempt", attempt+1), zap.Error(err))
+			continue
+		}
+
+		db = candidate
+		err = nil
+		break
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}

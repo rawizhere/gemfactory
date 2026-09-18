@@ -75,10 +75,6 @@ func (s *ConfigService) GetAll(ctx context.Context) (string, error) {
 	return result.String(), nil
 }
 
-func (s *ConfigService) GetAllRaw(ctx context.Context) ([]model.Config, error) {
-	return s.repo.GetAll(ctx)
-}
-
 func (s *ConfigService) Reset(ctx context.Context) error {
 	err := s.repo.Reset(ctx)
 	if err != nil {

@@ -32,7 +32,7 @@ func (s *ArtistService) Add(ctx context.Context, artists []string, isFemale bool
 	var models []model.Artist
 	for _, artistName := range artists {
 		models = append(models, model.Artist{
-			Name:     model.NewUniqueString(strings.TrimSpace(artistName)),
+			Name:     (strings.TrimSpace(artistName)),
 			Gender:   model.FromBool(isFemale),
 			IsActive: true,
 		})
@@ -84,32 +84,6 @@ func (s *ArtistService) Deactivate(ctx context.Context, artists []string) (int, 
 	return s.repo.DeactivateByNames(ctx, cleanNames)
 }
 
-func (s *ArtistService) GetFemaleArtists(ctx context.Context) ([]string, error) {
-	artists, err := s.repo.GetByGenderAndActive(ctx, model.GenderFemale, true)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get female artists: %w", err)
-	}
-
-	names := make([]string, 0, len(artists))
-	for _, artist := range artists {
-		names = append(names, artist.Name.String())
-	}
-	return names, nil
-}
-
-func (s *ArtistService) GetMaleArtists(ctx context.Context) ([]string, error) {
-	artists, err := s.repo.GetByGenderAndActive(ctx, model.GenderMale, true)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get male artists: %w", err)
-	}
-
-	names := make([]string, 0, len(artists))
-	for _, artist := range artists {
-		names = append(names, artist.Name.String())
-	}
-	return names, nil
-}
-
 func (s *ArtistService) GetAll(ctx context.Context) ([]model.Artist, error) {
 	return s.repo.GetAll(ctx)
 }
@@ -140,9 +114,9 @@ func (s *ArtistService) formatArtists(artists []model.Artist) string {
 
 	for _, artist := range artists {
 		if artist.IsFemale() {
-			femaleArtists = append(femaleArtists, artist.Name.String())
+			femaleArtists = append(femaleArtists, artist.Name)
 		} else {
-			maleArtists = append(maleArtists, artist.Name.String())
+			maleArtists = append(maleArtists, artist.Name)
 		}
 	}
 

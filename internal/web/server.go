@@ -35,27 +35,15 @@ type Deps struct {
 }
 
 type Server struct {
-	server     *http.Server
-	logger     *zap.Logger
-	appCfg     *config.Config
-	artists    model.ArtistRepository
-	releases   model.ReleaseRepository
-	configs    model.ConfigRepository
-	cookies    model.CookieRepository
-	downloads  *downloader.Service
-	releaseSvc *service.ReleaseService
+	Deps
+	server *http.Server
+	logger *zap.Logger
 }
 
 func NewServer(port string, logger *zap.Logger, deps Deps) *Server {
 	s := &Server{
-		logger:     logger,
-		appCfg:     deps.AppCfg,
-		artists:    deps.Artists,
-		releases:   deps.Releases,
-		configs:    deps.Configs,
-		cookies:    deps.Cookies,
-		downloads:  deps.Downloads,
-		releaseSvc: deps.ReleaseSvc,
+		Deps:   deps,
+		logger: logger,
 	}
 
 	mux := http.NewServeMux()
@@ -123,7 +111,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listArtists(w http.ResponseWriter, r *http.Request) {
-	artists, err := s.artists.GetAll(r.Context())
+	artists, err := s.Artists.GetAll(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -152,7 +140,7 @@ func (s *Server) createArtist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, err := s.artists.GetByName(r.Context(), name)
+	existing, err := s.Artists.GetByName(r.Context(), name)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -162,8 +150,8 @@ func (s *Server) createArtist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	artist := &model.Artist{Name: model.NewUniqueString(name), Gender: gender}
-	if err := s.artists.Create(r.Context(), artist); err != nil {
+	artist := &model.Artist{Name: (name), Gender: gender}
+	if err := s.Artists.Create(r.Context(), artist); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -185,14 +173,14 @@ func (s *Server) createArtists(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, err := s.artists.GetAll(r.Context())
+	existing, err := s.Artists.GetAll(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	known := make(map[string]bool, len(existing))
 	for _, a := range existing {
-		known[strings.ToLower(a.Name.String())] = true
+		known[strings.ToLower(a.Name)] = true
 	}
 
 	added, skipped := 0, []string{}
@@ -207,8 +195,8 @@ func (s *Server) createArtists(w http.ResponseWriter, r *http.Request) {
 			skipped = append(skipped, name)
 			continue
 		}
-		artist := &model.Artist{Name: model.NewUniqueString(name), Gender: gender}
-		if err := s.artists.Create(r.Context(), artist); err != nil {
+		artist := &model.Artist{Name: (name), Gender: gender}
+		if err := s.Artists.Create(r.Context(), artist); err != nil {
 			s.fail(w, err)
 			return
 		}
@@ -226,14 +214,14 @@ func (s *Server) importArtistsJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, err := s.artists.GetAll(r.Context())
+	existing, err := s.Artists.GetAll(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	known := make(map[string]bool, len(existing))
 	for _, a := range existing {
-		known[strings.ToLower(a.Name.String())] = true
+		known[strings.ToLower(a.Name)] = true
 	}
 
 	added, skipped := 0, []string{}
@@ -262,8 +250,8 @@ func (s *Server) importArtistsJSON(w http.ResponseWriter, r *http.Request) {
 				skipped = append(skipped, name)
 				continue
 			}
-			artist := &model.Artist{Name: model.NewUniqueString(name), Gender: gender}
-			if err := s.artists.Create(r.Context(), artist); err != nil {
+			artist := &model.Artist{Name: (name), Gender: gender}
+			if err := s.Artists.Create(r.Context(), artist); err != nil {
 				s.fail(w, err)
 				return
 			}
@@ -276,7 +264,7 @@ func (s *Server) importArtistsJSON(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) runParser(w http.ResponseWriter, r *http.Request) {
-	if s.releaseSvc == nil {
+	if s.ReleaseSvc == nil {
 		http.Error(w, "parser service unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -301,7 +289,7 @@ func (s *Server) runParser(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
-		count, err := s.releaseSvc.ParseReleasesForYear(ctx, strconv.Itoa(year))
+		count, err := s.ReleaseSvc.ParseReleasesForYear(ctx, strconv.Itoa(year))
 		if err != nil {
 			s.logger.Warn("Parser failed for year", zap.Int("year", year), zap.Error(err))
 		} else {
@@ -312,7 +300,7 @@ func (s *Server) runParser(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
-		count, err := s.releaseSvc.ParseReleasesForMonth(ctx, query)
+		count, err := s.ReleaseSvc.ParseReleasesForMonth(ctx, query)
 		if err != nil {
 			s.logger.Warn("Parser failed for query", zap.String("query", query), zap.Error(err))
 		} else {
@@ -328,17 +316,17 @@ func (s *Server) runParser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
-	artists, err := s.artists.GetAll(r.Context())
+	artists, err := s.Artists.GetAll(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	releases, err := s.releases.GetAll(r.Context())
+	releases, err := s.Releases.GetAll(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	cookies, err := s.cookies.GetAll(r.Context())
+	cookies, err := s.Cookies.GetAll(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -353,8 +341,8 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 
 	storageFormatted := "0 B"
 	storageFiles := 0
-	if s.downloads != nil {
-		if b, files, err := s.downloads.GetStorageUsage(); err == nil {
+	if s.Downloads != nil {
+		if b, files, err := s.Downloads.GetStorageUsage(); err == nil {
 			storageFormatted = formatBytes(b)
 			storageFiles = files
 		}
@@ -385,7 +373,7 @@ func (s *Server) updateArtist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	artist, err := s.artists.GetByID(r.Context(), id)
+	artist, err := s.Artists.GetByID(r.Context(), id)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -401,7 +389,7 @@ func (s *Server) updateArtist(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "name cannot be empty", http.StatusBadRequest)
 			return
 		}
-		artist.Name = model.NewUniqueString(name)
+		artist.Name = (name)
 	}
 	if req.IsActive != nil {
 		artist.IsActive = *req.IsActive
@@ -414,7 +402,7 @@ func (s *Server) updateArtist(w http.ResponseWriter, r *http.Request) {
 		artist.Gender = gender
 	}
 
-	if err := s.artists.Update(r.Context(), artist); err != nil {
+	if err := s.Artists.Update(r.Context(), artist); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -426,7 +414,7 @@ func (s *Server) deleteArtist(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.artists.Delete(r.Context(), id); err != nil {
+	if err := s.Artists.Delete(r.Context(), id); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -434,12 +422,12 @@ func (s *Server) deleteArtist(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listReleases(w http.ResponseWriter, r *http.Request) {
-	releases, err := s.releases.GetAll(r.Context())
+	releases, err := s.Releases.GetAll(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	artists, err := s.artists.GetAll(r.Context())
+	artists, err := s.Artists.GetAll(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -447,7 +435,7 @@ func (s *Server) listReleases(w http.ResponseWriter, r *http.Request) {
 
 	names := make(map[int]string, len(artists))
 	for _, a := range artists {
-		names[a.ArtistID] = a.Name.String()
+		names[a.ArtistID] = a.Name
 	}
 
 	type row struct {
@@ -465,11 +453,11 @@ func (s *Server) listReleases(w http.ResponseWriter, r *http.Request) {
 		rows = append(rows, row{
 			ID:         rel.ReleaseID,
 			Artist:     names[rel.ArtistID],
-			Title:      rel.Title.String(),
+			Title:      rel.Title,
 			Date:       rel.Date.Format("2006-01-02"),
-			TitleTrack: rel.TitleTrack.String(),
-			MV:         rel.MV.String(),
-			Spotify:    rel.Spotify.String(),
+			TitleTrack: rel.TitleTrack,
+			MV:         rel.MV,
+			Spotify:    rel.Spotify,
 		})
 	}
 	writeJSON(w, rows)
@@ -480,7 +468,7 @@ func (s *Server) deleteRelease(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := s.releases.Delete(r.Context(), id); err != nil {
+	if err := s.Releases.Delete(r.Context(), id); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -499,7 +487,7 @@ func (s *Server) deleteReleases(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ids is required", http.StatusBadRequest)
 		return
 	}
-	n, err := s.releases.DeleteByIDs(r.Context(), req.IDs)
+	n, err := s.Releases.DeleteByIDs(r.Context(), req.IDs)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -508,7 +496,7 @@ func (s *Server) deleteReleases(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listConfig(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.configs.GetAll(r.Context())
+	rows, err := s.Configs.GetAll(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -578,11 +566,11 @@ func (s *Server) listConfig(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	if s.appCfg != nil {
+	if s.AppCfg != nil {
 		out = append(out,
-			entry{Source: "env", Key: "WEB_PORT", Value: s.appCfg.WebPort, Description: "Web UI HTTP server port"},
-			entry{Source: "env", Key: "HEALTH_PORT", Value: s.appCfg.HealthPort, Description: "Health check HTTP server port"},
-			entry{Source: "env", Key: "APP_DATA_DIR", Value: s.appCfg.AppDataDir, Description: "Runtime data directory path"},
+			entry{Source: "env", Key: "WEB_PORT", Value: s.AppCfg.WebPort, Description: "Web UI HTTP server port"},
+			entry{Source: "env", Key: "HEALTH_PORT", Value: s.AppCfg.HealthPort, Description: "Health check HTTP server port"},
+			entry{Source: "env", Key: "APP_DATA_DIR", Value: s.AppCfg.AppDataDir, Description: "Runtime data directory path"},
 		)
 	}
 
@@ -609,7 +597,7 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if err := s.configs.Set(r.Context(), key, req.Value); err != nil {
+	if err := s.Configs.Set(r.Context(), key, req.Value); err != nil {
 		s.fail(w, err)
 		return
 	}

@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"gemfactory/internal/middleware"
+	"gemfactory/internal/settings"
 	"gemfactory/internal/translate"
 )
 
@@ -46,7 +47,7 @@ func (h *GrokHandlers) Run(ctx context.Context, message *telego.Message, mode Gr
 	}
 
 	enabledStr, err := h.Services.Config.Get(ctx, "GROK_ENABLED")
-	if err == nil && !translate.IsTruthy(enabledStr) {
+	if err == nil && !settings.IsTruthy(enabledStr) {
 		return
 	}
 

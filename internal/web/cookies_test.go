@@ -36,8 +36,8 @@ func (s *stubCookies) Delete(ctx context.Context, domain string) (int, error) {
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	return &Server{
-		logger:  zap.NewNop(),
-		cookies: &stubCookies{domains: map[string]string{}},
+		logger: zap.NewNop(),
+		Deps:   Deps{Cookies: &stubCookies{domains: map[string]string{}}},
 	}
 }
 
@@ -74,7 +74,7 @@ func TestUpsertCookieValidation(t *testing.T) {
 func TestUpsertCookieAutoDetect(t *testing.T) {
 	stub := &stubCookies{domains: map[string]string{}}
 	s := newTestServer(t)
-	s.cookies = stub
+	s.Cookies = stub
 
 	content := "# Netscape HTTP Cookie File\n" +
 		".youtube.com\tTRUE\t/\tTRUE\t0\tA\t1\n" +
