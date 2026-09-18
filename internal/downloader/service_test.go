@@ -90,9 +90,19 @@ func TestFriendlyError(t *testing.T) {
 			want: "Video is private or members-only. Cookies from an authorized account are required.",
 		},
 		{
-			name: "empty timedtext",
-			raw:  "failed to download subtitles: direct: invalid vtt content: ; yt-dlp fallback: Did not get any data blocks",
-			want: "YouTube is temporarily not serving subtitles for this video. Please try again later.",
+			name: "subtitle download failed though tracks exist",
+			raw:  "subtitles unavailable (en): failed to download subtitles: direct: invalid vtt content: ; yt-dlp fallback: Did not get any data blocks",
+			want: "Subtitles exist for this video, but YouTube failed to serve them. Please try again later.",
+		},
+		{
+			name: "no subtitle tracks in metadata",
+			raw:  "subtitles unavailable (en): no subtitles found for this video",
+			want: "This video has no subtitles.",
+		},
+		{
+			name: "no usable track",
+			raw:  "no usable subtitle track found",
+			want: "This video has no subtitles.",
 		},
 		{
 			name: "rate limited",

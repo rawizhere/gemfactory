@@ -9,6 +9,7 @@ import (
 	"gemfactory/internal/health"
 	"gemfactory/internal/keyboard"
 	"gemfactory/internal/service"
+	"gemfactory/internal/settings"
 	"gemfactory/internal/storage"
 	"gemfactory/internal/telegram"
 	"gemfactory/internal/web"
@@ -58,6 +59,15 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
+	configRepo := storage.NewConfigRepository(db.GetDB(), logger)
+	provider := settings.New(configRepo)
+	if cfg.BotToken == "" {
+		cfg.BotToken = provider.Value(ctx, "BOT_TOKEN", "")
+	}
+	if cfg.AdminUsername == "" {
+		cfg.AdminUsername = strings.TrimPrefix(provider.Value(ctx, "ADMIN_USERNAME", ""), "@")
+	}
+
 	services := service.NewServices(db, cfg, logger)
 	tgClient, err := telegram.NewClient(cfg.BotToken, logger)
 	if err != nil {
@@ -72,7 +82,6 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 
 	// yt-dlp downloader: resolve binary, start nightly update loop.
 	cookieRepo := storage.NewCookieRepository(db.GetDB(), logger)
-	configRepo := storage.NewConfigRepository(db.GetDB(), logger)
 	downloaderSvc := downloader.NewService(cookieRepo, cfg.AppDataDir, cfg.DownloadConcurrency, logger)
 	downloaderSvc.SetConfigRepo(configRepo)
 	if c, err := configRepo.Get(botCtx, "DOWNLOAD_CONCURRENCY"); err == nil && c != nil {

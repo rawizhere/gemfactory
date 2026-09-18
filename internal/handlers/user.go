@@ -18,7 +18,7 @@ func NewUserHandlers(base *BaseHandler) *UserHandlers {
 
 func (h *UserHandlers) Start(ctx context.Context, message *telego.Message) {
 	text := "Welcome! Please choose a month:"
-	_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, text, h.GetMainKeyboard())
+	_ = h.TG.SendMessageWithMarkup(ctx, message.Chat.ID, text, h.Keyboard.GetMainKeyboard())
 }
 
 func (h *UserHandlers) Help(ctx context.Context, message *telego.Message) {
@@ -34,13 +34,13 @@ func (h *UserHandlers) Help(ctx context.Context, message *telego.Message) {
 		"\nDirect links: Send TikTok or YouTube Shorts directly.\n" +
 		"Topic help: <code>/help clip</code>, <code>/help subs</code>, etc.\n\n" +
 		fmt.Sprintf("Admin: @%s", h.Config.AdminUsername)
-	_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, text, h.GetMainKeyboard())
+	_ = h.TG.SendMessageWithMarkup(ctx, message.Chat.ID, text, h.Keyboard.GetMainKeyboard())
 }
 
 func (h *UserHandlers) Month(ctx context.Context, message *telego.Message) {
 	parts := strings.Fields(message.Text)
 	if len(parts) < 2 {
-		_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, "Please choose a month:", h.GetMainKeyboard())
+		_ = h.TG.SendMessageWithMarkup(ctx, message.Chat.ID, "Please choose a month:", h.Keyboard.GetMainKeyboard())
 		return
 	}
 
@@ -74,7 +74,7 @@ func (h *UserHandlers) Month(ctx context.Context, message *telego.Message) {
 		return
 	}
 
-	_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, response, h.GetMainKeyboard())
+	_ = h.TG.SendMessageWithMarkup(ctx, message.Chat.ID, response, h.Keyboard.GetMainKeyboard())
 }
 
 func (h *UserHandlers) Artists(ctx context.Context, message *telego.Message) {
@@ -83,13 +83,13 @@ func (h *UserHandlers) Artists(ctx context.Context, message *telego.Message) {
 		h.HandleError(ctx, message.Chat.ID, err, "Error retrieving artist list")
 		return
 	}
-	_ = h.SendMessageWithMarkup(ctx, message.Chat.ID, response, h.GetMainKeyboard())
+	_ = h.TG.SendMessageWithMarkup(ctx, message.Chat.ID, response, h.Keyboard.GetMainKeyboard())
 }
 
 func (h *UserHandlers) Search(ctx context.Context, message *telego.Message) {
 	parts := strings.SplitN(message.Text, " ", 2)
 	if len(parts) < 2 {
-		_ = h.SendMessage(ctx, message.Chat.ID, "Usage: /search <artist_name>")
+		_ = h.TG.SendMessage(ctx, message.Chat.ID, "Usage: /search <artist_name>")
 		return
 	}
 
@@ -99,7 +99,7 @@ func (h *UserHandlers) Search(ctx context.Context, message *telego.Message) {
 		h.HandleError(ctx, message.Chat.ID, err, "Search error")
 		return
 	}
-	_ = h.SendMessage(ctx, message.Chat.ID, response)
+	_ = h.TG.SendMessage(ctx, message.Chat.ID, response)
 }
 
 func (h *UserHandlers) Metrics(ctx context.Context, message *telego.Message) {
@@ -113,5 +113,5 @@ func (h *UserHandlers) Metrics(ctx context.Context, message *telego.Message) {
 		"Total Releases: %d",
 		tCount, fCount, mCount, rCount)
 
-	_ = h.SendMessage(ctx, message.Chat.ID, text)
+	_ = h.TG.SendMessage(ctx, message.Chat.ID, text)
 }

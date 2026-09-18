@@ -1,6 +1,10 @@
 package downloader
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -256,4 +260,111 @@ func TestSplitDialogueLines(t *testing.T) {
 	for in, want := range cases {
 		require.Equal(t, want, splitDialogueLines(in), "splitDialogueLines(%q)", in)
 	}
+}
+
+const timedtextSampleURL = "https://www.youtube.com/api/timedtext?v=GcgUKMU3yzw&ei=ABC&caps=asr&opi=112496729&exp=xpo%2Cxpe&xoaf=5&hl=en&ip=0.0.0.0&ipbits=0&expire=1789785268&sparams=ip%2Cipbits%2Cexpire%2Cv%2Cei%2Ccaps%2Copi%2Cexp%2Cxoaf&signature=E4CA0B8A6F9CA0F8800D1108573AC5E98E4E285F.0B0ADD8E65A3DF062BB305E950F15841AA8FC743&key=yt8&lang=en&fmt=vtt&pot=oldpot"
+
+func TestBuildTimedtextURL(t *testing.T) {
+	got := buildTimedtextURL(timedtextSampleURL, "newpot", "vtt")
+	u, err := url.Parse(got)
+	require.NoError(t, err)
+	q := u.Query()
+
+	// Player client params appended (the proven fix for empty timedtext bodies).
+	require.Equal(t, "2", q.Get("xorb"))
+	require.Equal(t, "3", q.Get("xobt"))
+	require.Equal(t, "3", q.Get("xovt"))
+	require.Equal(t, "WEB", q.Get("c"))
+	require.Equal(t, "UNIPLAYER", q.Get("cplayer"))
+	require.Equal(t, "Firefox", q.Get("cbr"))
+	require.Equal(t, "152.0", q.Get("cbrver"))
+	require.Equal(t, "Windows", q.Get("cos"))
+	require.Equal(t, "10.0", q.Get("cosver"))
+	require.Equal(t, "DESKTOP", q.Get("cplatform"))
+	require.NotEmpty(t, q.Get("cver"))
+
+	// Fresh pot replaces any existing one, potc set alongside.
+	require.Equal(t, "newpot", q.Get("pot"))
+	require.Equal(t, "1", q.Get("potc"))
+	require.Equal(t, "vtt", q.Get("fmt"))
+
+	// Signature-bearing params pass through untouched.
+	require.Equal(t, "E4CA0B8A6F9CA0F8800D1108573AC5E98E4E285F.0B0ADD8E65A3DF062BB305E950F15841AA8FC743", q.Get("signature"))
+	require.Equal(t, "ip,ipbits,expire,v,ei,caps,opi,exp,xoaf", q.Get("sparams"))
+	require.Equal(t, "GcgUKMU3yzw", q.Get("v"))
+	require.Equal(t, "1789785268", q.Get("expire"))
+
+	// No pot -> no potc, requested format wins.
+	u2, err := url.Parse(buildTimedtextURL(timedtextSampleURL, "", "json3"))
+	require.NoError(t, err)
+	q2 := u2.Query()
+	require.Empty(t, q2.Get("pot"))
+	require.Empty(t, q2.Get("potc"))
+	require.Equal(t, "json3", q2.Get("fmt"))
+}
+
+func TestJson3ToVTT(t *testing.T) {
+	payload := `{"events":[{"tStartMs":500,"dDurationMs":2500,"segs":[{"utf8":"Hello "},{"utf8":"world"}]},{"tStartMs":4000,"dDurationMs":2000,"segs":[{"utf8":"\n"}]}]}`
+	vtt, err := json3ToVTT([]byte(payload))
+	require.NoError(t, err)
+	got := string(vtt)
+	require.Contains(t, got, "00:00:00.500 --> 00:00:03.000")
+	require.Contains(t, got, "Hello world")
+	require.NotContains(t, got, "00:00:04.000", "whitespace-only event must be dropped")
+	require.True(t, strings.HasPrefix(got, "WEBVTT"))
+
+	_, err = json3ToVTT([]byte(`{"events":[]}`))
+	require.Error(t, err)
+	_, err = json3ToVTT([]byte("not json"))
+	require.Error(t, err)
+}
+
+func TestDownloadSubtitlesDirectVTTSuccess(t *testing.T) {
+	var fmts []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmts = append(fmts, r.URL.Query().Get("fmt"))
+		_, _ = w.Write([]byte("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nhi\n"))
+	}))
+	defer srv.Close()
+
+	out := filepath.Join(t.TempDir(), "subs.vtt")
+	require.NoError(t, downloadSubtitlesDirect(context.Background(), srv.URL+"/api/timedtext?v=abc", "", out))
+	require.Equal(t, []string{"vtt"}, fmts, "valid vtt on first try must not trigger json3 fallback")
+
+	data, err := os.ReadFile(out)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "hi")
+}
+
+func TestDownloadSubtitlesDirectJSON3Fallback(t *testing.T) {
+	var fmts []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmts = append(fmts, r.URL.Query().Get("fmt"))
+		if r.URL.Query().Get("fmt") == "json3" {
+			_, _ = w.Write([]byte(`{"events":[{"tStartMs":500,"dDurationMs":2500,"segs":[{"utf8":"Hello"}]}]}`))
+			return
+		}
+		// YouTube-style failure: HTTP 200 with an empty body.
+	}))
+	defer srv.Close()
+
+	out := filepath.Join(t.TempDir(), "subs.vtt")
+	require.NoError(t, downloadSubtitlesDirect(context.Background(), srv.URL+"/api/timedtext?v=abc", "", out))
+	require.Equal(t, []string{"vtt", "json3"}, fmts, "empty vtt body must trigger the json3 retry")
+
+	data, err := os.ReadFile(out)
+	require.NoError(t, err)
+	require.Contains(t, string(data), "00:00:00.500 --> 00:00:03.000")
+	require.Contains(t, string(data), "Hello")
+}
+
+func TestDownloadSubtitlesDirectEmptyBodyFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+
+	out := filepath.Join(t.TempDir(), "subs.vtt")
+	err := downloadSubtitlesDirect(context.Background(), srv.URL+"/api/timedtext?v=abc", "", out)
+	require.ErrorContains(t, err, "invalid vtt content")
+	_, statErr := os.Stat(out)
+	require.Error(t, statErr, "no subtitle file must be written when every attempt returns an empty body")
 }

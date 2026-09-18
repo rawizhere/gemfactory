@@ -109,6 +109,55 @@ func TestParseClipArgsErrors(t *testing.T) {
 	}
 }
 
+func TestDetectImplicitClipsSingleVideo(t *testing.T) {
+	text := "https://www.youtube.com/watch?v=X56FLo6qslE 0:26 0:32 (https://youtube.com/watch?v=X56FLo6qslE&t=26)"
+	cmds := DetectImplicitClips(text)
+	require.Len(t, cmds, 1)
+	require.Equal(t, "https://www.youtube.com/watch?v=X56FLo6qslE", cmds[0].URL)
+	require.Len(t, cmds[0].Intervals, 1)
+	require.Equal(t, "0:26", cmds[0].Intervals[0].Start)
+	require.Equal(t, "0:32", cmds[0].Intervals[0].End)
+	require.Empty(t, cmds[0].SubsLang)
+}
+
+func TestDetectImplicitClipsTwoVideosWithLang(t *testing.T) {
+	text := "https://www.youtube.com/watch?v=mJ2yfsz1Tto 7:26 (https://youtube.com/watch?v=mJ2yfsz1Tto&t=446) 9:13 (https://youtube.com/watch?v=mJ2yfsz1Tto&t=553)\n" +
+		"https://www.youtube.com/watch?v=GcgUKMU3yzw 10:28 (https://youtube.com/watch?v=GcgUKMU3yzw&t=628) 10:33 (https://youtube.com/watch?v=GcgUKMU3yzw&t=633) ru"
+	cmds := DetectImplicitClips(text)
+	require.Len(t, cmds, 2)
+	require.Equal(t, "https://www.youtube.com/watch?v=mJ2yfsz1Tto", cmds[0].URL)
+	require.Equal(t, "7:26", cmds[0].Intervals[0].Start)
+	require.Equal(t, "9:13", cmds[0].Intervals[0].End)
+	require.Equal(t, "https://www.youtube.com/watch?v=GcgUKMU3yzw", cmds[1].URL)
+	require.Equal(t, "10:28", cmds[1].Intervals[0].Start)
+	require.Equal(t, "10:33", cmds[1].Intervals[0].End)
+	for _, c := range cmds {
+		require.Equal(t, "ru", c.SubsLang, "lang must apply to every job: %+v", c)
+	}
+}
+
+func TestDetectImplicitClipsFlags(t *testing.T) {
+	cmds := DetectImplicitClips("https://youtu.be/DaLioUGhHZo 0:10 0:20 hq 720p")
+	require.Len(t, cmds, 1)
+	require.True(t, cmds[0].HQ)
+	require.Equal(t, "720p", cmds[0].Quality)
+}
+
+func TestDetectImplicitClipsRejections(t *testing.T) {
+	cases := []string{
+		"https://www.youtube.com/watch?v=X56FLo6qslE",                      // plain URL, no timings
+		"https://youtu.be/x 0:10",                                          // odd timecode count
+		"https://youtu.be/x 0:32 0:26",                                     // end before start
+		"/clip https://youtu.be/x 0:10 0:20",                               // explicit command
+		"https://www.tiktok.com/@user/video/7123456789012345678 0:10 0:20", // non-YouTube URL
+		"https://www.youtube.com/shorts/abc123XYZ_-",                       // bare shorts goes to direct download
+		"", // empty
+	}
+	for i, text := range cases {
+		require.Nil(t, DetectImplicitClips(text), "case %d: expected nil for %q", i, text)
+	}
+}
+
 func TestYTDLPProgressRegex(t *testing.T) {
 	line := "[download]  45.2% of ~  25.40MiB at   4.12MiB/s ETA 00:03"
 	m := ytDlpProgressRe.FindStringSubmatch(line)

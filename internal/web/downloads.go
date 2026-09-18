@@ -14,7 +14,7 @@ import (
 )
 
 func (s *Server) submitDownload(w http.ResponseWriter, r *http.Request) {
-	if s.downloads == nil {
+	if s.Downloads == nil {
 		http.Error(w, "downloader unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -23,7 +23,7 @@ func (s *Server) submitDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	job, err := s.downloads.Submit(r.Context(), req)
+	job, err := s.Downloads.Submit(r.Context(), req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -32,19 +32,19 @@ func (s *Server) submitDownload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listDownloads(w http.ResponseWriter, r *http.Request) {
-	if s.downloads == nil {
+	if s.Downloads == nil {
 		http.Error(w, "downloader unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	writeJSON(w, s.downloads.ListJobs())
+	writeJSON(w, s.Downloads.ListJobs())
 }
 
 func (s *Server) getDownload(w http.ResponseWriter, r *http.Request) {
-	if s.downloads == nil {
+	if s.Downloads == nil {
 		http.Error(w, "downloader unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	job, ok := s.downloads.GetJob(r.PathValue("id"))
+	job, ok := s.Downloads.GetJob(r.PathValue("id"))
 	if !ok {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -53,11 +53,11 @@ func (s *Server) getDownload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) downloadFile(w http.ResponseWriter, r *http.Request) {
-	if s.downloads == nil {
+	if s.Downloads == nil {
 		http.Error(w, "downloader unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	job, ok := s.downloads.GetJob(r.PathValue("id"))
+	job, ok := s.Downloads.GetJob(r.PathValue("id"))
 	if !ok || job.Status != downloader.StatusDone || job.OutputDir == "" {
 		http.Error(w, "not ready", http.StatusNotFound)
 		return
@@ -81,11 +81,11 @@ func (s *Server) downloadFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getStorageUsage(w http.ResponseWriter, r *http.Request) {
-	if s.downloads == nil {
+	if s.Downloads == nil {
 		writeJSON(w, map[string]any{"bytes": 0, "formatted": "0 B", "files": 0})
 		return
 	}
-	b, files, err := s.downloads.GetStorageUsage()
+	b, files, err := s.Downloads.GetStorageUsage()
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -98,11 +98,11 @@ func (s *Server) getStorageUsage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) cleanStorage(w http.ResponseWriter, r *http.Request) {
-	if s.downloads == nil {
+	if s.Downloads == nil {
 		http.Error(w, "downloader unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	freed, files, err := s.downloads.CleanStorage()
+	freed, files, err := s.Downloads.CleanStorage()
 	if err != nil {
 		s.fail(w, err)
 		return

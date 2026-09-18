@@ -57,7 +57,7 @@ func (h *ClipHandlers) DirectLink(ctx context.Context, message *telego.Message, 
 	if message.Chat.Type == "private" {
 		hint := fmt.Sprintf("To cut a clip, specify a time interval:\n<code>/clip %s 0:10 0:30</code>\n\nOr extract audio:\n<code>/mp3 %s 0:10 0:30</code>",
 			html.EscapeString(rawURL), html.EscapeString(rawURL))
-		_ = h.SendMessage(ctx, chatID, hint)
+		_ = h.TG.SendMessage(ctx, chatID, hint)
 	}
 }
 
@@ -100,7 +100,7 @@ func (h *ClipHandlers) Help(ctx context.Context, message *telego.Message) {
 			h.user.Help(ctx, message)
 			return
 		}
-		_ = h.SendMessage(ctx, message.Chat.ID, text)
+		_ = h.TG.SendMessage(ctx, message.Chat.ID, text)
 		return
 	}
 	h.user.Help(ctx, message)
@@ -122,9 +122,28 @@ func (h *ClipHandlers) handleClipCommand(ctx context.Context, message *telego.Me
 	args := strings.Fields(message.Text)[1:]
 	parsed, err := downloader.ParseClipArgs(args)
 	if err != nil {
-		_ = h.SendMessage(ctx, chatID, "Error: "+html.EscapeString(err.Error()))
+		_ = h.TG.SendMessage(ctx, chatID, "Error: "+html.EscapeString(err.Error()))
 		return
 	}
+	h.submitParsed(ctx, message, parsed, gif, subs, audioOnly)
+}
+
+// Implicit handles command-less messages detected as implicit clip/subs requests.
+func (h *ClipHandlers) Implicit(ctx context.Context, message *telego.Message) {
+	cmds := downloader.DetectImplicitClips(message.Text)
+	if cmds == nil {
+		h.DirectLink(ctx, message, downloader.ExtractFirstURL(message.Text))
+		return
+	}
+	for _, parsed := range cmds {
+		h.submitParsed(ctx, message, parsed, false, parsed.SubsLang != "", false)
+	}
+}
+
+// submitParsed submits every interval of a parsed command as a clip job.
+func (h *ClipHandlers) submitParsed(ctx context.Context, message *telego.Message, parsed *downloader.ParsedCommand, gif, subs, audioOnly bool) {
+	chatID := message.Chat.ID
+
 	parsed.GIF = gif
 	parsed.AudioOnly = audioOnly
 
@@ -340,7 +359,7 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 			}
 			if sendErr != nil {
 				h.Logger.Error("failed to send resulting media", zap.Error(sendErr))
-				_ = h.SendMessage(bgCtx, chatID, "Failed to send file: "+html.EscapeString(sendErr.Error()))
+				_ = h.TG.SendMessage(bgCtx, chatID, "Failed to send file: "+html.EscapeString(sendErr.Error()))
 			}
 			if statusID > 0 {
 				if (req.Shorts && req.Start == "" && req.End == "") || h.shouldDeleteStatus(bgCtx) {

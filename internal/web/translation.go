@@ -47,8 +47,8 @@ type translationConfigResponse struct {
 }
 
 func (s *Server) translationConfig() translate.Config {
-	if s.downloads != nil {
-		return s.downloads.ResolveTranslationConfig(context.Background())
+	if s.Downloads != nil {
+		return s.Downloads.ResolveTranslationConfig(context.Background())
 	}
 	return translate.DefaultConfig()
 }
@@ -56,7 +56,7 @@ func (s *Server) translationConfig() translate.Config {
 func (s *Server) getTranslationConfig(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	tc := s.translationConfig()
-	cfg := settings.New(s.configs)
+	cfg := settings.New(s.Configs)
 
 	concurrency := cfg.Int(ctx, "DOWNLOAD_CONCURRENCY", 4)
 	clipCRF := cfg.Value(ctx, "CLIP_CRF", "20")
@@ -166,7 +166,7 @@ func (s *Server) updateTranslationConfig(w http.ResponseWriter, r *http.Request)
 
 	ctx := r.Context()
 	set := func(key, value string) bool {
-		if err := s.configs.Set(ctx, key, value); err != nil {
+		if err := s.Configs.Set(ctx, key, value); err != nil {
 			s.fail(w, err)
 			return false
 		}
@@ -268,8 +268,8 @@ func (s *Server) updateTranslationConfig(w http.ResponseWriter, r *http.Request)
 
 	if req.Concurrency != nil && *req.Concurrency > 0 {
 		cVal := min(*req.Concurrency, 20)
-		if s.downloads != nil {
-			s.downloads.SetConcurrency(cVal)
+		if s.Downloads != nil {
+			s.Downloads.SetConcurrency(cVal)
 		}
 		if !set("DOWNLOAD_CONCURRENCY", strconv.Itoa(cVal)) {
 			return

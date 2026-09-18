@@ -10,22 +10,18 @@ import (
 type Artist struct {
 	bun.BaseModel `bun:"table:gemfactory.artists"`
 
-	ArtistID  int          `bun:"artist_id,pk,autoincrement" json:"artist_id"`
-	Name      UniqueString `bun:"name,unique,notnull" json:"name"`
-	Gender    Gender       `bun:"gender,notnull" json:"gender"`
-	IsActive  bool         `bun:"is_active,notnull,default:true" json:"is_active"`
-	CreatedAt time.Time    `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
-	UpdatedAt time.Time    `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
+	ArtistID  int       `bun:"artist_id,pk,autoincrement" json:"artist_id"`
+	Name      string    `bun:"name,unique,notnull" json:"name"`
+	Gender    Gender    `bun:"gender,notnull" json:"gender"`
+	IsActive  bool      `bun:"is_active,notnull,default:true" json:"is_active"`
+	CreatedAt time.Time `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt time.Time `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
 
 	Releases []Release `bun:"rel:has-many,join:artist_id=artist_id" json:"releases,omitempty"`
 }
 
 func (a *Artist) IsFemale() bool {
 	return a.Gender == GenderFemale
-}
-
-func (a *Artist) IsMale() bool {
-	return a.Gender == GenderMale
 }
 
 type ArtistRepository interface {

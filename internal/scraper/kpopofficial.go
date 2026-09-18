@@ -17,7 +17,7 @@ import (
 
 var dateRegex = regexp.MustCompile(`(?i)(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})`)
 
-func (f *fetcherImpl) ParseMonth(ctx context.Context, month, year string) iter.Seq2[Release, error] {
+func (f *Fetcher) ParseMonth(ctx context.Context, month, year string) iter.Seq2[Release, error] {
 	return func(yield func(Release, error) bool) {
 		after, before, err := monthWindow(month, year)
 		if err != nil {
@@ -28,7 +28,7 @@ func (f *fetcherImpl) ParseMonth(ctx context.Context, month, year string) iter.S
 	}
 }
 
-func (f *fetcherImpl) ParseYear(ctx context.Context, year string) iter.Seq2[Release, error] {
+func (f *Fetcher) ParseYear(ctx context.Context, year string) iter.Seq2[Release, error] {
 	return func(yield func(Release, error) bool) {
 		after, before, err := yearWindow(year)
 		if err != nil {
@@ -39,7 +39,7 @@ func (f *fetcherImpl) ParseYear(ctx context.Context, year string) iter.Seq2[Rele
 	}
 }
 
-func (f *fetcherImpl) parseRESTWindow(ctx context.Context, after, before time.Time, month, year string, yield func(Release, error) bool) {
+func (f *Fetcher) parseRESTWindow(ctx context.Context, after, before time.Time, month, year string, yield func(Release, error) bool) {
 	posts, err := f.httpClient.FetchAlbumsWindow(ctx, after, before)
 	if err != nil {
 		f.logger.Warn("REST album fetch failed", zap.Error(err))
@@ -94,7 +94,7 @@ func (f *fetcherImpl) parseRESTWindow(ctx context.Context, after, before time.Ti
 	}
 }
 
-func (f *fetcherImpl) parseEventPageFromDoc(doc *goquery.Document, url string) ([]*Release, []string, error) {
+func (f *Fetcher) parseEventPageFromDoc(doc *goquery.Document, url string) ([]*Release, []string, error) {
 	pageTitle := strings.TrimSpace(doc.Find("h1.entry-title, .post-title, h1").First().Text())
 	defaultArtist, defaultAlbum := splitTitle(pageTitle)
 

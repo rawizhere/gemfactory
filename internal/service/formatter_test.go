@@ -12,12 +12,12 @@ import (
 func TestFormatReleaseForTelegram(t *testing.T) {
 	release := &model.Release{
 		Artist: &model.Artist{
-			Name: model.NewUniqueString("TWICE"),
+			Name: ("TWICE"),
 		},
-		AlbumName:  model.NewUniqueString("With YOU-th"),
-		TitleTrack: model.NewUniqueString("ONE SPARK"),
-		MV:         model.NewUniqueString("https://youtube.com/watch?v=123"),
-		Spotify:    model.NewUniqueString("https://open.spotify.com/track/456"),
+		AlbumName:  ("With YOU-th"),
+		TitleTrack: ("ONE SPARK"),
+		MV:         ("https://youtube.com/watch?v=123"),
+		Spotify:    ("https://open.spotify.com/track/456"),
 		Date:       time.Date(2026, 2, 23, 0, 0, 0, 0, time.UTC),
 	}
 
@@ -31,10 +31,10 @@ func TestFormatReleaseForTelegram(t *testing.T) {
 
 	collabRelease := &model.Release{
 		Artist: &model.Artist{
-			Name: model.NewUniqueString("JEON SOMI"),
+			Name: ("JEON SOMI"),
 		},
-		DisplayArtist: model.NewUniqueString("JVKE x JEON SOMI"),
-		AlbumName:     model.NewUniqueString("Collab Single"),
+		DisplayArtist: ("JVKE x JEON SOMI"),
+		AlbumName:     ("Collab Single"),
 		Date:          time.Date(2026, 2, 23, 0, 0, 0, 0, time.UTC),
 	}
 	collabResult := FormatReleaseForTelegram(collabRelease)

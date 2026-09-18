@@ -250,3 +250,24 @@ func TestDetectGrokMode(t *testing.T) {
 		})
 	}
 }
+
+func TestMessageWithImplicitClip(t *testing.T) {
+	pred := messageWithImplicitClip()
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{"single video with pair", "https://www.youtube.com/watch?v=mJ2yfsz1Tto 7:26 9:13", true},
+		{"two videos with lang", "https://youtu.be/mJ2yfsz1Tto 7:26 9:13\nhttps://youtu.be/GcgUKMU3yzw 10:28 10:33 ru", true},
+		{"plain url without timings", "https://www.youtube.com/watch?v=mJ2yfsz1Tto", false},
+		{"command is skipped", "/clip https://youtu.be/x 0:10 0:20", false},
+		{"empty text", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &telego.Message{Text: tt.text}
+			assert.Equal(t, tt.want, pred(nil, telego.Update{Message: m}))
+		})
+	}
+}

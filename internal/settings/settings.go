@@ -44,9 +44,16 @@ func (p Provider) Int(ctx context.Context, key string, def int) int {
 
 // Bool reports whether the stored value is truthy ("1", "true", "yes", "on").
 func (p Provider) Bool(ctx context.Context, key string, def bool) bool {
-	switch strings.ToLower(p.Value(ctx, key, "")) {
-	case "":
+	v := p.Value(ctx, key, "")
+	if v == "" {
 		return def
+	}
+	return IsTruthy(v)
+}
+
+// IsTruthy reports whether s is a truthy string ("1", "true", "yes", "on").
+func IsTruthy(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "1", "true", "yes", "on":
 		return true
 	default:

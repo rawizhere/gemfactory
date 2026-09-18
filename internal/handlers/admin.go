@@ -20,7 +20,7 @@ func NewAdminHandlers(base *BaseHandler) *AdminHandlers {
 
 func (h *AdminHandlers) Admin(ctx context.Context, message *telego.Message) {
 	if !h.IsAdmin(message.From) {
-		_ = h.SendMessage(ctx, message.Chat.ID, "You don't have admin permissions")
+		_ = h.TG.SendMessage(ctx, message.Chat.ID, "You don't have admin permissions")
 		return
 	}
 
@@ -31,7 +31,7 @@ func (h *AdminHandlers) Admin(ctx context.Context, message *telego.Message) {
 		"/config [key] [value] - Configuration\n" +
 		"/parse [month] [year] - Run parser"
 
-	_ = h.SendMessage(ctx, message.Chat.ID, text)
+	_ = h.TG.SendMessage(ctx, message.Chat.ID, text)
 }
 
 func (h *AdminHandlers) AddArtist(ctx context.Context, message *telego.Message) {
@@ -41,7 +41,7 @@ func (h *AdminHandlers) AddArtist(ctx context.Context, message *telego.Message) 
 
 	parts := strings.Fields(message.Text)
 	if len(parts) < 3 {
-		_ = h.SendMessage(ctx, message.Chat.ID, "Usage: /add_artist <names> [-f|-m]")
+		_ = h.TG.SendMessage(ctx, message.Chat.ID, "Usage: /add_artist <names> [-f|-m]")
 		return
 	}
 
@@ -49,7 +49,7 @@ func (h *AdminHandlers) AddArtist(ctx context.Context, message *telego.Message) 
 	flag := args[len(args)-1]
 	isFemale := flag == "-f"
 	if flag != "-f" && flag != "-m" {
-		_ = h.SendMessage(ctx, message.Chat.ID, "Please specify gender flag: -f or -m")
+		_ = h.TG.SendMessage(ctx, message.Chat.ID, "Please specify gender flag: -f or -m")
 		return
 	}
 
@@ -62,7 +62,7 @@ func (h *AdminHandlers) AddArtist(ctx context.Context, message *telego.Message) 
 		return
 	}
 
-	_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("Added artists: %d", count))
+	_ = h.TG.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("Added artists: %d", count))
 }
 
 func (h *AdminHandlers) RemoveArtist(ctx context.Context, message *telego.Message) {
@@ -72,7 +72,7 @@ func (h *AdminHandlers) RemoveArtist(ctx context.Context, message *telego.Messag
 
 	parts := strings.Fields(message.Text)
 	if len(parts) < 2 {
-		_ = h.SendMessage(ctx, message.Chat.ID, "Usage: /remove_artist <names>")
+		_ = h.TG.SendMessage(ctx, message.Chat.ID, "Usage: /remove_artist <names>")
 		return
 	}
 
@@ -85,7 +85,7 @@ func (h *AdminHandlers) RemoveArtist(ctx context.Context, message *telego.Messag
 		return
 	}
 
-	_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("Deactivated artists: %d", count))
+	_ = h.TG.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("Deactivated artists: %d", count))
 }
 
 func (h *AdminHandlers) Config(ctx context.Context, message *telego.Message) {
@@ -100,7 +100,7 @@ func (h *AdminHandlers) Config(ctx context.Context, message *telego.Message) {
 			h.HandleError(ctx, message.Chat.ID, err, "Failed to get config")
 			return
 		}
-		_ = h.SendMessage(ctx, message.Chat.ID, res)
+		_ = h.TG.SendMessage(ctx, message.Chat.ID, res)
 		return
 	}
 
@@ -111,11 +111,11 @@ func (h *AdminHandlers) Config(ctx context.Context, message *telego.Message) {
 			h.HandleError(ctx, message.Chat.ID, err, "Failed to update config")
 			return
 		}
-		_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("Config updated: %s = %s", key, val))
+		_ = h.TG.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("Config updated: %s = %s", key, val))
 		return
 	}
 
-	_ = h.SendMessage(ctx, message.Chat.ID, "Usage: /config OR /config <KEY> <VALUE>")
+	_ = h.TG.SendMessage(ctx, message.Chat.ID, "Usage: /config OR /config <KEY> <VALUE>")
 }
 
 func (h *AdminHandlers) Parse(ctx context.Context, message *telego.Message) {
@@ -128,7 +128,7 @@ func (h *AdminHandlers) Parse(ctx context.Context, message *telego.Message) {
 	if len(args) == 1 {
 		if y, err := strconv.Atoi(args[0]); err == nil && len(args[0]) == 4 && y >= 2000 {
 			yearStr := strconv.Itoa(y)
-			_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("Running parser for entire year %s...", yearStr))
+			_ = h.TG.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("Running parser for entire year %s...", yearStr))
 			go func() {
 				bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 				defer cancel()
@@ -138,7 +138,7 @@ func (h *AdminHandlers) Parse(ctx context.Context, message *telego.Message) {
 					h.HandleError(bgCtx, message.Chat.ID, fmt.Errorf("year %s: %w", yearStr, err), "Parser error")
 					return
 				}
-				_ = h.SendMessage(bgCtx, message.Chat.ID, fmt.Sprintf("Parsing complete for %s. Found %d releases", yearStr, count))
+				_ = h.TG.SendMessage(bgCtx, message.Chat.ID, fmt.Sprintf("Parsing complete for %s. Found %d releases", yearStr, count))
 			}()
 			return
 		}
@@ -148,7 +148,7 @@ func (h *AdminHandlers) Parse(ctx context.Context, message *telego.Message) {
 	switch {
 	case len(args) >= 2:
 		if _, err := strconv.Atoi(args[1]); err != nil {
-			_ = h.SendMessage(ctx, message.Chat.ID, "Usage: /parse [<month>|<year>] [<year>]")
+			_ = h.TG.SendMessage(ctx, message.Chat.ID, "Usage: /parse [<month>|<year>] [<year>]")
 			return
 		}
 		monthQueries = []string{strings.ToLower(args[0]) + "-" + args[1]}
@@ -158,7 +158,7 @@ func (h *AdminHandlers) Parse(ctx context.Context, message *telego.Message) {
 		monthQueries = []string{strings.ToLower(time.Now().Format("January")) + "-" + strconv.Itoa(time.Now().Year())}
 	}
 
-	_ = h.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("Running parser for %s...", strings.Join(monthQueries, ", ")))
+	_ = h.TG.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("Running parser for %s...", strings.Join(monthQueries, ", ")))
 
 	go func() {
 		bgCtx, cancel := context.WithTimeout(context.Background(), time.Duration(len(monthQueries))*5*time.Minute)
@@ -173,7 +173,7 @@ func (h *AdminHandlers) Parse(ctx context.Context, message *telego.Message) {
 			}
 			total += count
 		}
-		_ = h.SendMessage(bgCtx, message.Chat.ID, fmt.Sprintf("Parsing complete. Found %d releases", total))
+		_ = h.TG.SendMessage(bgCtx, message.Chat.ID, fmt.Sprintf("Parsing complete. Found %d releases", total))
 	}()
 }
 
@@ -188,7 +188,7 @@ func (h *AdminHandlers) Export(ctx context.Context, message *telego.Message) {
 		return
 	}
 
-	_ = h.SendMessage(ctx, message.Chat.ID, response)
+	_ = h.TG.SendMessage(ctx, message.Chat.ID, response)
 }
 
 func (h *AdminHandlers) parseArtistList(input string) []string {

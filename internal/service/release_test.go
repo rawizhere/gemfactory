@@ -19,14 +19,14 @@ func TestMonthToInt(t *testing.T) {
 }
 
 func TestValidateRelease(t *testing.T) {
-	valid := &model.Release{ArtistID: 1, Title: model.NewUniqueString("X"), Date: time.Now()}
+	valid := &model.Release{ArtistID: 1, Title: ("X"), Date: time.Now()}
 	require.NoError(t, NewReleaseService(nil, nil, nil).validateRelease(valid), "expected valid release")
 
 	cases := []*model.Release{
 		nil,
-		{Title: model.NewUniqueString("X"), Date: time.Now()},
+		{Title: ("X"), Date: time.Now()},
 		{ArtistID: 1, Date: time.Now()},
-		{ArtistID: 1, Title: model.NewUniqueString("  ")},
+		{ArtistID: 1, Title: ("  ")},
 	}
 	svc := &ReleaseService{}
 	for i, c := range cases {
@@ -50,19 +50,19 @@ func TestCleanReleaseTitleAndLink(t *testing.T) {
 }
 
 func TestFindArtist(t *testing.T) {
-	aespa := &model.Artist{ArtistID: 1, Name: model.NewUniqueString("aespa")}
-	blackpink := &model.Artist{ArtistID: 2, Name: model.NewUniqueString("BLACKPINK")}
-	txt := &model.Artist{ArtistID: 3, Name: model.NewUniqueString("TXT")}
-	classy := &model.Artist{ArtistID: 4, Name: model.NewUniqueString("CLASS:y")}
-	lightsum := &model.Artist{ArtistID: 5, Name: model.NewUniqueString("LIGHTSUM")}
-	somi := &model.Artist{ArtistID: 6, Name: model.NewUniqueString("JEON SOMI")}
-	solar := &model.Artist{ArtistID: 7, Name: model.NewUniqueString("Solar")}
-	zico := &model.Artist{ArtistID: 8, Name: model.NewUniqueString("ZICO")}
-	apink := &model.Artist{ArtistID: 9, Name: model.NewUniqueString("Apink")}
-	gfriend := &model.Artist{ArtistID: 10, Name: model.NewUniqueString("GFRIEND")}
-	omg := &model.Artist{ArtistID: 11, Name: model.NewUniqueString("OH MY GIRL")}
-	irene := &model.Artist{ArtistID: 12, Name: model.NewUniqueString("IRENE")}
-	redvelvet := &model.Artist{ArtistID: 13, Name: model.NewUniqueString("Red Velvet")}
+	aespa := &model.Artist{ArtistID: 1, Name: ("aespa")}
+	blackpink := &model.Artist{ArtistID: 2, Name: ("BLACKPINK")}
+	txt := &model.Artist{ArtistID: 3, Name: ("TXT")}
+	classy := &model.Artist{ArtistID: 4, Name: ("CLASS:y")}
+	lightsum := &model.Artist{ArtistID: 5, Name: ("LIGHTSUM")}
+	somi := &model.Artist{ArtistID: 6, Name: ("JEON SOMI")}
+	solar := &model.Artist{ArtistID: 7, Name: ("Solar")}
+	zico := &model.Artist{ArtistID: 8, Name: ("ZICO")}
+	apink := &model.Artist{ArtistID: 9, Name: ("Apink")}
+	gfriend := &model.Artist{ArtistID: 10, Name: ("GFRIEND")}
+	omg := &model.Artist{ArtistID: 11, Name: ("OH MY GIRL")}
+	irene := &model.Artist{ArtistID: 12, Name: ("IRENE")}
+	redvelvet := &model.Artist{ArtistID: 13, Name: ("Red Velvet")}
 
 	artists := map[string]*model.Artist{
 		"aespa":      aespa,
@@ -111,15 +111,15 @@ func TestFindArtist(t *testing.T) {
 
 func TestGetReleasesForMonthDedupAndGenderFilter(t *testing.T) {
 	day := time.Date(2024, time.May, 24, 0, 0, 0, 0, time.UTC)
-	girl := &model.Artist{ArtistID: 1, Name: model.NewUniqueString("aespa"), Gender: model.GenderFemale}
-	boy := &model.Artist{ArtistID: 2, Name: model.NewUniqueString("Stray Kids"), Gender: model.GenderMale}
+	girl := &model.Artist{ArtistID: 1, Name: ("aespa"), Gender: model.GenderFemale}
+	boy := &model.Artist{ArtistID: 2, Name: ("Stray Kids"), Gender: model.GenderMale}
 
 	releases := []model.Release{
-		{Artist: girl, ArtistID: 1, Title: model.NewUniqueString("How Sweet"), AlbumName: model.NewUniqueString("How Sweet"), Date: day},
+		{Artist: girl, ArtistID: 1, Title: ("How Sweet"), AlbumName: ("How Sweet"), Date: day},
 		// duplicate of the first one, only adds MV and Spotify links
-		{Artist: girl, ArtistID: 1, Title: model.NewUniqueString("How Sweet"), AlbumName: model.NewUniqueString("How Sweet"), Date: day,
-			MV: model.NewUniqueString("https://youtu.be/x1"), Spotify: model.NewUniqueString("https://open.spotify.com/x1")},
-		{Artist: boy, ArtistID: 2, Title: model.NewUniqueString("Lose My Breath"), AlbumName: model.NewUniqueString("Lose My Breath"), Date: day},
+		{Artist: girl, ArtistID: 1, Title: ("How Sweet"), AlbumName: ("How Sweet"), Date: day,
+			MV: ("https://youtu.be/x1"), Spotify: ("https://open.spotify.com/x1")},
+		{Artist: boy, ArtistID: 2, Title: ("Lose My Breath"), AlbumName: ("Lose My Breath"), Date: day},
 	}
 
 	repo := &mockReleaseRepo{byDateRange: releases}

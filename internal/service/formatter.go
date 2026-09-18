@@ -13,20 +13,20 @@ func escapeHTML(s string) string {
 
 func FormatReleaseForTelegram(release *model.Release) string {
 	var artistName string
-	if release.DisplayArtist.String() != "" {
-		artistName = release.DisplayArtist.String()
+	if release.DisplayArtist != "" {
+		artistName = release.DisplayArtist
 	} else if release.Artist != nil {
-		artistName = release.Artist.Name.String()
+		artistName = release.Artist.Name
 	}
 	artist := "<b>" + escapeHTML(artistName) + "</b>"
 
-	album := cleanReleaseString(release.AlbumName.String())
-	title := cleanReleaseString(release.Title.String())
-	track := cleanReleaseString(release.TitleTrack.String())
+	album := cleanReleaseString(release.AlbumName)
+	title := cleanReleaseString(release.Title)
+	track := cleanReleaseString(release.TitleTrack)
 
 	var mainEvent string
-	isPre := strings.Contains(strings.ToLower(release.Title.String()), "pre-release") ||
-		strings.Contains(strings.ToLower(release.AlbumName.String()), "pre-release")
+	isPre := strings.Contains(strings.ToLower(release.Title), "pre-release") ||
+		strings.Contains(strings.ToLower(release.AlbumName), "pre-release")
 
 	if isPre {
 		if title != "" && strings.Contains(strings.ToLower(title), "pre-release") {
@@ -62,11 +62,11 @@ func FormatReleaseForTelegram(release *model.Release) string {
 	}
 
 	var links []string
-	if release.MV.String() != "" && release.MV.String() != "N/A" {
-		links = append(links, fmt.Sprintf("<a href=\"%s\">YT</a>", release.MV.String()))
+	if release.MV != "" && release.MV != "N/A" {
+		links = append(links, fmt.Sprintf("<a href=\"%s\">YT</a>", release.MV))
 	}
-	if release.Spotify.String() != "" && release.Spotify.String() != "N/A" {
-		links = append(links, fmt.Sprintf("<a href=\"%s\">SP</a>", release.Spotify.String()))
+	if release.Spotify != "" && release.Spotify != "N/A" {
+		links = append(links, fmt.Sprintf("<a href=\"%s\">SP</a>", release.Spotify))
 	}
 
 	if len(links) > 0 {

@@ -91,7 +91,7 @@ func TestParseEventPageFromDoc(t *testing.T) {
 <a href="https://open.spotify.com/album/12345?si=x">Spotify</a>
 </div></body></html>`
 
-	f := &fetcherImpl{logger: zap.NewNop()}
+	f := &Fetcher{logger: zap.NewNop()}
 	doc, err := newTestDoc(html)
 	require.NoError(t, err, "failed to parse html")
 
@@ -121,7 +121,7 @@ func TestParseEventPageFromDocFallbackDate(t *testing.T) {
 <div class="entry-content"><p>Available since June 1, 2024 worldwide.</p></div>
 </body></html>`
 
-	f := &fetcherImpl{logger: zap.NewNop()}
+	f := &Fetcher{logger: zap.NewNop()}
 	doc, err := newTestDoc(html)
 	require.NoError(t, err, "failed to parse html")
 

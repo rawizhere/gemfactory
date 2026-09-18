@@ -111,16 +111,29 @@ func (s *Service) baseYTDLPArgs(ctx context.Context, cookieFile string) []string
 
 // downloadFullVideo downloads an entire video (shorts / tiktok) at best quality.
 func (s *Service) downloadFullVideo(ctx context.Context, req ClipRequest, outPath, cookieFile string, vertical bool, onProgress func(ProgressUpdate)) error {
-	return s.download(ctx, req, outPath, cookieFile, false, 0, 0, vertical, onProgress)
+	return s.download(ctx, req, outPath, cookieFile, false, 0, 0, vertical, false, onProgress)
 }
 
 // downloadSegment downloads a video section via yt-dlp --download-sections and merges it to mp4.
 func (s *Service) downloadSegment(ctx context.Context, req ClipRequest, outPath, cookieFile string, startMs, endMs float64, vertical bool, onProgress func(ProgressUpdate)) error {
-	return s.download(ctx, req, outPath, cookieFile, true, startMs, endMs, vertical, onProgress)
+	return s.download(ctx, req, outPath, cookieFile, true, startMs, endMs, vertical, false, onProgress)
 }
 
-// download runs the yt-dlp download; withSections cuts [startMs, endMs) via --download-sections.
-func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookieFile string, withSections bool, startMs, endMs float64, vertical bool, onProgress func(ProgressUpdate)) error {
+// downloadSegmentFallback is the incomplete-stream retry: same section, different fetch path.
+func (s *Service) downloadSegmentFallback(ctx context.Context, req ClipRequest, outPath, cookieFile string, startMs, endMs float64, vertical bool, onProgress func(ProgressUpdate)) error {
+	return s.download(ctx, req, outPath, cookieFile, true, startMs, endMs, vertical, true, onProgress)
+}
+
+// fallbackFetchArgs overrides player_client (web_safari+android instead of mweb) and disables concurrent fragments; appended after base args so they win.
+func fallbackFetchArgs() []string {
+	return []string{
+		"--extractor-args", "youtube:player_client=web_safari,android",
+		"-N", "1",
+	}
+}
+
+// download runs the yt-dlp download; withSections cuts [startMs, endMs) via --download-sections; fallback switches to the retry fetch path.
+func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookieFile string, withSections bool, startMs, endMs float64, vertical, fallback bool, onProgress func(ProgressUpdate)) error {
 	bin, err := YTDLPBinary()
 	if err != nil {
 		return err
@@ -140,6 +153,9 @@ func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookie
 		"-f", format,
 		"--newline",
 	)
+	if fallback {
+		args = append(args, fallbackFetchArgs()...)
+	}
 	if !req.AudioOnly {
 		args = append(args, "--merge-output-format", "mp4")
 	}
