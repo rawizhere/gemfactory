@@ -11,7 +11,7 @@ require (
 	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/joho/godotenv v1.5.1
-	github.com/lrstanley/go-ytdlp v1.5.2
+	github.com/lrstanley/go-ytdlp v1.5.3
 	github.com/mymmrac/telego v1.12.1
 	github.com/prometheus/client_golang v1.24.1
 	github.com/sashabaranov/go-openai v1.42.1
