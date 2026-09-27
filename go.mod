@@ -7,11 +7,11 @@ require (
 	github.com/PuerkitoBio/goquery v1.13.0
 	github.com/agnivade/levenshtein v1.2.1
 	github.com/caarlos0/env/v11 v11.4.1
-	github.com/dustin/go-humanize v1.0.1
+	github.com/dustin/go-humanize v1.1.0
 	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/joho/godotenv v1.5.1
-	github.com/lrstanley/go-ytdlp v1.5.2
+	github.com/lrstanley/go-ytdlp v1.5.4
 	github.com/mymmrac/telego v1.12.1
 	github.com/prometheus/client_golang v1.24.1
 	github.com/sashabaranov/go-openai v1.42.1
