@@ -40,6 +40,7 @@ func NewRouter(services *service.Services, config *config.Config, keyboard *keyb
 }
 
 // RegisterRoutes wires command and callback handlers; only the first matching route runs.
+// Handlers added via Use must call ctx.Next(update), otherwise the chain stops silently.
 func (r *Router) RegisterRoutes(bh *th.BotHandler) {
 	bh.Use(r.middleware.Handlers()...)
 	bh.Use(r.rememberAdmin())
