@@ -536,8 +536,7 @@ func (s *Server) listConfig(w http.ResponseWriter, r *http.Request) {
 			strings.Contains(key, "SECRET")
 	}
 
-	// Legacy seed rows and startup-only settings: present in the table but never
-	// read back from it. They duplicate env/runtime values shown under System Info.
+	// Legacy seed rows never read back; they duplicate values shown under System Info.
 	isDeadDBKey := func(key string) bool {
 		switch key {
 		case "RELEASE_CHECK_INTERVAL", "RATE_LIMIT_REQUESTS", "RATE_LIMIT_WINDOW",
