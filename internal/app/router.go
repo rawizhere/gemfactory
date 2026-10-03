@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"github.com/mymmrac/telego"
@@ -14,12 +15,12 @@ import (
 	"gemfactory/internal/handlers"
 	"gemfactory/internal/keyboard"
 	"gemfactory/internal/middleware"
+	"gemfactory/internal/notify"
 	"gemfactory/internal/service"
 	"gemfactory/internal/telegram"
 )
 
-// Router registers handlers dispatching updates to their respective
-// handler methods through the middleware pipeline.
+// Router dispatches telegram updates to handler methods through middleware.
 type Router struct {
 	handlers   *handlers.Handlers
 	middleware *middleware.Middleware
@@ -38,10 +39,10 @@ func NewRouter(services *service.Services, config *config.Config, keyboard *keyb
 	}
 }
 
-// RegisterRoutes wires all command and callback handlers onto the bot handler.
-// Handlers match in registration order; only the first matching one runs.
+// RegisterRoutes wires command and callback handlers; only the first matching route runs.
 func (r *Router) RegisterRoutes(bh *th.BotHandler) {
 	bh.Use(r.middleware.Handlers()...)
+	bh.Use(r.rememberAdmin())
 
 	commandRoutes := []struct {
 		command string
@@ -112,6 +113,27 @@ func (r *Router) RegisterRoutes(bh *th.BotHandler) {
 	}
 	for _, route := range callbackRoutes {
 		bh.HandleCallbackQuery(route.handler, route.predicate)
+	}
+}
+
+// rememberAdmin stores the admin chat id from private admin messages, then continues the chain.
+func (r *Router) rememberAdmin() th.Handler {
+	return func(ctx *th.Context, update telego.Update) error {
+		m := update.Message
+		if m == nil || m.From == nil || m.From.Username == "" || m.Chat.Type != "private" {
+			return ctx.Next(update)
+		}
+		admin := strings.TrimPrefix(r.config.AdminUsername, "@")
+		if !strings.EqualFold(m.From.Username, admin) {
+			return ctx.Next(update)
+		}
+		chatID := strconv.FormatInt(m.Chat.ID, 10)
+		if stored, err := r.services.Config.Get(ctx.Context(), notify.AdminChatIDKey); err != nil || stored != chatID {
+			if err := r.services.Config.Update(ctx.Context(), notify.AdminChatIDKey, chatID); err != nil {
+				r.logger.Warn("Failed to store admin chat id", zap.Error(err))
+			}
+		}
+		return ctx.Next(update)
 	}
 }
 

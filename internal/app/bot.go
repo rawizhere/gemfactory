@@ -8,6 +8,7 @@ import (
 	"gemfactory/internal/downloader"
 	"gemfactory/internal/health"
 	"gemfactory/internal/keyboard"
+	"gemfactory/internal/notify"
 	"gemfactory/internal/service"
 	"gemfactory/internal/settings"
 	"gemfactory/internal/storage"
@@ -121,7 +122,8 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 		})
 	}
 
-	releaseChecker := worker.NewReleaseChecker(services.Release, logger, cfg.ReleaseCheckInterval)
+	adminNotifier := notify.NewAdminNotifier(configRepo, tgClient, logger)
+	releaseChecker := worker.NewReleaseChecker(services.Release, logger, cfg.ReleaseCheckInterval, adminNotifier)
 
 	return &Bot{
 		config:         cfg,
