@@ -23,6 +23,7 @@ Telegram bot for tracking music releases and downloading media clips.
 - `/clip [url] [start] [end] [720p] [hq]` - Download video clip
 - `/subs [url] [start] [end] [lang] [720p] [hq] [nollm]` - Cut clip with burned-in subtitles; `nollm` translates via Google Translate, skipping AI providers
 - `/gif [url] [start] [end]` - Download clip as GIF
+- `/mp3 [url] [start] [end]` - Extract audio track
 
 ### Admin Commands
 - `/add_artist [name] [-f|-m]` - Add artist to list
