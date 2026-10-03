@@ -15,6 +15,12 @@ import (
 func Logging(logger *zap.Logger) th.Handler {
 	return func(ctx *th.Context, update telego.Update) error {
 		if update.Message == nil || update.Message.From == nil {
+			if q := update.CallbackQuery; q != nil {
+				logger.Info("Callback query",
+					zap.Int64("user_id", q.From.ID),
+					zap.String("user", telegram.GetUserIdentifier(&q.From)),
+					zap.String("data", q.Data))
+			}
 			return ctx.Next(update)
 		}
 
