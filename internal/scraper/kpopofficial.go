@@ -102,6 +102,37 @@ func (f *Fetcher) parseEventPageFromDoc(doc *goquery.Document, url string) ([]*R
 	metaArtist = defaultArtist
 	metaAlbum = defaultAlbum
 
+	// GreenShift layout pairs a gspb_text key with a gspb_meta_value in a sibling container.
+	var gspbDate string
+	doc.Find("div.gspb_text").Each(func(i int, s *goquery.Selection) {
+		key := strings.Join(strings.Fields(s.Text()), " ")
+		lowKey := strings.ToLower(key)
+		val := ""
+		if outer := s.Parent().Parent(); outer.Length() > 0 {
+			val = strings.Join(strings.Fields(outer.Find("span.gspb_meta_value").First().Text()), " ")
+		}
+		switch lowKey {
+		case "artist":
+			if val != "" {
+				metaArtist = val
+			}
+		case "album":
+			if val != "" {
+				metaAlbum = strings.Trim(val, " “\"”'[]")
+			}
+		case "title track", "title":
+			if val != "" {
+				metaTrack = strings.Trim(val, " “\"”'[]")
+			}
+		default:
+			if len(val) <= 80 && (strings.Contains(lowKey, "release") || strings.Contains(lowKey, "date")) {
+				if d := findDateInString(val); d != "" {
+					gspbDate = d
+				}
+			}
+		}
+	})
+
 	type eventRaw struct {
 		Name   string
 		Date   string
@@ -172,6 +203,14 @@ func (f *Fetcher) parseEventPageFromDoc(doc *goquery.Document, url string) ([]*R
 		}
 	})
 
+	if len(events) == 0 && gspbDate != "" {
+		events = append(events, eventRaw{Name: "", Date: gspbDate, IsMain: true})
+	}
+
+	if isTBA(metaTrack) {
+		metaTrack = ""
+	}
+
 	yt, _ := doc.Find("iframe[src*='youtube']").Attr("src")
 	if strings.Contains(yt, "embed/") {
 		id := strings.Split(yt, "embed/")[1]
@@ -201,6 +240,9 @@ func (f *Fetcher) parseEventPageFromDoc(doc *goquery.Document, url string) ([]*R
 		if ev.IsMain || title == "" {
 			title = metaAlbum
 		}
+		if strings.TrimSpace(title) == "" {
+			continue
+		}
 		releases = append(releases, &Release{
 			Artist:     cleanArtistName(metaArtist),
 			AlbumName:  metaAlbum,
@@ -212,7 +254,7 @@ func (f *Fetcher) parseEventPageFromDoc(doc *goquery.Document, url string) ([]*R
 			SourceURL:  url,
 		})
 	}
-	if len(releases) == 0 {
+	if len(releases) == 0 && strings.TrimSpace(metaAlbum) != "" {
 		if ds := findDateInString(doc.Find(".entry-content").Text()); ds != "" {
 			d, _ := time.Parse("January 2, 2006", ds)
 			releases = append(releases, &Release{
@@ -301,11 +343,16 @@ func uniqueStrings(in []string) []string {
 	return out
 }
 
+// isTBA reports placeholder track names like "To Be Announced (TBA)".
+func isTBA(s string) bool {
+	low := strings.ToLower(strings.TrimSpace(s))
+	return low == "tba" || strings.HasPrefix(low, "to be announced")
+}
+
+var titleDashSplit = regexp.MustCompile(`\s+[–—-]\s+`)
+
 func splitTitle(in string) (string, string) {
-	p := strings.SplitN(in, "–", 2)
-	if len(p) < 2 {
-		p = strings.SplitN(in, "-", 2)
-	}
+	p := titleDashSplit.Split(in, 2)
 	if len(p) == 2 {
 		return strings.TrimSpace(p[0]), strings.TrimSpace(p[1])
 	}

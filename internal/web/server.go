@@ -17,6 +17,7 @@ import (
 	"gemfactory/internal/config"
 	"gemfactory/internal/downloader"
 	"gemfactory/internal/model"
+	"gemfactory/internal/scraper"
 	"gemfactory/internal/service"
 )
 
@@ -32,6 +33,7 @@ type Deps struct {
 	Cookies    model.CookieRepository
 	Downloads  *downloader.Service
 	ReleaseSvc *service.ReleaseService
+	Scraper    *scraper.Fetcher
 }
 
 type Server struct {

@@ -131,6 +131,68 @@ func TestParseEventPageFromDocFallbackDate(t *testing.T) {
 	require.Equal(t, time.Date(2024, time.June, 1, 0, 0, 0, 0, time.UTC), rels[0].Date)
 }
 
+func TestSplitTitleSpacedDashOnly(t *testing.T) {
+	a, al := splitTitle("IVE Pre-release – Looks Can Kill (2026)")
+	require.Equal(t, "IVE Pre-release", a, "splitTitle should keep hyphenated words intact")
+	require.Equal(t, "Looks Can Kill (2026)", al)
+	a, al = splitTitle("KICK OFF THE WALL Pt. 1")
+	require.Equal(t, "KICK OFF THE WALL Pt. 1", a)
+	require.Empty(t, al)
+}
+
+func TestParseEventPageFromDocGreenShift(t *testing.T) {
+	html := `<html><body>
+<h1 class="entry-title">X:IN 1st Studio Album – Chain Reaction (2026)</h1>
+<div class="entry-content">
+<div class="gspb_container outer-a">
+<div class="gspb_container inner-a"><div class="gspb_text">Artist</div></div>
+<div class="gspb_container val-a"><span class="gspb_meta_value">X:IN</span></div>
+</div>
+<div class="gspb_container outer-b">
+<div class="gspb_container inner-b"><div class="gspb_text">Release Date</div></div>
+<div class="gspb_container val-b"><span class="gspb_meta_value">October 6, 2026 · Tuesday · 6 PM KST</span></div>
+</div>
+<div class="gspb_container outer-c">
+<div class="gspb_container inner-c"><div class="gspb_text">Album</div></div>
+<div class="gspb_container val-c"><span class="gspb_meta_value">1st Studio Album – Chain Reaction</span></div>
+</div>
+</div></body></html>`
+
+	f := &Fetcher{logger: zap.NewNop()}
+	doc, err := newTestDoc(html)
+	require.NoError(t, err, "failed to parse html")
+
+	rels, _, err := f.parseEventPageFromDoc(doc, "https://kpopofficial.com/album/xin-chain-reaction")
+	require.NoError(t, err)
+	require.Len(t, rels, 1, "rels = %+v", rels)
+	require.Equal(t, "X:IN", rels[0].Artist)
+	require.Equal(t, "1st Studio Album – Chain Reaction", rels[0].AlbumName)
+	require.Equal(t, "1st Studio Album – Chain Reaction", rels[0].Title)
+	require.Equal(t, time.Date(2026, time.October, 6, 0, 0, 0, 0, time.UTC), rels[0].Date)
+}
+
+func TestParseEventPageFromDocTBATrack(t *testing.T) {
+	html := `<html><body>
+<h1 class="entry-title">RIIZE – Digital Single</h1>
+<div class="entry-content">
+<table>
+<tr><td>Artist</td><td>RIIZE</td></tr>
+<tr><td>Album</td><td>Digital Single</td></tr>
+<tr><td>Title Track</td><td>To Be Announced (TBA)</td></tr>
+<tr><td>Release Date</td><td>October 26, 2026</td></tr>
+</table>
+</div></body></html>`
+
+	f := &Fetcher{logger: zap.NewNop()}
+	doc, err := newTestDoc(html)
+	require.NoError(t, err, "failed to parse html")
+
+	rels, _, err := f.parseEventPageFromDoc(doc, "https://kpopofficial.com/album/riize")
+	require.NoError(t, err)
+	require.Len(t, rels, 1)
+	require.Empty(t, rels[0].TitleTrack, "TBA title track must not be stored")
+}
+
 func newTestDoc(html string) (*goquery.Document, error) {
 	return goquery.NewDocumentFromReader(strings.NewReader(html))
 }

@@ -117,6 +117,7 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 			Cookies:    cookieRepo,
 			Downloads:  downloaderSvc,
 			ReleaseSvc: services.Release,
+			Scraper:    services.Scraper,
 		})
 	}
 

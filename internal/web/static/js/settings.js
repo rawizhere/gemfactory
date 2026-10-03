@@ -24,6 +24,13 @@ const SECTIONS = [
     extra: 'storage',
   },
   {
+    id: 'scraper',
+    title: 'Scraper',
+    fields: [
+      FIELD('SCRAPER_USER_AGENTS', 'User-Agents', 'textarea', { rows: 4, hint: 'One per line; on 403 an agent is skipped for 1h and the next is tried. Empty value falls back to the built-in default' }),
+    ],
+  },
+  {
     id: 'encoding',
     title: 'Encoding',
     fields: [
