@@ -9,7 +9,7 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o gemfactory ./cmd/bot
 
-FROM alpine:3.21
+FROM alpine:3.24
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \

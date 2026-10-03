@@ -210,6 +210,20 @@ func (s *ReleaseService) Upsert(ctx context.Context, release *model.Release) err
 		return fmt.Errorf("failed to check for existing release: %w", err)
 	}
 
+	// Skip placeholder releases: the site links pre-release posts to the parent album,
+	// so a shorter album name for the same date adds nothing to the fuller row.
+	artistReleases, aErr := s.repo.GetByArtistID(ctx, release.ArtistID)
+	if aErr == nil {
+		for i := range artistReleases {
+			r := &artistReleases[i]
+			album := strings.ToLower(strings.TrimSpace(release.AlbumName))
+			if r.Date.Equal(release.Date) && album != "" && len(album) < len(r.AlbumName) &&
+				strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.AlbumName)), album) {
+				return nil
+			}
+		}
+	}
+
 	if existingRelease != nil {
 		if release.Title != "" && release.Title != "N/A" {
 			existingRelease.Title = release.Title
@@ -231,22 +245,33 @@ func (s *ReleaseService) Upsert(ctx context.Context, release *model.Release) err
 		}
 		existingRelease.UpdatedAt = time.Now()
 
-		if err := s.repo.Update(ctx, existingRelease); err != nil {
-			return err
-		}
-
+		// Merge and drop same-date duplicates, keeping the richer row.
 		artistReleases, aErr := s.repo.GetByArtistID(ctx, release.ArtistID)
 		if aErr == nil {
 			for i := range artistReleases {
 				r := &artistReleases[i]
-				if r.ReleaseID != existingRelease.ReleaseID && r.Date.Equal(existingRelease.Date) {
-					if strings.EqualFold(r.AlbumName, existingRelease.AlbumName) ||
-						strings.EqualFold(r.Title, existingRelease.Title) ||
-						r.AlbumName == "" {
-						_ = s.repo.Delete(ctx, r.ReleaseID)
+				if r.ReleaseID == existingRelease.ReleaseID || !r.Date.Equal(existingRelease.Date) {
+					continue
+				}
+				if strings.EqualFold(r.AlbumName, existingRelease.AlbumName) ||
+					strings.EqualFold(r.Title, existingRelease.Title) ||
+					r.AlbumName == "" {
+					if existingRelease.TitleTrack == "" && r.TitleTrack != "" {
+						existingRelease.TitleTrack = r.TitleTrack
 					}
+					if existingRelease.MV == "" && r.MV != "" {
+						existingRelease.MV = r.MV
+					}
+					if existingRelease.Spotify == "" && r.Spotify != "" {
+						existingRelease.Spotify = r.Spotify
+					}
+					_ = s.repo.Delete(ctx, r.ReleaseID)
 				}
 			}
+		}
+
+		if err := s.repo.Update(ctx, existingRelease); err != nil {
+			return err
 		}
 
 		return nil
@@ -526,8 +551,7 @@ func (s *ReleaseService) findArtist(scrapedName string, artistMap map[string]*mo
 // maxFuzzyEditDistance bounds the Levenshtein fallback so short names don't match wildly.
 const maxFuzzyEditDistance = 2
 
-// fuzzyLookup is the last-resort exact-prefix/typo match: accepts candidates that
-// extend a known name by a few chars or differ from it within edit distance.
+// fuzzyLookup is the last-resort exact-prefix or typo match within edit distance.
 func fuzzyLookup(normMap map[string]*model.Artist, name string) *model.Artist {
 	if len(name) < 5 {
 		return nil

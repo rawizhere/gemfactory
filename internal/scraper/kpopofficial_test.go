@@ -131,10 +131,16 @@ func TestParseEventPageFromDocFallbackDate(t *testing.T) {
 	require.Equal(t, time.Date(2024, time.June, 1, 0, 0, 0, 0, time.UTC), rels[0].Date)
 }
 
+func TestCleanCellText(t *testing.T) {
+	require.Equal(t, "9th Mini Album – We made", cleanCellText("9th Mini Album – We made ()"))
+	require.Equal(t, "Song (Inst.)", cleanCellText("Song ( ) (Inst.)"))
+	require.Equal(t, "Artist", cleanCellText("  Artist\n"))
+}
+
 func TestSplitTitleSpacedDashOnly(t *testing.T) {
 	a, al := splitTitle("IVE Pre-release – Looks Can Kill (2026)")
 	require.Equal(t, "IVE Pre-release", a, "splitTitle should keep hyphenated words intact")
-	require.Equal(t, "Looks Can Kill (2026)", al)
+	require.Equal(t, "Looks Can Kill", al)
 	a, al = splitTitle("KICK OFF THE WALL Pt. 1")
 	require.Equal(t, "KICK OFF THE WALL Pt. 1", a)
 	require.Empty(t, al)
