@@ -154,7 +154,7 @@ func (f *Fetcher) parseEventPageFromDoc(doc *goquery.Document, url string) ([]*R
 				a.Remove()
 			}
 		})
-		key := strings.Join(strings.Fields(keyCell.Text()), " ")
+		key := cleanCellText(keyCell.Text())
 		lowKey := strings.ToLower(key)
 
 		valCell := cells.Eq(1).Clone()
@@ -165,7 +165,7 @@ func (f *Fetcher) parseEventPageFromDoc(doc *goquery.Document, url string) ([]*R
 				a.Remove()
 			}
 		})
-		val := strings.TrimSpace(valCell.Text())
+		val := cleanCellText(valCell.Text())
 
 		cells.Eq(1).Find("a").Each(func(j int, tag *goquery.Selection) {
 			href, _ := tag.Attr("href")
@@ -343,6 +343,13 @@ func uniqueStrings(in []string) []string {
 	return out
 }
 
+// cleanCellText drops link leftovers like empty parens and collapses whitespace.
+func cleanCellText(s string) string {
+	s = strings.ReplaceAll(s, "( )", "")
+	s = strings.ReplaceAll(s, "()", "")
+	return strings.Join(strings.Fields(s), " ")
+}
+
 // isTBA reports placeholder track names like "To Be Announced (TBA)".
 func isTBA(s string) bool {
 	low := strings.ToLower(strings.TrimSpace(s))
@@ -351,12 +358,15 @@ func isTBA(s string) bool {
 
 var titleDashSplit = regexp.MustCompile(`\s+[–—-]\s+`)
 
+// titleYearSuffix matches the " (2026)" marker the site appends to post titles.
+var titleYearSuffix = regexp.MustCompile(`\s*\((?:19|20)\d{2}\)$`)
+
 func splitTitle(in string) (string, string) {
 	p := titleDashSplit.Split(in, 2)
 	if len(p) == 2 {
-		return strings.TrimSpace(p[0]), strings.TrimSpace(p[1])
+		return strings.TrimSpace(titleYearSuffix.ReplaceAllString(p[0], "")), strings.TrimSpace(titleYearSuffix.ReplaceAllString(p[1], ""))
 	}
-	return in, ""
+	return strings.TrimSpace(titleYearSuffix.ReplaceAllString(in, "")), ""
 }
 
 func findDateInString(t string) string {
