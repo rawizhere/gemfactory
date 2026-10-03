@@ -31,10 +31,6 @@ func (c *HTTPClient) FetchAlbumsWindow(ctx context.Context, after, before time.T
 	var all []AlbumPost
 
 	for page := 1; ; page++ {
-		if err := c.limiter.Wait(ctx); err != nil {
-			return nil, fmt.Errorf("rate limit wait failed: %w", err)
-		}
-
 		q := url.Values{}
 		q.Set("per_page", strconv.Itoa(albumsPerPage))
 		q.Set("page", strconv.Itoa(page))
@@ -47,16 +43,9 @@ func (c *HTTPClient) FetchAlbumsWindow(ctx context.Context, after, before time.T
 		q.Set("_fields", "link,title,content")
 		apiURL := "https://kpopofficial.com/wp-json/wp/v2/album?" + q.Encode()
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+		resp, err := c.doRequest(ctx, apiURL)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create rest request: %w", err)
-		}
-		req.Header.Set("User-Agent", c.userAgent)
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := c.client.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("rest request failed: %w", err)
+			return nil, err
 		}
 
 		if resp.StatusCode == http.StatusBadRequest {
@@ -112,7 +101,7 @@ func monthWindow(month, year string) (time.Time, time.Time, error) {
 
 	start := time.Date(y, time.Month(m), 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 1, -1)
-	const pad = 45 * 24 * time.Hour
+	const pad = 60 * 24 * time.Hour
 	return start.Add(-pad), end.Add(pad), nil
 }
 

@@ -12,6 +12,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"gemfactory/internal/config"
+	"gemfactory/internal/scraper"
 	"gemfactory/internal/translate"
 )
 
@@ -109,6 +111,9 @@ func settingRegistry() []settingSpec {
 		{key: "GROK_PROMPT", def: translate.DefaultGrokPrompt},
 		{key: "GROK_RETELL_PROMPT", def: translate.DefaultGrokRetellPrompt},
 		{key: "GROK_OPINION_PROMPT", def: translate.DefaultGrokOpinionPrompt},
+		{key: "SCRAPER_USER_AGENTS", def: strings.Join(config.DefaultScraperUserAgents, "\n"),
+			validate: validateUserAgents,
+			apply:    applyScraperUserAgents},
 		{key: "GEMINI_API_KEY", masked: true},
 		{key: "GROQ_API_KEY", masked: true},
 		{key: "OPENCODE_API_KEY", masked: true},
@@ -119,6 +124,22 @@ func settingRegistry() []settingSpec {
 		{key: "OPENCODE_MODELS", def: strings.Join(translate.DefaultOpencodeModels, ",")},
 		{key: "NVIDIA_MODELS", def: strings.Join(translate.DefaultNvidiaModels, ",")},
 		{key: "OPENROUTER_MODELS", def: strings.Join(translate.DefaultOpenRouterModels, ",")},
+	}
+}
+
+func validateUserAgents(v string) error {
+	if len(scraper.ParseUserAgents(v)) == 0 {
+		return fmt.Errorf("add at least one user agent line")
+	}
+	return nil
+}
+
+func applyScraperUserAgents(s *Server, v string) {
+	if s.Scraper == nil {
+		return
+	}
+	if uas := scraper.ParseUserAgents(v); len(uas) > 0 {
+		s.Scraper.SetUserAgents(uas)
 	}
 }
 
