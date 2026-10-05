@@ -40,11 +40,11 @@ func TestCacheMarkerRoundTrip(t *testing.T) {
 	require.NoError(t, os.WriteFile(out, []byte("video"), 0644))
 	require.Nil(t, readCacheHit(out), "cache hit must not exist without marker")
 
-	writeCacheMarker(out, cacheMarker{Title: "Test Title", Caption: "<b>Test Title</b>\n\n#tag"})
+	writeCacheMarker(out, cacheMarker{Title: "Test Title", Tags: []string{"#tag"}})
 	m := readCacheHit(out)
 	require.NotNil(t, m, "marker = %+v", m)
 	require.Equal(t, "Test Title", m.Title)
-	require.Equal(t, "<b>Test Title</b>\n\n#tag", m.Caption)
+	require.Equal(t, []string{"#tag"}, m.Tags)
 }
 
 func TestCacheHitRequiresVideoFile(t *testing.T) {

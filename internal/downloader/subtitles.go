@@ -753,29 +753,23 @@ func DisplayTitle(meta *SourceMeta) string {
 	return base
 }
 
-// FormatCaption builds a clean, minimalist HTML caption (Title + up to 5 hashtags).
-func FormatCaption(meta *SourceMeta) string {
-	if meta == nil {
-		return ""
-	}
+// maxTitleRunes caps the caption title so long page dumps never reach the user.
+const maxTitleRunes = 200
 
-	title := DisplayTitle(meta)
+// FormatCaption builds a clean, minimalist HTML caption (Title + up to 5 hashtags).
+func FormatCaption(title string, tags []string) string {
 	if title == "" {
 		return ""
 	}
-
-	tags := CaptionHashtags(meta)
-	suffix := ""
+	// Cut before escaping so "</b>" never gets truncated.
+	if runes := []rune(title); len(runes) > maxTitleRunes {
+		title = string(runes[:maxTitleRunes-1]) + "…"
+	}
+	caption := "<b>" + htmlEscape(title) + "</b>"
 	if len(tags) > 0 {
-		suffix = "\n\n" + strings.Join(tags, " ")
+		caption += "\n\n" + strings.Join(tags, " ")
 	}
-
-	// Truncate the raw title before escaping so "</b>" never gets cut off.
-	budget := 1000 - len("<b></b>") - len(suffix)
-	if len(title) > budget {
-		title = strings.ToValidUTF8(title[:budget-1], "") + "…"
-	}
-	return "<b>" + htmlEscape(title) + "</b>" + suffix
+	return caption
 }
 
 // CaptionHashtags returns up to five "#Tag" entries not already present in the title.

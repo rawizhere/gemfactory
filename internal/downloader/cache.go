@@ -18,7 +18,6 @@ import (
 type cacheMarker struct {
 	Title       string    `json:"title,omitempty"`
 	AltTitle    string    `json:"alt_title,omitempty"`
-	Caption     string    `json:"caption,omitempty"`
 	Tags        []string  `json:"tags,omitempty"`
 	Translation string    `json:"translation,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
