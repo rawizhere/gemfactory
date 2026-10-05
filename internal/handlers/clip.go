@@ -39,6 +39,9 @@ func (h *ClipHandlers) MP3(ctx context.Context, message *telego.Message) {
 }
 
 func (h *ClipHandlers) DirectLink(ctx context.Context, message *telego.Message, rawURL string) {
+	if message.Chat.Type != "private" {
+		return
+	}
 	chatID := message.Chat.ID
 	if downloader.IsDirectDownloadURL(rawURL) {
 		req := downloader.ClipRequest{
@@ -117,6 +120,9 @@ func (h *ClipHandlers) maxSeconds(ctx context.Context, hq bool) float64 {
 }
 
 func (h *ClipHandlers) handleClipCommand(ctx context.Context, message *telego.Message, gif, subs, audioOnly bool) {
+	if message.Chat.Type != "private" {
+		return
+	}
 	chatID := message.Chat.ID
 
 	args := strings.Fields(message.Text)[1:]
@@ -130,6 +136,9 @@ func (h *ClipHandlers) handleClipCommand(ctx context.Context, message *telego.Me
 
 // Implicit handles command-less messages detected as implicit clip/subs requests.
 func (h *ClipHandlers) Implicit(ctx context.Context, message *telego.Message) {
+	if message.Chat.Type != "private" {
+		return
+	}
 	cmds := downloader.DetectImplicitClips(message.Text)
 	if cmds == nil {
 		h.DirectLink(ctx, message, downloader.ExtractFirstURL(message.Text))
