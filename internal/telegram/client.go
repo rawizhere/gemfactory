@@ -34,8 +34,32 @@ type Client struct {
 	logger *zap.Logger
 }
 
+// zapLogger routes telego internal logs into zap.
+type zapLogger struct{ l *zap.Logger }
+
+func (z zapLogger) Debugf(format string, args ...any) { z.l.Sugar().Debugf(format, args...) }
+func (z zapLogger) Errorf(format string, args ...any) { z.l.Sugar().Errorf(format, args...) }
+
+// retryCaller retries an API call once on transient failures (dead keep-alive conns, 5xx).
+type retryCaller struct {
+	next telegoapi.Caller
+	log  *zap.Logger
+}
+
+func (c retryCaller) Call(ctx context.Context, url string, data *telegoapi.RequestData) (*telegoapi.Response, error) {
+	res, err := c.next.Call(ctx, url, data)
+	if err == nil || ctx.Err() != nil {
+		return res, err
+	}
+	c.log.Warn("telegram api call failed, retrying once", zap.Error(err))
+	return c.next.Call(ctx, url, data)
+}
+
 func NewClient(botToken string, logger *zap.Logger) (*Client, error) {
-	bot, err := telego.NewBot(botToken)
+	bot, err := telego.NewBot(botToken,
+		telego.WithAPICaller(retryCaller{next: telegoapi.DefaultFastHTTPCaller, log: logger}),
+		telego.WithLogger(zapLogger{l: logger}),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create bot API: %w", err)
 	}
