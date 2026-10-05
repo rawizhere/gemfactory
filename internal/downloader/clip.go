@@ -101,6 +101,9 @@ func (s *Service) baseYTDLPArgs(ctx context.Context, cookieFile string) []string
 		// mweb keeps DASH alive now that web is SABR'd; web_safari adds an HLS fallback.
 		"--extractor-args", "youtube:player_client=default,mweb,web_safari",
 		"--progress-template", "download:[download] %(progress._percent_str)s of %(progress._total_bytes_estimate_str|progress._total_bytes_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s",
+		"--extractor-retries", "3",
+		"--retries", "5",
+		"--fragment-retries", "5",
 	}
 	args = append(args, s.authArgs(ctx, cookieFile)...)
 	if potURL := os.Getenv("BGUTIL_POT_URL"); potURL != "" {

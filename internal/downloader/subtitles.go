@@ -764,16 +764,18 @@ func FormatCaption(meta *SourceMeta) string {
 		return ""
 	}
 
-	caption := "<b>" + htmlEscape(title) + "</b>"
-
-	if tags := CaptionHashtags(meta); len(tags) > 0 {
-		caption += "\n\n" + strings.Join(tags, " ")
+	tags := CaptionHashtags(meta)
+	suffix := ""
+	if len(tags) > 0 {
+		suffix = "\n\n" + strings.Join(tags, " ")
 	}
 
-	if len(caption) > 1000 {
-		caption = caption[:997] + "…"
+	// Truncate the raw title before escaping so "</b>" never gets cut off.
+	budget := 1000 - len("<b></b>") - len(suffix)
+	if len(title) > budget {
+		title = strings.ToValidUTF8(title[:budget-1], "") + "…"
 	}
-	return caption
+	return "<b>" + htmlEscape(title) + "</b>" + suffix
 }
 
 // CaptionHashtags returns up to five "#Tag" entries not already present in the title.
