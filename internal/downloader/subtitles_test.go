@@ -214,7 +214,7 @@ func TestFormatCaption(t *testing.T) {
 		Description: "Theburntpeanut talks about dating clankers..😂☠️#theburntpeanut #theburntpeanutclip #fyp",
 		Tags:        []string{"theburntpeanut", "fyp", "funny"},
 	}
-	gotTikTok := FormatCaption(tiktokMeta)
+	gotTikTok := FormatCaption(DisplayTitle(tiktokMeta), CaptionHashtags(tiktokMeta))
 	require.LessOrEqual(t, strings.Count(gotTikTok, "Theburntpeanut"), 1, "expected no duplicate header for tiktok, got: %s", gotTikTok)
 	require.Contains(t, gotTikTok, "#funny", "expected missing tag #funny to be added, got: %s", gotTikTok)
 
@@ -224,7 +224,7 @@ func TestFormatCaption(t *testing.T) {
 		Description: "Official Dance Practice Video with long boilerplate",
 		Tags:        []string{"Kep1er", "WADADA", "Kpop"},
 	}
-	gotYT := FormatCaption(ytMeta)
+	gotYT := FormatCaption(DisplayTitle(ytMeta), CaptionHashtags(ytMeta))
 	require.Contains(t, gotYT, "<b>Kep1er WA DA DA</b>", "expected title in bold, got: %s", gotYT)
 	require.NotContains(t, gotYT, "Official Dance Practice Video", "expected no description body in minimalist mode, got: %s", gotYT)
 	require.Contains(t, gotYT, "#Kep1er #WADADA #Kpop", "expected tags in caption, got: %s", gotYT)

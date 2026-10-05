@@ -426,16 +426,19 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		return
 	}
 
+	baseTitle, altTitle := displayTitleParts(meta)
+	title := baseTitle
+	if altTitle != "" {
+		title = altTitle
+	}
 	var caption string
 	if job.Request.Shorts && job.Request.Start == "" && job.Request.End == "" {
-		caption = FormatCaption(meta)
+		caption = FormatCaption(title, CaptionHashtags(meta))
 	}
 
-	baseTitle, altTitle := displayTitleParts(meta)
 	writeCacheMarker(clipPath, cacheMarker{
 		Title:       baseTitle,
 		AltTitle:    altTitle,
-		Caption:     caption,
 		Tags:        AllHashtags(meta),
 		Translation: job.Translation,
 	})
@@ -490,12 +493,24 @@ func (s *Service) serveFromCache(job *Job, clipPath string, marker *cacheMarker)
 	}
 	s.reportStage(job, StageUpload, "")
 
+	caption := ""
+	if marker.Title != "" {
+		title := marker.Title
+		if marker.AltTitle != "" {
+			title = marker.AltTitle
+		}
+		tags := marker.Tags
+		if len(tags) > 5 {
+			tags = tags[:5]
+		}
+		caption = FormatCaption(title, tags)
+	}
 	s.mu.Lock()
 	job.Status = StatusDone
 	job.OutputDir = clipPath
-	job.Caption = marker.Caption
+	job.Caption = caption
 	s.mu.Unlock()
-	s.notifyDone(job, clipPath, marker.Caption)
+	s.notifyDone(job, clipPath, caption)
 }
 
 func (s *Service) reportStage(job *Job, stage, detail string) {
