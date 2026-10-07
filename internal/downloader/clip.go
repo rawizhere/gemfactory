@@ -545,7 +545,7 @@ func (s *Service) ReencodeWithSubs(ctx context.Context, clipPath, trimmedVTT str
 	}
 	maxVideoKbps := calculateBitrateCapKbps(durationSec, opts.AudioBitrate, opts.MaxFileMB, gif)
 
-	args := []string{"-y", "-nostdin", "-i", clipPath}
+	baseArgs := []string{"-y", "-nostdin", "-i", clipPath}
 	var vfilters []string
 	if trimmedVTT != "" {
 		subArg := escapeFilterPath(trimmedVTT)
@@ -556,82 +556,101 @@ func (s *Service) ReencodeWithSubs(ctx context.Context, clipPath, trimmedVTT str
 	} else {
 		vfilters = append(vfilters, "scale=trunc(iw/2)*2:trunc(ih/2)*2")
 	}
-	args = append(args, "-vf", strings.Join(vfilters, ","))
+	baseArgs = append(baseArgs, "-vf", strings.Join(vfilters, ","))
 
 	if gif {
-		args = append(args, "-an")
+		baseArgs = append(baseArgs, "-an")
 	} else {
-		args = append(args, "-c:a", "aac", "-b:a", opts.AudioBitrate)
+		baseArgs = append(baseArgs, "-c:a", "aac", "-b:a", opts.AudioBitrate)
 	}
+	var progressArgs []string
 	if onProgress != nil && expectedDurationMS > 0 {
-		args = append(args, "-progress", "pipe:1", "-nostats")
+		progressArgs = []string{"-progress", "pipe:1", "-nostats"}
 	}
-	args = append(args,
+	baseArgs = append(baseArgs,
 		"-c:v", "libx264",
 		"-crf", opts.CRF,
 		"-preset", opts.Preset,
 		"-pix_fmt", "yuv420p",
 	)
-	if maxVideoKbps > 0 && maxVideoKbps < 8000 {
-		args = append(args,
-			"-maxrate", fmt.Sprintf("%dk", int(maxVideoKbps)),
-			"-bufsize", fmt.Sprintf("%dk", int(maxVideoKbps*2)),
-		)
-	}
-	args = append(args,
-		"-movflags", "+faststart",
-		tmpPath)
 
-	cmd := exec.CommandContext(ctx, bin, args...)
-	s.logger.Info("ffmpeg re-encode starting",
-		zap.String("input", clipPath),
-		zap.Bool("burn_subs", trimmedVTT != ""),
-		zap.String("crf", opts.CRF),
-		zap.String("preset", opts.Preset),
-		zap.String("audio_bitrate", opts.AudioBitrate),
-		zap.Float64("max_video_kbps", maxVideoKbps))
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", fmt.Errorf("stdout pipe: %w", err)
-	}
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-
-	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("start ffmpeg: %w", err)
-	}
-
-	var lastSpeed string
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		if onProgress == nil || expectedDurationMS <= 0 {
-			continue
+	// CRF alone ignores the size budget, so always cap it with the computed maxrate; one corrective retry absorbs VBV overshoot.
+	capKbps := int(maxVideoKbps)
+	for attempt := 0; ; attempt++ {
+		args := append([]string{}, baseArgs...)
+		if maxVideoKbps > 0 {
+			args = append(args,
+				"-maxrate", fmt.Sprintf("%dk", capKbps),
+				"-bufsize", fmt.Sprintf("%dk", capKbps*2),
+			)
 		}
-		line := scanner.Text()
-		if sm := ffmpegSpeedRe.FindStringSubmatch(line); len(sm) > 1 {
-			lastSpeed = strings.TrimSpace(sm[1])
+		args = append(args, "-movflags", "+faststart", tmpPath)
+		args = append(args, progressArgs...)
+
+		cmd := exec.CommandContext(ctx, bin, args...)
+		s.logger.Info("ffmpeg re-encode starting",
+			zap.String("input", clipPath),
+			zap.Bool("burn_subs", trimmedVTT != ""),
+			zap.String("crf", opts.CRF),
+			zap.String("preset", opts.Preset),
+			zap.String("audio_bitrate", opts.AudioBitrate),
+			zap.Float64("max_video_kbps", float64(capKbps)),
+			zap.Int("attempt", attempt))
+
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return "", fmt.Errorf("stdout pipe: %w", err)
 		}
-		if m := ffmpegOutTimeRe.FindStringSubmatch(line); len(m) > 1 {
-			if us, perr := strconv.ParseInt(m[1], 10, 64); perr == nil {
-				expectedUS := expectedDurationMS * 1000.0
-				pct := int(float64(us) / expectedUS * 100.0)
-				if pct > 100 {
-					pct = 100
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+
+		if err := cmd.Start(); err != nil {
+			return "", fmt.Errorf("start ffmpeg: %w", err)
+		}
+
+		var lastSpeed string
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			if onProgress == nil || expectedDurationMS <= 0 {
+				continue
+			}
+			line := scanner.Text()
+			if sm := ffmpegSpeedRe.FindStringSubmatch(line); len(sm) > 1 {
+				lastSpeed = strings.TrimSpace(sm[1])
+			}
+			if m := ffmpegOutTimeRe.FindStringSubmatch(line); len(m) > 1 {
+				if us, perr := strconv.ParseInt(m[1], 10, 64); perr == nil {
+					expectedUS := expectedDurationMS * 1000.0
+					pct := int(float64(us) / expectedUS * 100.0)
+					if pct > 100 {
+						pct = 100
+					}
+					onProgress(ProgressUpdate{
+						Stage:   StageReencode,
+						Percent: pct,
+						Speed:   lastSpeed,
+					})
 				}
-				onProgress(ProgressUpdate{
-					Stage:   StageReencode,
-					Percent: pct,
-					Speed:   lastSpeed,
-				})
 			}
 		}
-	}
 
-	runErr := cmd.Wait()
-	if runErr != nil {
-		_ = os.Remove(tmpPath)
-		return "", fmt.Errorf("ffmpeg failed: %w: %s", runErr, truncate(stderr.String(), 2000))
+		runErr := cmd.Wait()
+		if runErr != nil {
+			_ = os.Remove(tmpPath)
+			return "", fmt.Errorf("ffmpeg failed: %w: %s", runErr, truncate(stderr.String(), 2000))
+		}
+
+		fi, serr := os.Stat(tmpPath)
+		if serr != nil || fi.Size() <= maxSizeBytes || attempt >= 1 || maxVideoKbps <= 0 {
+			// still over budget after the corrective retry: keep the file, run()'s size check reports the failure
+			break
+		}
+		// rescale the cap by the measured overshoot and encode once more
+		capKbps = int(float64(capKbps) * float64(maxSizeBytes) / float64(fi.Size()) * 0.97)
+		if capKbps < 500 {
+			capKbps = 500
+		}
+		s.logger.Info("re-encode overshot the size budget, retrying with lower cap", zap.Int("cap_kbps", capKbps), zap.Int64("bytes", fi.Size()))
 	}
 
 	if err := os.Rename(tmpPath, clipPath); err != nil {
