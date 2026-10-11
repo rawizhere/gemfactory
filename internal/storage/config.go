@@ -74,19 +74,6 @@ func (r *ConfigRepository) Set(ctx context.Context, key, value string) error {
 	return nil
 }
 
-func (r *ConfigRepository) Delete(ctx context.Context, key string) error {
-	_, err := r.db.NewDelete().
-		Model((*model.Config)(nil)).
-		Where("key = ?", key).
-		Exec(ctx)
-
-	if err != nil {
-		return fmt.Errorf("failed to delete config: %w", err)
-	}
-
-	return nil
-}
-
 func (r *ConfigRepository) Reset(ctx context.Context) error {
 	// Clear everything: managed settings are re-created on demand when saved,
 	// and startup-only values live in env, not here.

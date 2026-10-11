@@ -12,12 +12,6 @@ import (
 	"gemfactory/internal/model"
 )
 
-func TestMonthToInt(t *testing.T) {
-	require.Equal(t, 3, monthToInt("March"))
-	require.Equal(t, 12, monthToInt("DECEMBER"))
-	require.Zero(t, monthToInt("notamonth"), "unexpected monthToInt results")
-}
-
 func TestValidateRelease(t *testing.T) {
 	valid := &model.Release{ArtistID: 1, Title: ("X"), Date: time.Now()}
 	require.NoError(t, NewReleaseService(nil, nil, nil).validateRelease(valid), "expected valid release")

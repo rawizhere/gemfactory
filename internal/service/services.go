@@ -6,27 +6,31 @@ import (
 
 	"gemfactory/internal/config"
 	"gemfactory/internal/scraper"
+	"gemfactory/internal/settings"
 	"gemfactory/internal/storage"
 
 	"go.uber.org/zap"
 )
 
 type Services struct {
-	Artist  *ArtistService
-	Release *ReleaseService
-	Config  *ConfigService
-	Scraper *scraper.Fetcher
+	Artist   *ArtistService
+	Release  *ReleaseService
+	Config   *ConfigService
+	Settings settings.Provider
+	Scraper  *scraper.Fetcher
 }
 
 func NewServices(db *storage.Postgres, cfg *config.Config, logger *zap.Logger) *Services {
-	configSvc := NewConfigService(db.GetDB(), logger)
+	configRepo := storage.NewConfigRepository(db.GetDB(), logger)
+	configSvc := NewConfigService(configRepo, logger)
 	scraperClient := scraper.NewFetcher(initialUserAgents(context.Background(), configSvc), logger)
 
 	return &Services{
-		Artist:  NewArtistService(db.GetDB(), logger),
-		Release: NewReleaseService(db.GetDB(), scraperClient, logger),
-		Config:  configSvc,
-		Scraper: scraperClient,
+		Artist:   NewArtistService(db.GetDB(), logger),
+		Release:  NewReleaseService(db.GetDB(), scraperClient, logger),
+		Config:   configSvc,
+		Settings: settings.New(configRepo),
+		Scraper:  scraperClient,
 	}
 }
 

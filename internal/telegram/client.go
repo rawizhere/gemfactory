@@ -22,15 +22,8 @@ import (
 
 const maxMessageLength = 4000
 
-// Router registers update handlers on the telegohandler bot handler.
-type Router interface {
-	RegisterRoutes(bh *th.BotHandler)
-	RegisterBotCommands() []telego.BotCommand
-}
-
 type Client struct {
 	bot    *telego.Bot
-	router Router
 	logger *zap.Logger
 }
 
@@ -70,8 +63,7 @@ func NewClient(botToken string, logger *zap.Logger) (*Client, error) {
 	}, nil
 }
 
-func (c *Client) Start(ctx context.Context, router Router) error {
-	c.router = router
+func (c *Client) Start(ctx context.Context, commands []telego.BotCommand, registerRoutes func(*th.BotHandler)) error {
 
 	me, err := c.bot.GetMe(ctx)
 	if err != nil {
@@ -81,7 +73,7 @@ func (c *Client) Start(ctx context.Context, router Router) error {
 
 	_ = c.bot.DeleteWebhook(ctx, &telego.DeleteWebhookParams{DropPendingUpdates: true})
 
-	if err := c.SetBotCommands(ctx, c.router.RegisterBotCommands()); err != nil {
+	if err := c.SetBotCommands(ctx, commands); err != nil {
 		c.logger.Error("Failed to set bot commands", zap.Error(err))
 	}
 
@@ -95,7 +87,7 @@ func (c *Client) Start(ctx context.Context, router Router) error {
 	if err != nil {
 		return fmt.Errorf("failed to create bot handler: %w", err)
 	}
-	c.router.RegisterRoutes(bh)
+	registerRoutes(bh)
 
 	// Blocks until the updates channel closes (ctx cancellation) or Stop is called.
 	return bh.Start()

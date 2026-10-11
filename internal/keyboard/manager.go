@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/mymmrac/telego"
@@ -27,8 +26,6 @@ type Manager struct {
 	allMonthsKeyboard telego.InlineKeyboardMarkup
 	mainMonthKeyboard telego.InlineKeyboardMarkup
 	lastMonth         int
-	mu                sync.RWMutex
-	stopChan          chan struct{}
 }
 
 func NewManager(releaseService *service.ReleaseService, config *config.Config, logger *zap.Logger) *Manager {
@@ -36,11 +33,9 @@ func NewManager(releaseService *service.ReleaseService, config *config.Config, l
 		releaseService: releaseService,
 		logger:         logger,
 		config:         config,
-		stopChan:       make(chan struct{}),
 	}
 
 	k.initKeyboards()
-	go k.updateMainMonthKeyboardLoop()
 
 	return k
 }
@@ -104,31 +99,14 @@ func (k *Manager) updateMainMonthKeyboard() {
 		telegoutil.InlineKeyboardButton("...").WithCallbackData("show_all_months"),
 	}
 
-	k.mu.Lock()
 	k.lastMonth = currentMonth
 	k.mainMonthKeyboard = *telegoutil.InlineKeyboard(telegoutil.InlineKeyboardRow(buttons...))
-	k.mu.Unlock()
 
 	k.logger.Info("Updated main month keyboard", zap.String("current_month", model.Months[currentMonth-1]))
 }
 
-func (k *Manager) updateMainMonthKeyboardLoop() {
-	ticker := time.NewTicker(1 * time.Hour)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			k.updateMainMonthKeyboard()
-		case <-k.stopChan:
-			return
-		}
-	}
-}
-
 func (k *Manager) GetMainKeyboard() *telego.InlineKeyboardMarkup {
-	k.mu.RLock()
-	defer k.mu.RUnlock()
+	k.updateMainMonthKeyboard()
 	kb := k.mainMonthKeyboard
 	return &kb
 }
@@ -191,12 +169,4 @@ func (k *Manager) HandleMainCallback(ctx context.Context, callback *telego.Callb
 		return k.tg.EditMessageReplyMarkup(ctx, chatID, messageID, k.GetMainKeyboard())
 	}
 	return nil
-}
-
-func (k *Manager) Stop() {
-	select {
-	case <-k.stopChan:
-	default:
-		close(k.stopChan)
-	}
 }

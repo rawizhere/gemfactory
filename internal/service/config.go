@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"gemfactory/internal/model"
-	"gemfactory/internal/storage"
 	"strings"
 
-	"github.com/uptrace/bun"
 	"go.uber.org/zap"
 )
 
@@ -16,11 +14,8 @@ type ConfigService struct {
 	logger *zap.Logger
 }
 
-func NewConfigService(db *bun.DB, logger *zap.Logger) *ConfigService {
-	return &ConfigService{
-		repo:   storage.NewConfigRepository(db, logger),
-		logger: logger,
-	}
+func NewConfigService(repo model.ConfigRepository, logger *zap.Logger) *ConfigService {
+	return &ConfigService{repo: repo, logger: logger}
 }
 
 func (s *ConfigService) Update(ctx context.Context, key, value string) error {
@@ -73,14 +68,4 @@ func (s *ConfigService) GetAll(ctx context.Context) (string, error) {
 	}
 
 	return result.String(), nil
-}
-
-func (s *ConfigService) Reset(ctx context.Context) error {
-	err := s.repo.Reset(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to reset config: %w", err)
-	}
-
-	s.logger.Info("Config reset to default values")
-	return nil
 }

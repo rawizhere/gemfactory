@@ -32,8 +32,6 @@ func NewServer(port string, logger *zap.Logger, db *storage.Postgres) *Server {
 	}
 
 	mux.HandleFunc("/health", healthServer.healthHandler)
-	mux.HandleFunc("/ready", healthServer.healthHandler)
-	mux.HandleFunc("/live", healthServer.healthHandler)
 	mux.Handle("/metrics", promhttp.Handler())
 
 	return healthServer

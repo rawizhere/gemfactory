@@ -53,19 +53,6 @@ func (r *ArtistRepository) GetAll(ctx context.Context) ([]model.Artist, error) {
 	return artists, nil
 }
 
-func (r *ArtistRepository) GetByGender(ctx context.Context, gender model.Gender) ([]model.Artist, error) {
-	var artists []model.Artist
-	err := r.db.NewSelect().
-		Model(&artists).
-		Where("gender = ?", gender).
-		Order("name ASC").
-		Scan(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query artists by gender: %w", err)
-	}
-	return artists, nil
-}
-
 func (r *ArtistRepository) GetByName(ctx context.Context, name string) (*model.Artist, error) {
 	artist := new(model.Artist)
 
@@ -93,19 +80,6 @@ func (r *ArtistRepository) GetActive(ctx context.Context) ([]model.Artist, error
 		Scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query active artists: %w", err)
-	}
-	return artists, nil
-}
-
-func (r *ArtistRepository) GetByGenderAndActive(ctx context.Context, gender model.Gender, active bool) ([]model.Artist, error) {
-	var artists []model.Artist
-	err := r.db.NewSelect().
-		Model(&artists).
-		Where("gender = ? AND is_active = ?", gender, active).
-		Order("name ASC").
-		Scan(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query artists by gender and active: %w", err)
 	}
 	return artists, nil
 }

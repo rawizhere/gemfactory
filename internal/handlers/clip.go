@@ -507,10 +507,5 @@ func formatInterval(req downloader.ClipRequest) string {
 }
 
 func (h *ClipHandlers) shouldDeleteStatus(ctx context.Context) bool {
-	if h.Services != nil && h.Services.Config != nil {
-		if val, err := h.Services.Config.Get(ctx, "CLIP_DELETE_STATUS"); err == nil && val != "" {
-			return strings.ToLower(strings.TrimSpace(val)) == "true" || strings.TrimSpace(val) == "1"
-		}
-	}
-	return false
+	return h.Services.Settings.Bool(ctx, "CLIP_DELETE_STATUS", false)
 }

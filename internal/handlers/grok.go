@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"html"
-	"strconv"
 	"strings"
 	"time"
 
@@ -11,7 +10,6 @@ import (
 	"go.uber.org/zap"
 
 	"gemfactory/internal/middleware"
-	"gemfactory/internal/settings"
 	"gemfactory/internal/translate"
 )
 
@@ -31,13 +29,13 @@ var (
 
 type GrokHandlers struct {
 	*BaseHandler
-	limiter *middleware.GrokLimiter
+	limiter *middleware.Limiter
 }
 
 func NewGrokHandlers(base *BaseHandler) *GrokHandlers {
 	return &GrokHandlers{
 		BaseHandler: base,
-		limiter:     middleware.NewGrokLimiter(),
+		limiter:     middleware.NewLimiter(),
 	}
 }
 
@@ -46,19 +44,13 @@ func (h *GrokHandlers) Run(ctx context.Context, message *telego.Message, mode Gr
 		return
 	}
 
-	enabledStr, err := h.Services.Config.Get(ctx, "GROK_ENABLED")
-	if err == nil && !settings.IsTruthy(enabledStr) {
+	if !h.Services.Settings.Bool(ctx, "GROK_ENABLED", true) {
 		return
 	}
 
 	isAdmin := message.From != nil && (message.From.Username == h.Config.AdminUsername || h.IsAdmin(message.From))
 	if !isAdmin {
-		rateLimit := 3
-		if rlStr, err := h.Services.Config.Get(ctx, "GROK_RATE_LIMIT"); err == nil && rlStr != "" {
-			if v, err := strconv.Atoi(rlStr); err == nil && v > 0 {
-				rateLimit = v
-			}
-		}
+		rateLimit := h.Services.Settings.Int(ctx, "GROK_RATE_LIMIT", 3)
 
 		userID := int64(0)
 		if message.From != nil {
@@ -92,12 +84,7 @@ func (h *GrokHandlers) Run(ctx context.Context, message *telego.Message, mode Gr
 		return
 	}
 
-	maxChars := 3000
-	if mcStr, err := h.Services.Config.Get(ctx, "GROK_MAX_CHARS"); err == nil && mcStr != "" {
-		if v, err := strconv.Atoi(mcStr); err == nil && v > 0 {
-			maxChars = v
-		}
-	}
+	maxChars := h.Services.Settings.Int(ctx, "GROK_MAX_CHARS", 3000)
 
 	runes := []rune(targetText)
 	if len(runes) > maxChars {
@@ -107,20 +94,11 @@ func (h *GrokHandlers) Run(ctx context.Context, message *telego.Message, mode Gr
 		return
 	}
 
-	prompt, err := h.Services.Config.Get(ctx, mode.promptKey)
-	if err != nil || strings.TrimSpace(prompt) == "" {
-		prompt = mode.defPrompt
-	}
+	prompt := h.Services.Settings.Value(ctx, mode.promptKey, mode.defPrompt)
 
 	cfg := translate.ResolveConfig(func(k string) (string, bool) {
-		if h.Services == nil || h.Services.Config == nil {
-			return "", false
-		}
-		v, err := h.Services.Config.Get(ctx, k)
-		if err != nil || strings.TrimSpace(v) == "" {
-			return "", false
-		}
-		return strings.TrimSpace(v), true
+		v := h.Services.Settings.Value(ctx, k, "")
+		return v, v != ""
 	})
 
 	resp, _, err := translate.Complete(ctx, prompt, targetText, cfg)

@@ -29,8 +29,6 @@ type ArtistRepository interface {
 	GetByName(ctx context.Context, name string) (*Artist, error)
 	GetAll(ctx context.Context) ([]Artist, error)
 	GetActive(ctx context.Context) ([]Artist, error)
-	GetByGender(ctx context.Context, gender Gender) ([]Artist, error)
-	GetByGenderAndActive(ctx context.Context, gender Gender, isActive bool) ([]Artist, error)
 	Create(ctx context.Context, artist *Artist) error
 	Update(ctx context.Context, artist *Artist) error
 	Delete(ctx context.Context, id int) error
