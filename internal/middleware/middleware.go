@@ -9,18 +9,18 @@ import (
 )
 
 type Middleware struct {
-	rateLimiter *RateLimiter
-	debouncer   *Debouncer
-	logger      *zap.Logger
-	config      *config.Config
+	limiter   *Limiter
+	debouncer *Debouncer
+	logger    *zap.Logger
+	config    *config.Config
 }
 
 func New(config *config.Config, logger *zap.Logger) *Middleware {
 	return &Middleware{
-		rateLimiter: NewRateLimiter(10, 60*time.Second, logger),
-		debouncer:   NewDebouncer(1*time.Second, logger),
-		logger:      logger,
-		config:      config,
+		limiter:   NewLimiter(),
+		debouncer: NewDebouncer(1*time.Second, logger),
+		logger:    logger,
+		config:    config,
 	}
 }
 
@@ -32,6 +32,6 @@ func (m *Middleware) Handlers() []th.Handler {
 		th.Timeout(60 * time.Second),
 		Logging(m.logger),
 		Debounce(m.debouncer, m.logger),
-		RateLimit(m.rateLimiter),
+		RateLimit(m.limiter, 10, time.Minute),
 	}
 }

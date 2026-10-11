@@ -6,6 +6,7 @@ import (
 	"gemfactory/internal/model"
 	"gemfactory/internal/scraper"
 	"gemfactory/internal/storage"
+	"iter"
 	"regexp"
 	"strconv"
 	"strings"
@@ -68,7 +69,7 @@ func (s *ReleaseService) GetReleasesForMonth(ctx context.Context, month string, 
 		gender = "male"
 	}
 
-	startDate := time.Date(year, time.Month(monthToInt(month)), 1, 0, 0, 0, 0, time.UTC)
+	startDate := time.Date(year, time.Month(model.MonthNumber(month)), 1, 0, 0, 0, 0, time.UTC)
 	endDate := startDate.AddDate(0, 1, -1)
 
 	allReleases, err := s.repo.GetByDateRange(ctx, startDate, endDate)
@@ -154,9 +155,9 @@ func (s *ReleaseService) Upsert(ctx context.Context, release *model.Release) err
 		return err
 	}
 
-	release.Title = (CleanReleaseTitle(release.Title))
-	release.AlbumName = (CleanReleaseTitle(release.AlbumName))
-	release.TitleTrack = (CleanReleaseTitle(release.TitleTrack))
+	release.Title = CleanReleaseTitle(release.Title)
+	release.AlbumName = CleanReleaseTitle(release.AlbumName)
+	release.TitleTrack = CleanReleaseTitle(release.TitleTrack)
 
 	genericTitles := []string{
 		"youtube", "official audio", "music video", "mv release",
@@ -167,13 +168,13 @@ func (s *ReleaseService) Upsert(ctx context.Context, release *model.Release) err
 	titleLower := strings.ToLower(release.TitleTrack)
 	for _, generic := range genericTitles {
 		if titleLower == generic || strings.Contains(titleLower, generic) {
-			release.TitleTrack = ("")
+			release.TitleTrack = ""
 			break
 		}
 	}
 
-	release.MV = (CleanLink(release.MV))
-	release.Spotify = (CleanLink(release.Spotify))
+	release.MV = CleanLink(release.MV)
+	release.Spotify = CleanLink(release.Spotify)
 
 	var existingRelease *model.Release
 	var err error
@@ -300,30 +301,40 @@ func (s *ReleaseService) ParseReleasesForMonth(ctx context.Context, monthName st
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	month, year := resolveMonthYear(monthName)
 	s.logger.Info("Starting to parse releases", zap.String("month", monthName))
+	return s.parseReleases(ctx, s.scraper.ParseMonth(ctx, month, year), "month",
+		"failed to parse monthly page",
+		[]zap.Field{zap.String("month", month), zap.String("year", year)})
+}
 
-	year := time.Now().Format("2006")
-	month := monthName
-	if strings.Contains(monthName, "-") {
-		parts := strings.Split(monthName, "-")
-		if len(parts) == 2 {
-			month = parts[0]
-			year = parts[1]
-		}
-	} else {
-		now := time.Now()
-		currentMonth := int(now.Month())
+func (s *ReleaseService) ParseReleasesForYear(ctx context.Context, year string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-		requestedMonthIndex := -1
-		if m := model.MonthNumber(month); m > 0 {
-			requestedMonthIndex = m
-		}
+	s.logger.Info("Starting to parse releases for year", zap.String("year", year))
+	return s.parseReleases(ctx, s.scraper.ParseYear(ctx, year), "year",
+		"failed to parse year "+year,
+		[]zap.Field{zap.String("year", year)})
+}
 
-		if requestedMonthIndex != -1 && requestedMonthIndex < currentMonth {
-			year = strconv.Itoa(now.Year() + 1)
+// resolveMonthYear splits a "month-year" input and shifts to next year for past months without an explicit year.
+func resolveMonthYear(monthName string) (month, year string) {
+	if !strings.Contains(monthName, "-") {
+		if m := model.MonthNumber(monthName); m > 0 && m < int(time.Now().Month()) {
+			return monthName, strconv.Itoa(time.Now().Year() + 1)
 		}
+		return monthName, time.Now().Format("2006")
 	}
+	parts := strings.Split(monthName, "-")
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return monthName, time.Now().Format("2006")
+}
 
+// parseReleases scrapes releases from the given iterator and upserts those with matched active artists.
+func (s *ReleaseService) parseReleases(ctx context.Context, releases iter.Seq2[scraper.Release, error], period, scrapeErrPrefix string, endFields []zap.Field) (int, error) {
 	activeArtists, err := s.artistRepo.GetActive(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get artists: %w", err)
@@ -335,9 +346,9 @@ func (s *ReleaseService) ParseReleasesForMonth(ctx context.Context, monthName st
 	}
 
 	savedCount := 0
-	for scrapedRelease, err := range s.scraper.ParseMonth(ctx, month, year) {
+	for scrapedRelease, err := range releases {
 		if err != nil {
-			return savedCount, fmt.Errorf("failed to parse monthly page: %w", err)
+			return savedCount, fmt.Errorf("%s: %w", scrapeErrPrefix, err)
 		}
 
 		artist := s.findArtist(scrapedRelease.Artist, artistObjectMap)
@@ -351,19 +362,18 @@ func (s *ReleaseService) ParseReleasesForMonth(ctx context.Context, monthName st
 
 		release := &model.Release{
 			ArtistID:      artist.ArtistID,
-			DisplayArtist: (scrapedRelease.Artist),
-			Title:         (scrapedRelease.Title),
-			TitleTrack:    (scrapedRelease.TitleTrack),
-			AlbumName:     (scrapedRelease.AlbumName),
-			MV:            (scrapedRelease.MV),
-			Spotify:       (scrapedRelease.Spotify),
-			SourceURL:     (scrapedRelease.SourceURL),
+			DisplayArtist: scrapedRelease.Artist,
+			Title:         scrapedRelease.Title,
+			TitleTrack:    scrapedRelease.TitleTrack,
+			AlbumName:     scrapedRelease.AlbumName,
+			MV:            scrapedRelease.MV,
+			Spotify:       scrapedRelease.Spotify,
+			SourceURL:     scrapedRelease.SourceURL,
 			Date:          scrapedRelease.Date,
 			IsActive:      true,
 		}
 
-		err = s.Upsert(ctx, release)
-		if err != nil {
+		if err := s.Upsert(ctx, release); err != nil {
 			s.logger.Warn("Failed to save release",
 				zap.String("artist", scrapedRelease.Artist),
 				zap.Error(err))
@@ -373,72 +383,7 @@ func (s *ReleaseService) ParseReleasesForMonth(ctx context.Context, monthName st
 		savedCount++
 	}
 
-	s.logger.Info("Completed parsing releases for month",
-		zap.String("month", month),
-		zap.String("year", year),
-		zap.Int("saved", savedCount))
-
-	return savedCount, nil
-}
-
-func (s *ReleaseService) ParseReleasesForYear(ctx context.Context, year string) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.logger.Info("Starting to parse releases for year", zap.String("year", year))
-
-	activeArtists, err := s.artistRepo.GetActive(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get active artists: %w", err)
-	}
-
-	artistObjectMap := make(map[string]*model.Artist)
-	for i := range activeArtists {
-		artistObjectMap[strings.ToLower(activeArtists[i].Name)] = &activeArtists[i]
-	}
-
-	savedCount := 0
-	for scrapedRelease, err := range s.scraper.ParseYear(ctx, year) {
-		if err != nil {
-			return savedCount, fmt.Errorf("failed to parse year %s: %w", year, err)
-		}
-
-		artist := s.findArtist(scrapedRelease.Artist, artistObjectMap)
-		if artist == nil {
-			s.logger.Debug("Scraped release artist not matched in active artists",
-				zap.String("artist", scrapedRelease.Artist),
-				zap.String("title", scrapedRelease.Title),
-				zap.String("date", scrapedRelease.Date.Format("2006-01-02")))
-			continue
-		}
-
-		release := &model.Release{
-			ArtistID:      artist.ArtistID,
-			DisplayArtist: (scrapedRelease.Artist),
-			Title:         (scrapedRelease.Title),
-			TitleTrack:    (scrapedRelease.TitleTrack),
-			AlbumName:     (scrapedRelease.AlbumName),
-			MV:            (scrapedRelease.MV),
-			Spotify:       (scrapedRelease.Spotify),
-			SourceURL:     (scrapedRelease.SourceURL),
-			Date:          scrapedRelease.Date,
-			IsActive:      true,
-		}
-
-		err = s.Upsert(ctx, release)
-		if err != nil {
-			s.logger.Warn("Failed to save release",
-				zap.String("artist", scrapedRelease.Artist),
-				zap.Error(err))
-			continue
-		}
-
-		savedCount++
-	}
-
-	s.logger.Info("Completed parsing releases for year",
-		zap.String("year", year),
-		zap.Int("saved", savedCount))
+	s.logger.Info("Completed parsing releases for "+period, append(endFields, zap.Int("saved", savedCount))...)
 
 	return savedCount, nil
 }
@@ -463,10 +408,6 @@ func (s *ReleaseService) GetByArtist(ctx context.Context, artistName string) (st
 	}
 
 	return result.String(), nil
-}
-
-func monthToInt(month string) int {
-	return model.MonthNumber(month)
 }
 
 var staticAliases = map[string]string{

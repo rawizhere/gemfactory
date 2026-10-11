@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestGrokLimiter_Check(t *testing.T) {
-	limiter := NewGrokLimiter()
+func TestLimiterCheck(t *testing.T) {
+	limiter := NewLimiter()
 	userID := int64(12345)
 	limit := 3
 	window := 100 * time.Millisecond
@@ -48,8 +48,8 @@ func TestGrokLimiter_Check(t *testing.T) {
 	assert.False(t, notify)
 }
 
-func TestGrokLimiter_Concurrent(t *testing.T) {
-	limiter := NewGrokLimiter()
+func TestLimiterConcurrent(t *testing.T) {
+	limiter := NewLimiter()
 	userID := int64(99999)
 	limit := 5
 	window := time.Second

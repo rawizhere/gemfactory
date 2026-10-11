@@ -185,7 +185,7 @@ func (b *Bot) Start(ctx context.Context) error {
 
 	b.logger.Info("Bot started successfully")
 
-	return b.telegram.Start(ctx, b.router)
+	return b.telegram.Start(ctx, b.router.RegisterBotCommands(), b.router.RegisterRoutes)
 }
 
 func (b *Bot) Stop() error {
@@ -193,10 +193,6 @@ func (b *Bot) Stop() error {
 
 	if b.cancel != nil {
 		b.cancel()
-	}
-
-	if b.keyboard != nil {
-		b.keyboard.Stop()
 	}
 
 	if b.health != nil {

@@ -12,7 +12,6 @@ import (
 func TestKeyboardManager(t *testing.T) {
 	cfg := &config.Config{Timezone: "UTC"}
 	mgr := NewManager(nil, cfg, zap.NewNop())
-	defer mgr.Stop()
 
 	mainKb := mgr.GetMainKeyboard()
 	require.NotNil(t, mainKb)

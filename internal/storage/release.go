@@ -56,20 +56,6 @@ func (r *ReleaseRepository) GetAll(ctx context.Context) ([]model.Release, error)
 	return releases, nil
 }
 
-func (r *ReleaseRepository) GetByGender(ctx context.Context, gender model.Gender) ([]model.Release, error) {
-	var releases []model.Release
-	err := r.db.NewSelect().
-		Model(&releases).
-		Relation("Artist").
-		Where("artist.gender = ? AND release.is_active = true", gender).
-		Order("date ASC").
-		Scan(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query releases by gender: %w", err)
-	}
-	return releases, nil
-}
-
 func (r *ReleaseRepository) GetByArtistID(ctx context.Context, artistID int) ([]model.Release, error) {
 	var releases []model.Release
 	err := r.db.NewSelect().

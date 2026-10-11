@@ -33,26 +33,15 @@ func TestDebouncerEntriesExpire(t *testing.T) {
 	require.False(t, ok, "expected expired entry to be gone")
 }
 
-func TestRateLimiterAllow(t *testing.T) {
-	rl := NewRateLimiter(3, 50*time.Millisecond, zap.NewNop())
+func TestLimiterAllow(t *testing.T) {
+	l := NewLimiter()
 
 	for i := 0; i < 3; i++ {
-		require.True(t, rl.Allow(1), "request %d must be allowed", i+1)
+		require.True(t, l.Allow(1, 3, 50*time.Millisecond), "request %d must be allowed", i+1)
 	}
-	require.False(t, rl.Allow(1), "4th request within window must be rejected")
-	require.True(t, rl.Allow(2), "other user must not be affected")
+	require.False(t, l.Allow(1, 3, 50*time.Millisecond), "4th request within window must be rejected")
+	require.True(t, l.Allow(2, 3, 50*time.Millisecond), "other user must not be affected")
 
 	time.Sleep(60 * time.Millisecond)
-	require.True(t, rl.Allow(1), "request in a fresh window must be allowed")
-}
-
-func TestRateLimiterEntriesExpire(t *testing.T) {
-	rl := NewRateLimiter(2, 20*time.Millisecond, zap.NewNop())
-	rl.Allow(1)
-	rl.Allow(1)
-
-	time.Sleep(40 * time.Millisecond)
-
-	_, ok := rl.requests.Get(1)
-	require.False(t, ok, "expected expired user state to be gone")
+	require.True(t, l.Allow(1, 3, 50*time.Millisecond), "request in a fresh window must be allowed")
 }
