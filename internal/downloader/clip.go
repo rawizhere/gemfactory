@@ -135,8 +135,18 @@ func fallbackFetchArgs() []string {
 	}
 }
 
-// download runs the yt-dlp download; withSections cuts [startMs, endMs) via --download-sections; fallback switches to the retry fetch path.
+// download runs the yt-dlp download with one retry on failure; withSections cuts [startMs, endMs) via --download-sections; fallback switches to the retry fetch path.
 func (s *Service) download(ctx context.Context, req ClipRequest, outPath, cookieFile string, withSections bool, startMs, endMs float64, vertical, fallback bool, onProgress func(ProgressUpdate)) error {
+	err := s.downloadOnce(ctx, req, outPath, cookieFile, withSections, startMs, endMs, vertical, fallback, onProgress)
+	if err == nil {
+		return nil
+	}
+	s.logger.Warn("download failed, retrying once", zap.String("url", req.URL), zap.Error(err))
+	time.Sleep(10 * time.Second)
+	return s.downloadOnce(ctx, req, outPath, cookieFile, withSections, startMs, endMs, vertical, fallback, onProgress)
+}
+
+func (s *Service) downloadOnce(ctx context.Context, req ClipRequest, outPath, cookieFile string, withSections bool, startMs, endMs float64, vertical, fallback bool, onProgress func(ProgressUpdate)) error {
 	bin, err := YTDLPBinary()
 	if err != nil {
 		return err
