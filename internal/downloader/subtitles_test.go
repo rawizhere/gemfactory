@@ -145,8 +145,14 @@ func TestVideoIDFromURL(t *testing.T) {
 		"https://www.youtube.com/shorts/dQw4w9WgXcQ":         "dQw4w9WgXcQ",
 		"https://www.youtube.com/live/dQw4w9WgXcQ?feature=x": "dQw4w9WgXcQ",
 		"dQw4w9WgXcQ": "dQw4w9WgXcQ",
-		"https://www.tiktok.com/@user/video/7123456789012345": "tt_7123456789012345",
-		"https://vm.tiktok.com/ZM8abc123/":                    "tt_ZM8abc123",
+		"https://www.tiktok.com/@user/video/7123456789012345":                  "tt_7123456789012345",
+		"https://vm.tiktok.com/ZM8abc123/":                                     "tt_ZM8abc123",
+		"https://www.instagram.com/p/Deq1TVCkU2h/?utm_source=ig_web_copy_link": "ig_Deq1TVCkU2h",
+		"https://www.instagram.com/reel/Dep3CZWR5P1/":                          "ig_Dep3CZWR5P1",
+		"https://instagram.com/kiiikiii.official/p/Deq1TVCkU2h":                "ig_Deq1TVCkU2h",
+		"https://x.com/sukykiii/status/2112165463400808469?s=20":               "tw_2112165463400808469",
+		"https://twitter.com/i/web/status/2112165463400808469":                 "tw_2112165463400808469",
+		"https://mobile.twitter.com/user/statuses/2112165463400808469":         "tw_2112165463400808469",
 	}
 	for raw, want := range cases {
 		got, err := videoIDFromURL(raw)
@@ -159,6 +165,11 @@ func TestVideoIDFromURL(t *testing.T) {
 	require.True(t, IsTikTokURL("https://www.tiktok.com/@user/video/123"))
 	require.True(t, IsShortsURL("https://youtube.com/shorts/abc"))
 	require.True(t, IsDirectDownloadURL("https://vm.tiktok.com/123"), "expected true for direct download helpers")
+	require.True(t, IsDirectDownloadURL("https://www.instagram.com/reel/Dep3CZWR5P1/"))
+	require.True(t, IsDirectDownloadURL("https://x.com/u/status/2112165463400808469"))
+	require.False(t, IsPostURL("https://www.instagram.com/kiiikiii.official/"), "profile is not a post")
+	require.False(t, IsPostURL("https://x.com/sukykiii"), "profile is not a post")
+	require.False(t, IsPostURL("https://box.com/u/status/1"), "only x.com/twitter.com hosts")
 	require.Equal(t, "https://youtu.be/dQw4w9WgXcQ", ExtractFirstURL("Check this: https://youtu.be/dQw4w9WgXcQ!"))
 }
 

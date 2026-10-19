@@ -319,6 +319,122 @@ func (c *Client) SendVideoFile(ctx context.Context, chatID int64, filePath, capt
 	return nil
 }
 
+// AlbumItem is one photo or video of a media group.
+type AlbumItem struct {
+	Path  string
+	Video bool
+}
+
+// albumMaxItems and albumMaxBytes split large posts into several media groups (Bot API: 2-10 items, ~50 MB per request).
+const (
+	albumMaxItems = 10
+	albumMaxBytes = 49 << 20
+)
+
+// SendAlbum sends photos/videos as media groups with the caption on the first item; a lone item goes as a plain photo or video.
+func (c *Client) SendAlbum(ctx context.Context, chatID int64, items []AlbumItem, caption string, replyToMsgID int) error {
+	for i, chunk := range chunkAlbum(items) {
+		if i > 0 {
+			caption, replyToMsgID = "", 0
+		}
+		if err := c.sendAlbumChunk(ctx, chatID, chunk, caption, replyToMsgID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func chunkAlbum(items []AlbumItem) [][]AlbumItem {
+	var chunks [][]AlbumItem
+	var cur []AlbumItem
+	var curBytes int64
+	for _, it := range items {
+		var size int64
+		if st, err := os.Stat(it.Path); err == nil {
+			size = st.Size()
+		}
+		if len(cur) == albumMaxItems || (len(cur) > 0 && curBytes+size > albumMaxBytes) {
+			chunks = append(chunks, cur)
+			cur, curBytes = nil, 0
+		}
+		cur = append(cur, it)
+		curBytes += size
+	}
+	if len(cur) > 0 {
+		chunks = append(chunks, cur)
+	}
+	return chunks
+}
+
+func (c *Client) sendAlbumChunk(ctx context.Context, chatID int64, chunk []AlbumItem, caption string, replyToMsgID int) error {
+	if len(chunk) == 1 {
+		if chunk[0].Video {
+			return c.SendVideoFile(ctx, chatID, chunk[0].Path, caption, nil, replyToMsgID)
+		}
+		return c.sendPhotoFile(ctx, chatID, chunk[0].Path, caption, replyToMsgID)
+	}
+
+	media := make([]telego.InputMedia, 0, len(chunk))
+	for i, it := range chunk {
+		f, err := os.Open(it.Path)
+		if err != nil {
+			return fmt.Errorf("open album file: %w", err)
+		}
+		defer func() { _ = f.Close() }()
+		itemCaption := ""
+		if i == 0 {
+			itemCaption = caption
+		}
+		if it.Video {
+			v := telegoutil.MediaVideo(telegoutil.File(f)).WithSupportsStreaming()
+			if w, h, dur := probeVideoMeta(it.Path); w > 0 && h > 0 {
+				v = v.WithWidth(w).WithHeight(h).WithDuration(dur)
+			}
+			if itemCaption != "" {
+				v = v.WithCaption(itemCaption).WithParseMode(telego.ModeHTML)
+			}
+			media = append(media, v)
+			continue
+		}
+		p := telegoutil.MediaPhoto(telegoutil.File(f))
+		if itemCaption != "" {
+			p = p.WithCaption(itemCaption).WithParseMode(telego.ModeHTML)
+		}
+		media = append(media, p)
+	}
+
+	group := telegoutil.MediaGroup(telegoutil.ID(chatID), media...)
+	if replyToMsgID > 0 {
+		group.ReplyParameters = &telego.ReplyParameters{MessageID: replyToMsgID, AllowSendingWithoutReply: true}
+	}
+	if _, err := c.bot.SendMediaGroup(ctx, group); err != nil {
+		c.logger.Error("Failed to send media group", zap.Int64("chat_id", chatID), zap.Int("items", len(chunk)), zap.Error(err))
+		return fmt.Errorf("send media group: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) sendPhotoFile(ctx context.Context, chatID int64, filePath, caption string, replyToMsgID int) error {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("open photo file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	photo := telegoutil.Photo(telegoutil.ID(chatID), telegoutil.File(f))
+	if caption != "" {
+		photo = photo.WithCaption(caption).WithParseMode(telego.ModeHTML)
+	}
+	if replyToMsgID > 0 {
+		photo.ReplyParameters = &telego.ReplyParameters{MessageID: replyToMsgID, AllowSendingWithoutReply: true}
+	}
+	if _, err := c.bot.SendPhoto(ctx, photo); err != nil {
+		c.logger.Error("Failed to send photo", zap.Int64("chat_id", chatID), zap.String("file", filePath), zap.Error(err))
+		return fmt.Errorf("send photo: %w", err)
+	}
+	return nil
+}
+
 func (c *Client) SendAudioFile(ctx context.Context, chatID int64, filePath, caption string, onProgress UploadProgressCallback, replyToMsgID int) error {
 	f, err := os.Open(filePath)
 	if err != nil {

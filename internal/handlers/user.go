@@ -31,7 +31,7 @@ func (h *UserHandlers) Help(ctx context.Context, message *telego.Message) {
 		"<code>/search</code> &lt;artist&gt; - Search releases by artist\n" +
 		"/artists - List tracked artists\n" +
 		"/metrics - Show system metrics\n" +
-		"\nDirect links: Send TikTok or YouTube Shorts directly.\n" +
+		"\nDirect links: Send TikTok, YouTube Shorts, Instagram or X posts (photos and videos) directly.\n" +
 		"Topic help: <code>/help clip</code>, <code>/help subs</code>, etc.\n\n" +
 		fmt.Sprintf("Admin: @%s", h.Config.AdminUsername)
 	_ = h.TG.SendMessageWithMarkup(ctx, message.Chat.ID, text, h.Keyboard.GetMainKeyboard())

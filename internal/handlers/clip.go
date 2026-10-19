@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"gemfactory/internal/downloader"
+	"gemfactory/internal/telegram"
 )
 
 type ClipHandlers struct {
@@ -78,7 +79,7 @@ func (h *ClipHandlers) Help(ctx context.Context, message *telego.Message) {
 				"• <code>hq</code> — Quality up to 2K, max " + fmt.Sprintf("%.0f", h.maxSeconds(ctx, true)) + "s\n" +
 				"• Standard quality — Up to " + fmt.Sprintf("%.0f", h.maxSeconds(ctx, false)/60) + " minutes per clip\n" +
 				"• An end beyond the video length means \"to the end\"\n" +
-				"• Direct links: Send YouTube Shorts or TikTok directly without commands\n" +
+				"• Direct links: Send YouTube Shorts, TikTok, Instagram or X posts directly without commands\n" +
 				"Example: <code>/clip https://youtu.be/X56FLo6qslE 0:26 0:32 720p</code>"
 		case "gif":
 			text = "<b>/gif</b> — Cut clip without audio\n\n" +
@@ -97,7 +98,7 @@ func (h *ClipHandlers) Help(ctx context.Context, message *telego.Message) {
 			text = "<b>/mp3</b> — Extract audio track from video\n\n" +
 				"<code>/mp3 &lt;url&gt; [start] [end]</code>\n\n" +
 				"• Extracts high-quality MP3 (192 kbps)\n" +
-				"• Timecodes are optional for Shorts and TikTok\n" +
+				"• Timecodes are optional for Shorts, TikTok, Instagram and X\n" +
 				"Example: <code>/mp3 https://youtu.be/dQw4w9WgXcQ 0:43 1:15</code>"
 		default:
 			h.user.Help(ctx, message)
@@ -238,6 +239,41 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 		}
 	}
 
+	// deliver uploads the result, then drops or finalizes the status card.
+	deliver := func(send func(ctx context.Context, onUpload telegram.UploadProgressCallback) error) {
+		state.stage = downloader.StageUpload
+		state.percent = 0
+		state.statusLine = "<b>Upload:</b> Uploading to Telegram..."
+		edit()
+
+		bgCtx := context.Background()
+		onUploadProgress := func(pct int, speed, sizeStr string) {
+			state.stage = downloader.StageUpload
+			state.percent = pct
+			if speed != "" {
+				state.statusLine = fmt.Sprintf("<b>Upload:</b> %s (%s)", sizeStr, speed)
+			} else {
+				state.statusLine = fmt.Sprintf("<b>Upload:</b> %s", sizeStr)
+			}
+			edit()
+		}
+
+		if sendErr := send(bgCtx, onUploadProgress); sendErr != nil {
+			h.Logger.Error("failed to send resulting media", zap.Error(sendErr))
+			_ = h.TG.SendMessage(bgCtx, chatID, "Failed to send file: "+html.EscapeString(sendErr.Error()))
+		}
+		if statusID > 0 {
+			if (req.Shorts && req.Start == "" && req.End == "") || h.shouldDeleteStatus(bgCtx) {
+				_ = h.TG.DeleteMessage(bgCtx, chatID, statusID)
+			} else {
+				state.done = true
+				state.percent = 100
+				state.statusLine = ""
+				edit()
+			}
+		}
+	}
+
 	return &downloader.ClipCallbacks{
 		OnHashtags: func(tags []string) {
 			state.hashtags = tags
@@ -343,43 +379,21 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 			edit()
 		},
 		OnDone: func(path, caption string) {
-			state.stage = downloader.StageUpload
-			state.percent = 0
-			state.statusLine = "<b>Upload:</b> Uploading to Telegram..."
-			edit()
-
-			bgCtx := context.Background()
-			onUploadProgress := func(pct int, speed, sizeStr string) {
-				state.stage = downloader.StageUpload
-				state.percent = pct
-				if speed != "" {
-					state.statusLine = fmt.Sprintf("<b>Upload:</b> %s (%s)", sizeStr, speed)
-				} else {
-					state.statusLine = fmt.Sprintf("<b>Upload:</b> %s", sizeStr)
+			deliver(func(ctx context.Context, onUpload telegram.UploadProgressCallback) error {
+				if req.AudioOnly {
+					return h.TG.SendAudioFile(ctx, chatID, path, caption, onUpload, replyToMsgID)
 				}
-				edit()
-			}
-
-			var sendErr error
-			if req.AudioOnly {
-				sendErr = h.TG.SendAudioFile(bgCtx, chatID, path, caption, onUploadProgress, replyToMsgID)
-			} else {
-				sendErr = h.TG.SendVideoFile(bgCtx, chatID, path, caption, onUploadProgress, replyToMsgID)
-			}
-			if sendErr != nil {
-				h.Logger.Error("failed to send resulting media", zap.Error(sendErr))
-				_ = h.TG.SendMessage(bgCtx, chatID, "Failed to send file: "+html.EscapeString(sendErr.Error()))
-			}
-			if statusID > 0 {
-				if (req.Shorts && req.Start == "" && req.End == "") || h.shouldDeleteStatus(bgCtx) {
-					_ = h.TG.DeleteMessage(bgCtx, chatID, statusID)
-				} else {
-					state.done = true
-					state.percent = 100
-					state.statusLine = ""
-					edit()
+				return h.TG.SendVideoFile(ctx, chatID, path, caption, onUpload, replyToMsgID)
+			})
+		},
+		OnPostDone: func(media []downloader.PostMedia, caption string) {
+			deliver(func(ctx context.Context, _ telegram.UploadProgressCallback) error {
+				items := make([]telegram.AlbumItem, len(media))
+				for i, m := range media {
+					items[i] = telegram.AlbumItem{Path: m.Path, Video: m.Video}
 				}
-			}
+				return h.TG.SendAlbum(ctx, chatID, items, caption, replyToMsgID)
+			})
 		},
 		OnError: func(errMsg string) {
 			if statusID < 0 {
