@@ -205,6 +205,8 @@ var (
 		regexp.MustCompile(`tiktok\.com/t/([A-Za-z0-9_-]+)`),
 		regexp.MustCompile(`tiktok\.com/v/(\d+)`),
 	}
+	instagramPostRe = regexp.MustCompile(`instagram\.com/(?:[\w.]+/)?(?:p|reels?|tv)/([A-Za-z0-9_-]+)`)
+	twitterPostRe   = regexp.MustCompile(`(?:^|[/.])(?:twitter|x)\.com/[^/?#]+(?:/web)?/status(?:es)?/(\d+)`)
 )
 
 func videoIDFromURL(raw string) (string, error) {
@@ -216,6 +218,12 @@ func videoIDFromURL(raw string) (string, error) {
 		if m := re.FindStringSubmatch(raw); len(m) > 1 {
 			return m[1], nil
 		}
+	}
+	if id := instagramShortcode(raw); id != "" {
+		return "ig_" + id, nil
+	}
+	if id := tweetID(raw); id != "" {
+		return "tw_" + id, nil
 	}
 	for _, re := range tiktokIDPatterns {
 		if m := re.FindStringSubmatch(raw); len(m) > 1 {
@@ -236,8 +244,27 @@ func IsShortsURL(raw string) bool {
 	return strings.Contains(raw, "/shorts/")
 }
 
+func instagramShortcode(raw string) string {
+	if m := instagramPostRe.FindStringSubmatch(raw); len(m) > 1 {
+		return m[1]
+	}
+	return ""
+}
+
+func tweetID(raw string) string {
+	if m := twitterPostRe.FindStringSubmatch(raw); len(m) > 1 {
+		return m[1]
+	}
+	return ""
+}
+
+// IsPostURL reports whether raw is an Instagram post/reel or an X status: a post that may hold photos and videos.
+func IsPostURL(raw string) bool {
+	return instagramShortcode(raw) != "" || tweetID(raw) != ""
+}
+
 func IsDirectDownloadURL(raw string) bool {
-	return IsTikTokURL(raw) || IsShortsURL(raw)
+	return IsTikTokURL(raw) || IsShortsURL(raw) || IsPostURL(raw)
 }
 
 // IsYouTubeURL reports whether raw points to youtube.com or youtu.be.

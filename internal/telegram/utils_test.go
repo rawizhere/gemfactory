@@ -1,6 +1,8 @@
 package telegram
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -70,4 +72,28 @@ func TestSplitMessageKeepsValidHTMLAcrossChunks(t *testing.T) {
 		require.Equal(t, strings.Count(chunk, "<b>"), strings.Count(chunk, "</b>"),
 			"every chunk must have balanced <b> tags:\n%s", chunk)
 	}
+}
+
+func TestChunkAlbum(t *testing.T) {
+	dir := t.TempDir()
+	item := func(name string, size int) AlbumItem {
+		p := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(p, make([]byte, size), 0644))
+		return AlbumItem{Path: p}
+	}
+
+	var twelve []AlbumItem
+	for i := range 12 {
+		twelve = append(twelve, item("p"+strings.Repeat("x", i)+".jpg", 1))
+	}
+	chunks := chunkAlbum(twelve)
+	require.Len(t, chunks, 2, "12 items split by the 10-item limit")
+	require.Len(t, chunks[0], 10)
+	require.Len(t, chunks[1], 2)
+
+	big := []AlbumItem{item("a.mp4", 30<<20), item("b.mp4", 30<<20), item("c.jpg", 1)}
+	chunks = chunkAlbum(big)
+	require.Len(t, chunks, 2, "two 30 MB videos exceed one request budget")
+	require.Len(t, chunks[0], 1)
+	require.Len(t, chunks[1], 2)
 }

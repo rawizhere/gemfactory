@@ -257,7 +257,8 @@ type ClipCallbacks struct {
 	OnTranslateAttempt func(providerModel string) // fired before each LLM provider/model attempt
 	OnProgress         func(p ProgressUpdate)     // throttled
 	OnDone             func(path, caption string)
-	OnError            func(message string) // user-facing text
+	OnPostDone         func(media []PostMedia, caption string) // Instagram/X posts; falls back to OnDone with the first item
+	OnError            func(message string)                    // user-facing text
 }
 
 // Stage names reported via ClipCallbacks.OnStage.
@@ -276,6 +277,11 @@ func (s *Service) run(ctx context.Context, job *Job) {
 	s.acquireSlot()
 	defer s.releaseSlot()
 
+	if isPostJob(job.Request) {
+		s.runPost(ctx, job)
+		return
+	}
+
 	// Serve instantly when this exact request was produced before.
 	clipPath := s.outputPathFor(job)
 	if marker := readCacheHit(clipPath); marker != nil {
@@ -286,7 +292,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 	s.setStatus(job, StatusDownloading)
 	s.reportStage(job, StageDownload, "")
 
-	cookieFile, cleanup, err := s.prepareCookieFile(ctx, "youtube.com")
+	cookieFile, cleanup, err := s.prepareCookieFile(ctx, cookieDomainFor(job.Request.URL))
 	if err != nil {
 		s.logger.Warn("cookies unavailable, continuing without", zap.Error(err))
 	} else {
