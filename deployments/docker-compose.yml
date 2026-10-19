@@ -21,7 +21,7 @@ services:
 
   # GemFactory Application
   app:
-    image: rawizhere/gemfactory:latest
+    image: ghcr.io/rawizhere/gemfactory:latest
     container_name: gemfactory
     env_file:
       - ../.env
