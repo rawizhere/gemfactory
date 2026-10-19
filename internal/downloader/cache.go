@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -114,10 +113,8 @@ func (s *Service) CleanupOnce(ctx context.Context) (int, int64) {
 		if statErr != nil {
 			return nil
 		}
+		// dataDir holds only downloader output, so any stale file (mp3, photos, .part leftovers) goes.
 		if info.ModTime().After(cutoff) {
-			return nil
-		}
-		if !isRemovableArtifact(d.Name()) {
 			return nil
 		}
 		size := info.Size()
@@ -156,16 +153,6 @@ func (s *Service) CleanupOnce(ctx context.Context) (int, int64) {
 	s.mu.Unlock()
 
 	return removed, freed
-}
-
-// isRemovableArtifact reports whether the filename is generated download output.
-func isRemovableArtifact(name string) bool {
-	switch strings.ToLower(filepath.Ext(name)) {
-	case ".mp4", ".mkv", ".webm", ".mov", ".vtt", ".json":
-		return true
-	default:
-		return false
-	}
 }
 
 // pruneEmptyDirs removes empty leaf directories bottom-up.

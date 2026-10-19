@@ -67,18 +67,24 @@ func TestCleanupOnceRemovesOldArtifactsOnly(t *testing.T) {
 	require.NoError(t, os.MkdirAll(oldDir, 0755))
 	require.NoError(t, os.MkdirAll(newDir, 0755))
 
-	oldFile := filepath.Join(oldDir, "vidold_000605-900.mp4")
 	newFile := filepath.Join(newDir, "vidnew_000605-900.mp4")
-	require.NoError(t, os.WriteFile(oldFile, []byte("x"), 0644))
 	past := time.Now().Add(-48 * time.Hour)
-	require.NoError(t, os.Chtimes(oldFile, past, past))
+	// Every kind of downloader output must expire, not just video.
+	oldFiles := []string{"vidold_000605-900.mp4", "vidold_full.mp3", "ig_x_1.jpg", "vidold.f137.mp4.part"}
+	for _, name := range oldFiles {
+		p := filepath.Join(oldDir, name)
+		require.NoError(t, os.WriteFile(p, []byte("x"), 0644))
+		require.NoError(t, os.Chtimes(p, past, past))
+	}
 	require.NoError(t, os.WriteFile(newFile, []byte("x"), 0644))
 
 	removed, _ := s.CleanupOnce(context.Background())
 
-	require.Equal(t, 1, removed, "want 1 removed file")
+	require.Equal(t, len(oldFiles), removed, "want every stale file removed")
 	require.NoError(t, isMissing(newFile), "fresh artifact must survive cleanup")
-	require.True(t, os.IsNotExist(isMissing(oldFile)), "stale artifact must be removed")
+	for _, name := range oldFiles {
+		require.True(t, os.IsNotExist(isMissing(filepath.Join(oldDir, name))), "stale %s must be removed", name)
+	}
 	// Empty directory pruned.
 	require.True(t, os.IsNotExist(isMissing(oldDir)), "empty dir after cleanup should be pruned")
 }
