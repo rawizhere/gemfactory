@@ -41,7 +41,7 @@ func (d *Debouncer) ShouldProcess(userID int64, action string) bool {
 func Debounce(debouncer *Debouncer, logger *zap.Logger) th.Handler {
 	return func(ctx *th.Context, update telego.Update) error {
 		switch {
-		case update.Message != nil:
+		case update.Message != nil && update.Message.From != nil:
 			userID := update.Message.From.ID
 			command := telegram.MessageCommand(update.Message)
 			if command != "" && !debouncer.ShouldProcess(userID, "msg:"+command) {
