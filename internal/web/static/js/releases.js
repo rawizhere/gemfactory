@@ -382,6 +382,7 @@ export function initReleases() {
       await loadReleases();
     } catch (err) {
       showMsg(msg, `Scraper error: ${err.message}`, false, 6000);
+      await loadReleases(); // releases saved before the failure
     } finally {
       btn.disabled = false;
       btn.textContent = 'Run Scraper';

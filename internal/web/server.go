@@ -241,33 +241,28 @@ func (s *Server) runParser(w http.ResponseWriter, r *http.Request) {
 
 	month := strings.ToLower(strings.TrimSpace(req.Month))
 
-	var totalFound int
+	var (
+		found int
+		err   error
+	)
 	if month == "" || month == "all" || month == "year" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-
-		count, err := s.ReleaseSvc.ParseReleasesForYear(ctx, strconv.Itoa(year))
-		if err != nil {
-			s.logger.Warn("Parser failed for year", zap.Int("year", year), zap.Error(err))
-		} else {
-			totalFound = count
-		}
+		found, err = s.ReleaseSvc.ParseReleasesForYear(ctx, strconv.Itoa(year))
 	} else {
-		query := fmt.Sprintf("%s-%d", month, year)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-
-		count, err := s.ReleaseSvc.ParseReleasesForMonth(ctx, query)
-		if err != nil {
-			s.logger.Warn("Parser failed for query", zap.String("query", query), zap.Error(err))
-		} else {
-			totalFound = count
-		}
+		found, err = s.ReleaseSvc.ParseReleasesForMonth(ctx, fmt.Sprintf("%s-%d", month, year))
+	}
+	if err != nil {
+		s.logger.Warn("Parser failed", zap.String("month", month), zap.Int("year", year), zap.Error(err))
+		http.Error(w, fmt.Sprintf("parser failed after saving %d releases: %v", found, err), http.StatusBadGateway)
+		return
 	}
 
 	writeJSON(w, map[string]any{
 		"query": fmt.Sprintf("%s %d", req.Month, year),
-		"found": totalFound,
+		"found": found,
 		"year":  year,
 	})
 }
