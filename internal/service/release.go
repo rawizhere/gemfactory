@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/agnivade/levenshtein"
@@ -24,6 +25,27 @@ type ReleaseService struct {
 	scraper    *scraper.Fetcher
 	logger     *zap.Logger
 	mu         sync.Mutex
+	lastParse  atomic.Pointer[ParseResult]
+}
+
+// ParseResult is the outcome of the latest scraper run, shown in the web panel header.
+type ParseResult struct {
+	At  time.Time
+	Err string // empty on success
+}
+
+// LastParse returns the latest scraper run since startup, or nil before the first one.
+func (s *ReleaseService) LastParse() *ParseResult {
+	return s.lastParse.Load()
+}
+
+func (s *ReleaseService) recordParse(n int, err error) (int, error) {
+	res := &ParseResult{At: time.Now()}
+	if err != nil {
+		res.Err = err.Error()
+	}
+	s.lastParse.Store(res)
+	return n, err
 }
 
 func NewReleaseService(db *bun.DB, scraper *scraper.Fetcher, logger *zap.Logger) *ReleaseService {
@@ -301,9 +323,9 @@ func (s *ReleaseService) ParseReleasesForMonth(ctx context.Context, monthName st
 
 	month, year := resolveMonthYear(monthName)
 	s.logger.Info("Starting to parse releases", zap.String("month", monthName))
-	return s.parseReleases(ctx, s.scraper.ParseMonth(ctx, month, year), "month",
+	return s.recordParse(s.parseReleases(ctx, s.scraper.ParseMonth(ctx, month, year), "month",
 		"failed to parse monthly page",
-		[]zap.Field{zap.String("month", month), zap.String("year", year)})
+		[]zap.Field{zap.String("month", month), zap.String("year", year)}))
 }
 
 func (s *ReleaseService) ParseReleasesForYear(ctx context.Context, year string) (int, error) {
@@ -311,9 +333,9 @@ func (s *ReleaseService) ParseReleasesForYear(ctx context.Context, year string) 
 	defer s.mu.Unlock()
 
 	s.logger.Info("Starting to parse releases for year", zap.String("year", year))
-	return s.parseReleases(ctx, s.scraper.ParseYear(ctx, year), "year",
+	return s.recordParse(s.parseReleases(ctx, s.scraper.ParseYear(ctx, year), "year",
 		"failed to parse year "+year,
-		[]zap.Field{zap.String("year", year)})
+		[]zap.Field{zap.String("year", year)}))
 }
 
 // resolveMonthYear splits a "month-year" input and shifts to next year for past months without an explicit year.

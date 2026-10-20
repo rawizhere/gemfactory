@@ -295,6 +295,7 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]any{
+		"warnings":          s.warnings(r.Context(), cookies),
 		"artists":           len(artists),
 		"active_artists":    activeArtists,
 		"releases":          len(releases),
@@ -302,6 +303,40 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 		"storage_formatted": storageFormatted,
 		"storage_files":     storageFiles,
 	})
+}
+
+// warning is a problem shown in the panel header; tab is where it gets fixed.
+type warning struct {
+	Text string `json:"text"`
+	Tab  string `json:"tab"`
+}
+
+// warnings lists cheap-to-detect problems: expiring cookies, a missing Gemini key and a failed scraper run.
+// A key that Gemini rejects needs a network call, so the panel asks /api/translation for it separately.
+func (s *Server) warnings(ctx context.Context, cookies []model.CookieSummary) []warning {
+	out := []warning{}
+	now := time.Now()
+	for _, c := range cookies {
+		rec, err := s.Cookies.GetByDomain(ctx, c.Domain)
+		if err != nil || rec == nil {
+			continue
+		}
+		switch _, health, days := cookieHealth(rec.Content, now); health {
+		case "expired":
+			out = append(out, warning{c.Domain + " cookies expired", "cookies"})
+		case "expiring_soon":
+			out = append(out, warning{fmt.Sprintf("%s cookies expire in %dd", c.Domain, max(days, 0)), "cookies"})
+		}
+	}
+	if tc := s.translationConfig(ctx); tc.Key == "" && !tc.YouTubeOnly {
+		out = append(out, warning{"Gemini API key not set", "settings/translation"})
+	}
+	if s.ReleaseSvc != nil {
+		if p := s.ReleaseSvc.LastParse(); p != nil && p.Err != "" {
+			out = append(out, warning{"Last release scrape failed " + p.At.Format("Jan 2 15:04"), "releases"})
+		}
+	}
+	return out
 }
 
 func (s *Server) updateArtist(w http.ResponseWriter, r *http.Request) {

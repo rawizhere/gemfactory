@@ -28,7 +28,7 @@ func (s *Server) listCookies(w http.ResponseWriter, r *http.Request) {
 		ExpiresInDays int    `json:"expires_in_days"`
 	}
 
-	now := time.Now().Unix()
+	now := time.Now()
 	out := make([]cookieItem, 0, len(cookies))
 
 	for _, c := range cookies {
@@ -42,26 +42,7 @@ func (s *Server) listCookies(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		count, minExp, maxExp := parseNetscapeMetadata(rec.Content)
-		var health string
-		days := 0
-
-		switch {
-		case maxExp > 0 && maxExp < now:
-			health = "expired"
-			days = int((maxExp - now) / 86400)
-		case maxExp > 0 && minExp > 0 && minExp < now+7*86400:
-			health = "expiring_soon"
-			days = int((minExp - now) / 86400)
-		case maxExp > 0:
-			health = "valid"
-			days = int((maxExp - now) / 86400)
-		case count > 0:
-			health = "session"
-		default:
-			health = "empty"
-		}
-
+		count, health, days := cookieHealth(rec.Content, now)
 		out = append(out, cookieItem{
 			Domain:        c.Domain,
 			UpdatedAt:     c.UpdatedAt.Format("2006-01-02 15:04:05"),
@@ -74,19 +55,34 @@ func (s *Server) listCookies(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
-func parseNetscapeMetadata(content string) (count int, minExp int64, maxExp int64) {
+// cookieHealth summarizes a Netscape cookie file: expired, expiring_soon (within a week), valid, session or empty,
+// with the days left until the relevant expiry.
+func cookieHealth(content string, now time.Time) (count int, health string, days int) {
 	cookies := downloader.ParseNetscapeCookies(content)
+	var minExp, maxExp time.Time
 	for _, c := range cookies {
 		if c.Expires.IsZero() {
 			continue
 		}
-		exp := c.Expires.Unix()
-		if minExp == 0 || exp < minExp {
-			minExp = exp
+		if minExp.IsZero() || c.Expires.Before(minExp) {
+			minExp = c.Expires
 		}
-		maxExp = max(maxExp, exp)
+		if c.Expires.After(maxExp) {
+			maxExp = c.Expires
+		}
 	}
-	return len(cookies), minExp, maxExp
+	daysUntil := func(t time.Time) int { return int(t.Sub(now).Hours() / 24) }
+	switch {
+	case !maxExp.IsZero() && maxExp.Before(now):
+		return len(cookies), "expired", daysUntil(maxExp)
+	case !minExp.IsZero() && minExp.Before(now.Add(7*24*time.Hour)):
+		return len(cookies), "expiring_soon", daysUntil(minExp)
+	case !maxExp.IsZero():
+		return len(cookies), "valid", daysUntil(maxExp)
+	case len(cookies) > 0:
+		return len(cookies), "session", 0
+	}
+	return 0, "empty", 0
 }
 
 func (s *Server) getCookie(w http.ResponseWriter, r *http.Request) {

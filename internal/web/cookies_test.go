@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -100,4 +102,27 @@ func keys(m map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+func TestCookieHealth(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	line := func(exp int64) string { return fmt.Sprintf(".youtube.com\tTRUE\t/\tTRUE\t%d\tSID\tx\n", exp) }
+	day := int64(24 * 3600)
+
+	_, health, _ := cookieHealth(line(now.Unix()-day), now)
+	require.Equal(t, "expired", health)
+
+	_, health, days := cookieHealth(line(now.Unix()+3*day+60)+line(now.Unix()+90*day), now)
+	require.Equal(t, "expiring_soon", health)
+	require.Equal(t, 3, days)
+
+	count, health, days := cookieHealth(line(now.Unix()+30*day+60), now)
+	require.Equal(t, 1, count)
+	require.Equal(t, "valid", health)
+	require.Equal(t, 30, days)
+
+	_, health, _ = cookieHealth(line(0), now)
+	require.Equal(t, "session", health)
+	_, health, _ = cookieHealth("", now)
+	require.Equal(t, "empty", health)
 }

@@ -50,8 +50,26 @@ main {
 .brand {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.85rem;
 }
+.status-dot.warn { background: var(--warning); }
+.warn-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.warn-pill {
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--warning);
+  background: var(--warning-bg);
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  cursor: pointer;
+}
+.warn-pill:hover { border-color: var(--warning); }
 .brand h1 {
   font-size: 1.15rem;
   font-weight: 700;
@@ -302,19 +320,17 @@ a.clickable-link { cursor: pointer; }
 .empty { color: var(--muted); padding: 2.5rem 0; text-align: center; font-size: 0.88rem; }
 
 /* Count & Stats Pills */
-.count-pill {
-  font-size: 0.74rem;
-  color: var(--muted);
-  background: var(--line);
-  padding: 0.12rem 0.45rem;
-  border-radius: 999px;
-  margin-left: 0.45rem;
+.count-link {
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
   cursor: pointer;
 }
-.count-pill:hover {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-}
+.count-link:hover { text-decoration: underline; }
+.muted { color: var(--muted); }
 
 /* Forms & Controls */
 input[type="text"], textarea, select {

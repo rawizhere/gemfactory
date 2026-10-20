@@ -1,9 +1,9 @@
-import { $, $$, api } from './api.js';
+import { $, $$, el, api } from './api.js';
 import { initArtists, loadArtists, setArtistSelectCallback, setReleaseCounts } from './artists.js';
 import { initReleases, loadReleases, filterByArtist, setReleasesLoadedCallback } from './releases.js';
 import { initSchedule, renderSchedule } from './schedule.js';
 import { initCookies, loadCookies } from './cookies.js';
-import { initSettings, loadConfig } from './settings.js';
+import { initSettings, loadConfig, openSection } from './settings.js';
 import { initPalette, setPaletteTabCallback } from './palette.js';
 
 export function switchTab(tabName) {
@@ -24,16 +24,47 @@ export function switchTab(tabName) {
   else updateStats();
 }
 
+// Gemini rejecting the key takes a network round trip, so it is checked once per page load.
+let keyRejected = false;
+
+async function checkGeminiKey() {
+  try {
+    keyRejected = !!(await api('GET', '/api/translation')).key_rejected;
+  } catch (_) {
+    keyRejected = false;
+  }
+}
+
+function renderWarnings(warnings) {
+  const box = $('#stats-warnings');
+  const dot = $('#system-stats .status-dot');
+  if (!box) return;
+  box.textContent = '';
+  const all = keyRejected ? [...warnings, { text: 'Gemini rejects the API key', tab: 'settings/translation' }] : warnings;
+  all.forEach((w) => {
+    const [tab, section] = w.tab.split('/');
+    const b = el('button', { type: 'button', class: 'warn-pill', title: `Open ${w.tab}` }, w.text);
+    b.addEventListener('click', () => {
+      if (section) openSection(section);
+      switchTab(tab);
+    });
+    box.appendChild(b);
+  });
+  dot?.classList.toggle('warn', all.length > 0);
+}
+
 async function updateStats() {
   const statsEl = $('#stats-summary');
   if (!statsEl) return;
   try {
     const stats = await api('GET', '/api/stats');
     if (stats) {
-      statsEl.textContent = `Online · ${stats.artists} artists (${stats.active_artists} active) · ${stats.releases} releases · Storage: ${stats.storage_formatted || '0 B'}`;
+      statsEl.textContent = `${stats.artists} artists (${stats.active_artists} active) · ${stats.releases} releases · ${stats.storage_formatted || '0 B'} stored`;
+      renderWarnings(stats.warnings || []);
     }
   } catch (err) {
-    statsEl.textContent = 'Server Online';
+    statsEl.textContent = 'Server unreachable';
+    $('#system-stats .status-dot')?.classList.add('warn');
   }
 }
 
@@ -112,5 +143,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadReleases();
   renderSchedule();
   loadArtists();
+  await checkGeminiKey();
   updateStats();
 });

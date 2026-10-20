@@ -75,6 +75,7 @@ export function renderArtists() {
   const rows = artists.filter((a) => {
     if (statusFilter === 'active' && !a.is_active) return false;
     if (statusFilter === 'inactive' && a.is_active) return false;
+    if (statusFilter === 'norel' && releaseCounts[a.name]) return false;
     if (genderFilter && a.gender !== genderFilter) return false;
     if (!q) return true;
     return `${a.name} ${a.gender}`.toLowerCase().includes(q);
@@ -91,8 +92,8 @@ export function renderArtists() {
   const table = el('table');
   const thead = el('thead');
   const headRow = el('tr');
-  ['', 'Name', 'Gender', 'Status', ''].forEach((title, idx) => {
-    headRow.appendChild(el('th', { class: idx === 0 ? 'num' : '' }, title));
+  ['', 'Name', 'Releases', 'Gender', 'Status', ''].forEach((title, idx) => {
+    headRow.appendChild(el('th', { class: idx === 0 || idx === 2 ? 'num' : '' }, title));
   });
   thead.appendChild(headRow);
   table.appendChild(thead);
@@ -120,22 +121,10 @@ export function renderArtists() {
     tdChk.appendChild(chk);
     tr.appendChild(tdChk);
 
-    // Name + Release Count (opens releases) + Inline Rename
+    // Name + Inline Rename
     const tdName = el('td', { class: 'title-cell' });
     // Plain text: a link here would switch tabs on the first click of a double-click rename.
     tdName.appendChild(el('span', { title: 'Double-click to rename' }, a.name));
-
-    // Releases count pill
-    const count = releaseCounts[a.name] || 0;
-    if (count > 0) {
-      const countPill = el('span', { class: 'count-pill', title: `${count} releases. Click to view.` }, `${count} releases`);
-      countPill.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (onSelectArtistCallback) onSelectArtistCallback(a.name);
-      });
-      tdName.appendChild(countPill);
-    }
 
     // Double-click inline rename
     tdName.addEventListener('dblclick', () => {
@@ -172,6 +161,18 @@ export function renderArtists() {
     });
 
     tr.appendChild(tdName);
+
+    // Release count; opens the Releases tab filtered to this artist.
+    const count = releaseCounts[a.name] || 0;
+    const tdRel = el('td', { class: 'num' });
+    if (count > 0) {
+      const link = el('button', { type: 'button', class: 'count-link', title: 'Show releases' }, String(count));
+      link.addEventListener('click', () => onSelectArtistCallback?.(a.name));
+      tdRel.appendChild(link);
+    } else {
+      tdRel.appendChild(el('span', { class: 'muted' }, '0'));
+    }
+    tr.appendChild(tdRel);
 
     // Gender toggle
     const tdG = el('td');

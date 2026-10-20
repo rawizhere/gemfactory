@@ -762,6 +762,11 @@ async function saveChanges() {
   }
 }
 
+// openSection makes the next settings render show the given subtab.
+export function openSection(id) {
+  if (SECTIONS.some((s) => s.id === id)) state.active = id;
+}
+
 export function initSettings() {
   $('#settings-save-btn')?.addEventListener('click', saveChanges);
   $('#settings-revert-btn')?.addEventListener('click', () => {
