@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/mymmrac/telego"
+
+	"gemfactory/internal/model"
 )
 
 type UserHandlers struct {
@@ -46,6 +48,10 @@ func (h *UserHandlers) Month(ctx context.Context, message *telego.Message) {
 
 	args := parts[1:]
 	month := strings.ToLower(args[0])
+	if model.MonthNumber(month) == 0 {
+		_ = h.TG.SendMessageWithMarkup(ctx, message.Chat.ID, "Unknown month. Use a full English name, e.g. /month march", h.Keyboard.GetMainKeyboard())
+		return
+	}
 	femaleOnly := false
 	maleOnly := false
 	year := ""
