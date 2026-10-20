@@ -166,13 +166,9 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	if s.AppCfg != nil {
 		system = append(system,
 			map[string]string{"key": "WEB_PORT", "value": s.AppCfg.WebPort},
-			map[string]string{"key": "HEALTH_PORT", "value": s.AppCfg.HealthPort},
-			map[string]string{"key": "WEB_ENABLED", "value": strconv.FormatBool(s.AppCfg.WebEnabled)},
-			map[string]string{"key": "HEALTH_CHECK_ENABLED", "value": strconv.FormatBool(s.AppCfg.HealthCheckEnabled)},
-			map[string]string{"key": "LOG_LEVEL", "value": s.AppCfg.LogLevel},
+			map[string]string{"key": "LOG_LEVEL", "value": os.Getenv("LOG_LEVEL")},
 			map[string]string{"key": "TIMEZONE", "value": s.AppCfg.Timezone},
 			map[string]string{"key": "APP_DATA_DIR", "value": s.AppCfg.AppDataDir},
-			map[string]string{"key": "SCRAPER_REQUEST_DELAY", "value": s.AppCfg.ScraperDelay.String()},
 			map[string]string{"key": "RELEASE_CHECK_INTERVAL", "value": s.AppCfg.ReleaseCheckInterval.String()},
 			map[string]string{"key": "FFMPEG_BINARY", "value": os.Getenv("FFMPEG_BINARY")},
 		)

@@ -26,11 +26,9 @@ func TestDebouncerEntriesExpire(t *testing.T) {
 	d.ShouldProcess(2, "b")
 
 	time.Sleep(30 * time.Millisecond)
+	d.ShouldProcess(3, "c")
 
-	_, ok := d.lastProcess.Get("1:a")
-	require.False(t, ok, "expected expired entry to be gone")
-	_, ok = d.lastProcess.Get("2:b")
-	require.False(t, ok, "expected expired entry to be gone")
+	require.Len(t, d.lastProcess, 1, "expired entries must be dropped on the next call")
 }
 
 func TestLimiterAllow(t *testing.T) {

@@ -20,9 +20,6 @@ type ReleaseChecker struct {
 }
 
 func NewReleaseChecker(releaseService *service.ReleaseService, logger *zap.Logger, initialInterval time.Duration, notifier *notify.AdminNotifier) *ReleaseChecker {
-	if initialInterval <= 0 {
-		initialInterval = 24 * time.Hour
-	}
 	return &ReleaseChecker{
 		releaseService: releaseService,
 		logger:         logger,

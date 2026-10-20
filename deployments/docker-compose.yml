@@ -33,17 +33,11 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME}
 
       # Application settings
-      # Always enabled so the container healthcheck works
-      HEALTH_CHECK_ENABLED: "true"
-      HEALTH_PORT: 8080
-      WEB_ENABLED: ${WEB_ENABLED:-true}
       WEB_PORT: 9090
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      SCRAPER_REQUEST_DELAY: ${SCRAPER_REQUEST_DELAY:-2s}
       # PO token provider for yt-dlp
       BGUTIL_POT_URL: http://bgutil-pot:4416
     ports:
-      - "8080:8080"
       - "9090:9090"
     volumes:
       # Persist downloaded clips + cache markers across restarts
@@ -53,7 +47,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health" ]
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/health" ]
       interval: 30s
       timeout: 10s
       retries: 3

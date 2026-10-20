@@ -5,15 +5,10 @@ import { getArtistsList } from './artists.js';
 let currentYear = new Date().getFullYear();
 let currentMonth = new Date().getMonth() + 1; // 1-12
 
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
+const pad2 = (n) => String(n).padStart(2, '0');
 
-const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-
-function padZero(num) {
-  return num < 10 ? `0${num}` : `${num}`;
+function monthLabel() {
+  return new Date(currentYear, currentMonth - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
 function getRelativeDateBadge(dateStr) {
@@ -29,15 +24,13 @@ function getRelativeDateBadge(dateStr) {
   if (diffDays === 0) return el('span', { class: 'badge on' }, 'today');
   if (diffDays === 1) return el('span', { class: 'badge expiring' }, 'tomorrow');
   if (diffDays === -1) return el('span', { class: 'badge' }, 'yesterday');
-  if (diffDays > 1 && diffDays <= 7) return el('span', { class: 'badge' }, `in ${diffDays}d`);
-  if (diffDays > 7) return el('span', { class: 'badge' }, `in ${diffDays}d`);
+  if (diffDays > 1) return el('span', { class: 'badge' }, `in ${diffDays}d`);
   return el('span', { class: 'badge' }, `${Math.abs(diffDays)}d ago`);
 }
 
 function getDayOfWeek(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
-  const dt = new Date(y, m - 1, d);
-  return DAY_NAMES[dt.getDay()] || '';
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'long' });
 }
 
 export function renderSchedule() {
@@ -47,9 +40,9 @@ export function renderSchedule() {
   if (!box) return;
 
   box.textContent = '';
-  monthTitle.textContent = `${MONTH_NAMES[currentMonth - 1]} ${currentYear}`;
+  monthTitle.textContent = monthLabel();
 
-  const monthPrefix = `${currentYear}-${padZero(currentMonth)}`;
+  const monthPrefix = `${currentYear}-${pad2(currentMonth)}`;
   const releases = getReleasesList();
   const artists = getArtistsList();
   const artistMap = new Map(artists.map((a) => [a.name.toLowerCase(), a]));
@@ -81,12 +74,12 @@ export function renderSchedule() {
 
   if (!monthReleases.length) {
     box.appendChild(
-      el('p', { class: 'empty' }, `No releases scheduled for ${MONTH_NAMES[currentMonth - 1]} ${currentYear}.`)
+      el('p', { class: 'empty' }, `No releases scheduled for ${monthLabel()}.`)
     );
     return;
   }
 
-  const todayStr = `${new Date().getFullYear()}-${padZero(new Date().getMonth() + 1)}-${padZero(new Date().getDate())}`;
+  const todayStr = `${new Date().getFullYear()}-${pad2(new Date().getMonth() + 1)}-${pad2(new Date().getDate())}`;
 
   const table = el('table');
   const thead = el('thead');

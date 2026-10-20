@@ -19,6 +19,7 @@ import (
 	"gemfactory/internal/model"
 	"gemfactory/internal/scraper"
 	"gemfactory/internal/service"
+	"gemfactory/internal/storage"
 )
 
 //go:embed static
@@ -27,6 +28,7 @@ var staticFS embed.FS
 // Deps wires the server's collaborators; repositories are injected as interfaces.
 type Deps struct {
 	AppCfg     *config.Config
+	DB         *storage.Postgres // pinged by /health; nil in tests
 	Artists    model.ArtistRepository
 	Releases   model.ReleaseRepository
 	Configs    model.ConfigRepository
@@ -50,6 +52,7 @@ func NewServer(port string, logger *zap.Logger, deps Deps) *Server {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.page)
+	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("POST /api/parse", s.runParser)
 	mux.HandleFunc("GET /api/stats", s.getStats)
 	mux.HandleFunc("GET /api/artists", s.listArtists)
@@ -94,6 +97,19 @@ func (s *Server) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return s.server.Shutdown(ctx)
+}
+
+// health answers the container healthcheck: 200 while the database responds, 503 otherwise.
+func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	if s.DB != nil {
+		if err := s.DB.Ping(); err != nil {
+			s.logger.Error("Health check failed", zap.Error(err))
+			w.WriteHeader(http.StatusServiceUnavailable)
+			writeJSON(w, map[string]string{"status": "unhealthy"})
+			return
+		}
+	}
+	writeJSON(w, map[string]string{"status": "healthy"})
 }
 
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
@@ -490,7 +506,6 @@ func (s *Server) listConfig(w http.ResponseWriter, r *http.Request) {
 	if s.AppCfg != nil {
 		out = append(out,
 			entry{Source: "env", Key: "WEB_PORT", Value: s.AppCfg.WebPort, Description: "Web UI HTTP server port"},
-			entry{Source: "env", Key: "HEALTH_PORT", Value: s.AppCfg.HealthPort, Description: "Health check HTTP server port"},
 			entry{Source: "env", Key: "APP_DATA_DIR", Value: s.AppCfg.AppDataDir, Description: "Runtime data directory path"},
 		)
 	}

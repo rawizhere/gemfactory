@@ -18,16 +18,16 @@ import (
 
 // ClipRequest describes a single clip job.
 type ClipRequest struct {
-	URL       string `json:"url"`
-	Start     string `json:"start,omitempty"`
-	End       string `json:"end,omitempty"`
-	SubsLang  string `json:"subs_lang,omitempty"`   // empty = no subs
-	SubsNoLLM bool   `json:"subs_no_llm,omitempty"` // translate via YouTube auto-translate only
-	Quality   string `json:"quality,omitempty"`     // e.g. "720p", "720", "1080p"
-	HQ        bool   `json:"hq,omitempty"`          // up to 2K
-	GIF       bool   `json:"gif,omitempty"`         // drop audio track
-	Shorts    bool   `json:"shorts,omitempty"`      // download whole short, best quality
-	AudioOnly bool   `json:"audio_only,omitempty"`  // extract mp3
+	URL       string
+	Start     string
+	End       string
+	SubsLang  string // empty = no subs
+	SubsNoLLM bool   // translate via YouTube auto-translate only
+	Quality   string // e.g. "720p", "720", "1080p"
+	HQ        bool   // up to 2K
+	GIF       bool   // drop audio track
+	Shorts    bool   // download whole short, best quality
+	AudioOnly bool   // extract mp3
 }
 
 // JobStatus is the lifecycle state of a download job.
@@ -43,16 +43,16 @@ const (
 
 // Job tracks progress of one clip request.
 type Job struct {
-	ID          string      `json:"id"`
-	VideoID     string      `json:"video_id"`
-	Request     ClipRequest `json:"request"`
-	Status      JobStatus   `json:"status"`
-	Error       string      `json:"error,omitempty"`
-	OutputDir   string      `json:"output_dir,omitempty"`
-	Caption     string      `json:"caption,omitempty"`
-	Translation string      `json:"translation,omitempty"`
+	ID          string
+	VideoID     string
+	Request     ClipRequest
+	Status      JobStatus
+	Error       string
+	OutputDir   string
+	Caption     string
+	Translation string
 
-	callbacks *ClipCallbacks `json:"-"`
+	callbacks *ClipCallbacks
 
 	// Progress throttle state, guarded by Service.mu.
 	lastProgStage   string

@@ -1,31 +1,33 @@
 package middleware
 
 import (
+	"maps"
 	"slices"
 	"sync"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
 )
 
-// maxTrackedUsers bounds the per-user state kept in memory.
-const maxTrackedUsers = 10_000
+// limiterStateTTL drops per-user state after this long without requests.
+const limiterStateTTL = 10 * time.Minute
 
 type limiterState struct {
 	requests []time.Time
 	notified bool
+	lastSeen time.Time
 }
 
 // Limiter is a per-user sliding-window rate limiter with an optional notify-once signal on refusal.
 type Limiter struct {
-	mu    sync.Mutex
-	cache *lru.LRU[int64, *limiterState]
+	mu        sync.Mutex
+	users     map[int64]*limiterState
+	lastSweep time.Time
 }
 
 func NewLimiter() *Limiter {
-	return &Limiter{cache: lru.NewLRU[int64, *limiterState](maxTrackedUsers, nil, 10*time.Minute)}
+	return &Limiter{users: map[int64]*limiterState{}}
 }
 
 // Check prunes requests outside the window, records the request when under the limit,
@@ -37,11 +39,16 @@ func (l *Limiter) Check(userID int64, limit int, window time.Duration) (allowed,
 	now := time.Now()
 	windowStart := now.Add(-window)
 
-	state, ok := l.cache.Get(userID)
-	if !ok || state == nil {
-		state = &limiterState{}
-		l.cache.Add(userID, state)
+	if now.Sub(l.lastSweep) > limiterStateTTL {
+		maps.DeleteFunc(l.users, func(_ int64, st *limiterState) bool { return now.Sub(st.lastSeen) > limiterStateTTL })
+		l.lastSweep = now
 	}
+	state, ok := l.users[userID]
+	if !ok {
+		state = &limiterState{}
+		l.users[userID] = state
+	}
+	state.lastSeen = now
 
 	state.requests = slices.DeleteFunc(state.requests, func(t time.Time) bool { return !t.After(windowStart) })
 

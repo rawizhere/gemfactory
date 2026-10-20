@@ -2,25 +2,27 @@ package middleware
 
 import (
 	"fmt"
+	"maps"
+	"sync"
 	"time"
 
 	"gemfactory/internal/telegram"
 
-	lru "github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
 	"go.uber.org/zap"
 )
 
 type Debouncer struct {
-	lastProcess *lru.LRU[string, time.Time]
+	mu          sync.Mutex
+	lastProcess map[string]time.Time
 	interval    time.Duration
 	logger      *zap.Logger
 }
 
 func NewDebouncer(interval time.Duration, logger *zap.Logger) *Debouncer {
 	return &Debouncer{
-		lastProcess: lru.NewLRU[string, time.Time](maxTrackedUsers, nil, interval*2),
+		lastProcess: map[string]time.Time{},
 		interval:    interval,
 		logger:      logger,
 	}
@@ -28,12 +30,16 @@ func NewDebouncer(interval time.Duration, logger *zap.Logger) *Debouncer {
 
 func (d *Debouncer) ShouldProcess(userID int64, action string) bool {
 	key := fmt.Sprintf("%d:%s", userID, action)
+	now := time.Now()
 
-	if last, exists := d.lastProcess.Get(key); exists && time.Since(last) < d.interval {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	// Entries past the interval can never debounce again, so they are dropped on every call.
+	maps.DeleteFunc(d.lastProcess, func(_ string, t time.Time) bool { return now.Sub(t) >= d.interval })
+	if _, exists := d.lastProcess[key]; exists {
 		return false
 	}
-
-	d.lastProcess.Add(key, time.Now())
+	d.lastProcess[key] = now
 	return true
 }
 

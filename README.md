@@ -43,7 +43,6 @@ gemfactory/
 │   ├── config/             # Configuration management
 │   ├── downloader/         # yt-dlp downloader, ffmpeg & translator
 │   ├── handlers/           # Telegram command handlers
-│   ├── health/             # Health checks
 │   ├── keyboard/           # UI builders
 │   ├── logger/             # Logging setup
 │   ├── middleware/         # Rate limiting & logging

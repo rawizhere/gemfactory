@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-	"golang.org/x/time/rate"
 
 	"gemfactory/internal/config"
 )
@@ -20,7 +19,7 @@ const uaCooldown = time.Hour
 type HTTPClient struct {
 	client     *http.Client
 	logger     *zap.Logger
-	limiter    *rate.Limiter
+	nextAt     time.Time // earliest time the next request may start, guarded by mu
 	mu         sync.Mutex
 	userAgents []string
 	badUntil   map[string]time.Time
@@ -39,8 +38,6 @@ func NewHTTPClient(userAgents []string, logger *zap.Logger) *HTTPClient {
 		Timeout:   30 * time.Second,
 	}
 
-	limiter := rate.NewLimiter(rate.Every(2*time.Second), 1)
-
 	if len(userAgents) == 0 {
 		userAgents = config.DefaultScraperUserAgents
 	}
@@ -48,7 +45,6 @@ func NewHTTPClient(userAgents []string, logger *zap.Logger) *HTTPClient {
 	return &HTTPClient{
 		client:     client,
 		logger:     logger,
-		limiter:    limiter,
 		userAgents: userAgents,
 		badUntil:   make(map[string]time.Time),
 	}
@@ -90,6 +86,27 @@ func (c *HTTPClient) markBad(ua string) {
 	c.badUntil[ua] = time.Now().Add(uaCooldown)
 }
 
+// requestDelay spaces requests to kpopofficial.com.
+const requestDelay = 2 * time.Second
+
+// wait blocks until requestDelay has passed since the previous request.
+func (c *HTTPClient) wait(ctx context.Context) error {
+	c.mu.Lock()
+	now := time.Now()
+	start := now
+	if c.nextAt.After(now) {
+		start = c.nextAt
+	}
+	c.nextAt = start.Add(requestDelay)
+	c.mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(start.Sub(now)):
+		return nil
+	}
+}
+
 // doRequest sends the request, failing over to the next user agent on 403.
 func (c *HTTPClient) doRequest(ctx context.Context, apiURL string) (*http.Response, error) {
 	c.mu.Lock()
@@ -100,8 +117,8 @@ func (c *HTTPClient) doRequest(ctx context.Context, apiURL string) (*http.Respon
 	}
 
 	for attempt := 0; attempt < attempts; attempt++ {
-		if err := c.limiter.Wait(ctx); err != nil {
-			return nil, fmt.Errorf("rate limit wait failed: %w", err)
+		if err := c.wait(ctx); err != nil {
+			return nil, err
 		}
 		ua := c.pickUA()
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)

@@ -3,11 +3,11 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"gemfactory/internal/config"
 	"gemfactory/internal/downloader"
 	"gemfactory/internal/handlers"
-	"gemfactory/internal/health"
 	"gemfactory/internal/keyboard"
 	"gemfactory/internal/notify"
 	"gemfactory/internal/service"
@@ -16,6 +16,7 @@ import (
 	"gemfactory/internal/telegram"
 	"gemfactory/internal/web"
 	"gemfactory/internal/worker"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -31,7 +32,6 @@ type Bot struct {
 	logger         *zap.Logger
 	db             *storage.Postgres
 	telegram       *telegram.Client
-	health         *health.Server
 	web            *web.Server
 	services       *service.Services
 	keyboard       *keyboard.Manager
@@ -97,24 +97,17 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 
 	router := NewRouter(services, cfg, keyboardManager, logger, tgClient, downloaderSvc)
 
-	var healthServer *health.Server
-	if cfg.HealthCheckEnabled {
-		healthServer = health.NewServer(cfg.HealthPort, logger, db)
-	}
-
-	var webServer *web.Server
-	if cfg.WebEnabled {
-		webServer = web.NewServer(cfg.WebPort, logger, web.Deps{
-			AppCfg:     cfg,
-			Artists:    storage.NewArtistRepository(db.GetDB()),
-			Releases:   storage.NewReleaseRepository(db.GetDB()),
-			Configs:    configRepo,
-			Cookies:    cookieRepo,
-			Downloads:  downloaderSvc,
-			ReleaseSvc: services.Release,
-			Scraper:    services.Scraper,
-		})
-	}
+	webServer := web.NewServer(cfg.WebPort, logger, web.Deps{
+		AppCfg:     cfg,
+		DB:         db,
+		Artists:    storage.NewArtistRepository(db.GetDB()),
+		Releases:   storage.NewReleaseRepository(db.GetDB()),
+		Configs:    configRepo,
+		Cookies:    cookieRepo,
+		Downloads:  downloaderSvc,
+		ReleaseSvc: services.Release,
+		Scraper:    services.Scraper,
+	})
 
 	adminNotifier := notify.NewAdminNotifier(configRepo, tgClient, logger)
 	releaseChecker := worker.NewReleaseChecker(services.Release, logger, cfg.ReleaseCheckInterval, adminNotifier)
@@ -124,7 +117,6 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 		logger:         logger,
 		db:             db,
 		telegram:       tgClient,
-		health:         healthServer,
 		web:            webServer,
 		services:       services,
 		keyboard:       keyboardManager,
@@ -147,29 +139,17 @@ func warnIfFFmpegMissingLibass(logger *zap.Logger) {
 	}
 }
 
-// Start launches the health server, periodic cleanup, background release checker, and long-polling.
+// Start launches the web server, periodic cleanup, background release checker, and long-polling.
 func (b *Bot) Start(ctx context.Context) error {
 	b.logger.Info("Starting bot")
 
-	if b.health != nil {
-		b.wg.Add(1)
-		go func() {
-			defer b.wg.Done()
-			if err := b.health.Start(); err != nil && err.Error() != "http: Server closed" {
-				b.logger.Error("Health check server failed", zap.Error(err))
-			}
-		}()
-	}
-
-	if b.web != nil {
-		b.wg.Add(1)
-		go func() {
-			defer b.wg.Done()
-			if err := b.web.Start(); err != nil && err.Error() != "http: Server closed" {
-				b.logger.Error("Web server failed", zap.Error(err))
-			}
-		}()
-	}
+	b.wg.Add(1)
+	go func() {
+		defer b.wg.Done()
+		if err := b.web.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			b.logger.Error("Web server failed", zap.Error(err))
+		}
+	}()
 
 	b.wg.Add(1)
 	go func() {
@@ -189,14 +169,8 @@ func (b *Bot) Stop() error {
 		b.cancel()
 	}
 
-	if b.health != nil {
-		_ = b.health.Stop()
-	}
-
-	if b.web != nil {
-		if err := b.web.Stop(); err != nil {
-			b.logger.Warn("Failed to stop web server", zap.Error(err))
-		}
+	if err := b.web.Stop(); err != nil {
+		b.logger.Warn("Failed to stop web server", zap.Error(err))
 	}
 
 	stopped := make(chan struct{})

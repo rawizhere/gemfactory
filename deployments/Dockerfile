@@ -52,6 +52,6 @@ USER app
 
 WORKDIR /app
 
-EXPOSE 8080
+EXPOSE 9090
 
 CMD ["/app/start.sh"]
