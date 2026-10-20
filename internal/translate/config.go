@@ -52,6 +52,12 @@ const DefaultTranslationPrompt = `Translate subtitles for entertainment videos: 
 5. Song lyrics: translate the thought and rhythm, not word-by-word.
 6. Silently fix obvious ASR/speech-recognition errors from context.`
 
+// Grok defaults used when GROK_RATE_LIMIT / GROK_MAX_CHARS are unset; the web panel shows the same values.
+const (
+	DefaultGrokRateLimit = 3    // requests per user per minute
+	DefaultGrokMaxChars  = 3000 // input runes sent to the model
+)
+
 const DefaultGrokPrompt = `Ты — Grok в Telegram. Твоя задача — ответить на вопрос пользователя «это правда?», проверив утверждение или цитату.
 
 Правила:

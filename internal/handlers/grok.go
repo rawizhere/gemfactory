@@ -50,7 +50,7 @@ func (h *GrokHandlers) Run(ctx context.Context, message *telego.Message, mode Gr
 
 	isAdmin := message.From != nil && (message.From.Username == h.Config.AdminUsername || h.IsAdmin(message.From))
 	if !isAdmin {
-		rateLimit := h.Services.Settings.Int(ctx, "GROK_RATE_LIMIT", 3)
+		rateLimit := h.Services.Settings.Int(ctx, "GROK_RATE_LIMIT", translate.DefaultGrokRateLimit)
 
 		userID := int64(0)
 		if message.From != nil {
@@ -84,7 +84,7 @@ func (h *GrokHandlers) Run(ctx context.Context, message *telego.Message, mode Gr
 		return
 	}
 
-	maxChars := h.Services.Settings.Int(ctx, "GROK_MAX_CHARS", 3000)
+	maxChars := h.Services.Settings.Int(ctx, "GROK_MAX_CHARS", translate.DefaultGrokMaxChars)
 
 	runes := []rune(targetText)
 	if len(runes) > maxChars {
