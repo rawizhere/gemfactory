@@ -341,7 +341,16 @@ func (s *Server) updateArtist(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "name cannot be empty", http.StatusBadRequest)
 			return
 		}
-		artist.Name = (name)
+		other, err := s.Artists.GetByName(r.Context(), name)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		if other != nil && other.ArtistID != artist.ArtistID {
+			http.Error(w, "artist "+other.Name+" already exists", http.StatusConflict)
+			return
+		}
+		artist.Name = name
 	}
 	if req.IsActive != nil {
 		artist.IsActive = *req.IsActive

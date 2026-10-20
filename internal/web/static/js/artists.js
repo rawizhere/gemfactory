@@ -120,15 +120,10 @@ export function renderArtists() {
     tdChk.appendChild(chk);
     tr.appendChild(tdChk);
 
-    // Name + Release Count + Inline Rename
+    // Name + Release Count (opens releases) + Inline Rename
     const tdName = el('td', { class: 'title-cell' });
-    const nameSpan = el('span', null, a.name);
-    const link = el('a', { class: 'clickable-link', title: 'Filter releases by this artist' }, [nameSpan]);
-    link.addEventListener('click', (e) => {
-      e.preventDefault();
-      if (onSelectArtistCallback) onSelectArtistCallback(a.name);
-    });
-    tdName.appendChild(link);
+    // Plain text: a link here would switch tabs on the first click of a double-click rename.
+    tdName.appendChild(el('span', { title: 'Double-click to rename' }, a.name));
 
     // Releases count pill
     const count = releaseCounts[a.name] || 0;
@@ -150,7 +145,9 @@ export function renderArtists() {
       input.focus();
       input.select();
 
+      let cancelled = false;
       const save = async () => {
+        if (cancelled) return;
         const newName = input.value.trim();
         if (newName && newName !== a.name) {
           try {
@@ -168,6 +165,7 @@ export function renderArtists() {
         if (e.key === 'Enter') {
           input.blur();
         } else if (e.key === 'Escape') {
+          cancelled = true; // removing the input may fire blur
           renderArtists();
         }
       });
