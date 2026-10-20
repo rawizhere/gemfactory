@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"strings"
+	"sync"
 
 	"github.com/mymmrac/telego"
 	"go.uber.org/zap"
@@ -224,7 +225,10 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 		statusLine: "Initializing...",
 		lastRender: initialStatusCard(req),
 	}
+	// Callbacks fire from the job worker and, on resubmit, from the submitting goroutine; mu guards state.
+	var mu sync.Mutex
 
+	// edit re-renders the status card; callers hold mu.
 	edit := func() {
 		if statusID < 0 {
 			return
@@ -241,13 +245,17 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 
 	// deliver uploads the result, then drops or finalizes the status card.
 	deliver := func(send func(ctx context.Context, onUpload telegram.UploadProgressCallback) error) {
+		mu.Lock()
 		state.stage = downloader.StageUpload
 		state.percent = 0
 		state.statusLine = "<b>Upload:</b> Uploading to Telegram..."
 		edit()
+		mu.Unlock()
 
 		bgCtx := context.Background()
 		onUploadProgress := func(pct int, speed, sizeStr string) {
+			mu.Lock()
+			defer mu.Unlock()
 			state.stage = downloader.StageUpload
 			state.percent = pct
 			if speed != "" {
@@ -262,6 +270,8 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 			h.Logger.Error("failed to send resulting media", zap.Error(sendErr))
 			_ = h.TG.SendMessage(bgCtx, chatID, "Failed to send file: "+html.EscapeString(sendErr.Error()))
 		}
+		mu.Lock()
+		defer mu.Unlock()
 		if statusID > 0 {
 			if (req.Shorts && req.Start == "" && req.End == "") || h.shouldDeleteStatus(bgCtx) {
 				_ = h.TG.DeleteMessage(bgCtx, chatID, statusID)
@@ -276,16 +286,22 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 
 	return &downloader.ClipCallbacks{
 		OnHashtags: func(tags []string) {
+			mu.Lock()
+			defer mu.Unlock()
 			state.hashtags = tags
 			edit()
 		},
 
 		OnTranslation: func(providerModel string) {
+			mu.Lock()
+			defer mu.Unlock()
 			state.translatedVia = providerModel
 			edit()
 		},
 
 		OnTranslateAttempt: func(providerModel string) {
+			mu.Lock()
+			defer mu.Unlock()
 			state.stage = downloader.StageTranslate
 			target := state.translating
 			if target == "" {
@@ -296,6 +312,8 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 		},
 
 		OnStage: func(stage, detail string) {
+			mu.Lock()
+			defer mu.Unlock()
 			state.stage = stage
 			switch stage {
 			case downloader.StageQueued:
@@ -340,6 +358,8 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 			edit()
 		},
 		OnProgress: func(p downloader.ProgressUpdate) {
+			mu.Lock()
+			defer mu.Unlock()
 			state.stage = p.Stage
 			state.percent = p.Percent
 			switch p.Stage {

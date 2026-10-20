@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -63,4 +64,26 @@ func TestFormatMode(t *testing.T) {
 	require.Equal(t, "Subtitles (ru, 720p)", formatMode(downloader.ClipRequest{SubsLang: "ru", Quality: "720p"}))
 	require.Equal(t, "Subtitles (ru, HQ)", formatMode(downloader.ClipRequest{SubsLang: "ru", HQ: true}))
 	require.Equal(t, "MP3", formatMode(downloader.ClipRequest{AudioOnly: true}))
+}
+
+// Status callbacks are invoked from several goroutines; run with -race.
+func TestClipCallbacksConcurrentUse(t *testing.T) {
+	h := &ClipHandlers{BaseHandler: &BaseHandler{}}
+	req := downloader.ClipRequest{URL: "https://youtu.be/X56FLo6qslE", Start: "0:01", End: "0:05"}
+	cbs := h.newCallbacks(1, -1, &downloader.ParsedCommand{}, req, 0)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				cbs.OnStage(downloader.StageDownload, "")
+				cbs.OnProgress(downloader.ProgressUpdate{Stage: downloader.StageDownload, Percent: j})
+				cbs.OnHashtags([]string{"#a"})
+				cbs.OnTranslation("p")
+			}
+		}(i)
+	}
+	wg.Wait()
 }

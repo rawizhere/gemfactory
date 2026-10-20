@@ -60,7 +60,7 @@ func (s *Service) runPost(ctx context.Context, job *Job) {
 	if m, media := readPostManifest(manifestPath); m != nil {
 		s.logger.Info("post cache hit", zap.String("job", job.ID))
 		s.reportStage(job, StageMetadata, m.Title)
-		if cbs := job.callbacks; cbs != nil && cbs.OnHashtags != nil && len(m.Tags) > 0 {
+		if cbs := s.callbacksOf(job); cbs != nil && cbs.OnHashtags != nil && len(m.Tags) > 0 {
 			cbs.OnHashtags(m.Tags)
 		}
 		s.finishPost(job, media, m.Caption)
@@ -90,7 +90,7 @@ func (s *Service) runPost(ctx context.Context, job *Job) {
 	meta.Title = DisplayTitle(meta)
 	title := meta.Title
 	s.reportStage(job, StageMetadata, title)
-	if cbs := job.callbacks; cbs != nil && cbs.OnHashtags != nil {
+	if cbs := s.callbacksOf(job); cbs != nil && cbs.OnHashtags != nil {
 		cbs.OnHashtags(AllHashtags(meta))
 	}
 

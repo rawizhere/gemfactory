@@ -191,11 +191,12 @@ func (s *Service) SubmitWithCallbacks(ctx context.Context, req ClipRequest, cbs 
 					existing.callbacks = cbs
 					output := existing.OutputDir
 					caption := existing.Caption
+					snap := snapshot(existing)
 					s.mu.Unlock()
 					if cbs != nil && cbs.OnDone != nil {
 						go cbs.OnDone(output, caption)
 					}
-					return existing, nil
+					return snap, nil
 				}
 			}
 			// File was deleted from disk or OutputDir is empty: drop stale job so fresh attempt starts.
@@ -203,13 +204,12 @@ func (s *Service) SubmitWithCallbacks(ctx context.Context, req ClipRequest, cbs 
 		default:
 			// Still running: re-point callbacks so the new status message keeps receiving stage/progress updates.
 			existing.callbacks = cbs
+			snap := snapshot(existing)
 			s.mu.Unlock()
-			if cbs != nil {
-				if cbs.OnStage != nil {
-					s.snapshotStage(existing, cbs)
-				}
+			if cbs != nil && cbs.OnStage != nil {
+				s.snapshotStage(existing, cbs)
 			}
-			return existing, nil
+			return snap, nil
 		}
 	}
 	s.jobs[job.ID] = job
@@ -217,17 +217,41 @@ func (s *Service) SubmitWithCallbacks(ctx context.Context, req ClipRequest, cbs 
 	if cbs != nil {
 		job.callbacks = cbs
 	}
+	snap := snapshot(job)
 	s.mu.Unlock()
 
 	go s.run(context.WithoutCancel(ctx), job)
-	return job, nil
+	return snap, nil
+}
+
+// snapshot copies a job for callers outside the service; the caller must hold s.mu.
+func snapshot(job *Job) *Job {
+	c := *job
+	c.callbacks = nil
+	return &c
+}
+
+// callbacksOf returns the job's current callbacks; a resubmit may re-point them at any time.
+func (s *Service) callbacksOf(job *Job) *ClipCallbacks {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return job.callbacks
+}
+
+func (s *Service) setTranslation(job *Job, providerModel string) {
+	s.mu.Lock()
+	job.Translation = providerModel
+	s.mu.Unlock()
 }
 
 func (s *Service) GetJob(id string) (*Job, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	job, ok := s.jobs[id]
-	return job, ok
+	if !ok {
+		return nil, false
+	}
+	return snapshot(job), true
 }
 
 func (s *Service) ListJobs() []*Job {
@@ -235,7 +259,7 @@ func (s *Service) ListJobs() []*Job {
 	defer s.mu.Unlock()
 	out := make([]*Job, 0, len(s.order))
 	for _, id := range s.order {
-		out = append(out, s.jobs[id])
+		out = append(out, snapshot(s.jobs[id]))
 	}
 	return out
 }
@@ -307,7 +331,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		return
 	}
 	s.reportStage(job, StageMetadata, DisplayTitle(meta))
-	if cbs := job.callbacks; cbs != nil && cbs.OnHashtags != nil {
+	if cbs := s.callbacksOf(job); cbs != nil && cbs.OnHashtags != nil {
 		cbs.OnHashtags(AllHashtags(meta))
 	}
 
@@ -443,11 +467,14 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		caption = FormatCaption(title, CaptionHashtags(meta))
 	}
 
+	s.mu.Lock()
+	translation := job.Translation
+	s.mu.Unlock()
 	writeCacheMarker(clipPath, cacheMarker{
 		Title:       baseTitle,
 		AltTitle:    altTitle,
 		Tags:        AllHashtags(meta),
-		Translation: job.Translation,
+		Translation: translation,
 	})
 	s.mu.Lock()
 	job.Status = StatusDone
@@ -489,12 +516,14 @@ func (s *Service) serveFromCache(job *Job, clipPath string, marker *cacheMarker)
 		title = marker.AltTitle
 	}
 	s.reportStage(job, StageMetadata, title)
-	if cbs := job.callbacks; cbs != nil {
+	if marker.Translation != "" {
+		s.setTranslation(job, marker.Translation)
+	}
+	if cbs := s.callbacksOf(job); cbs != nil {
 		if cbs.OnHashtags != nil && len(marker.Tags) > 0 {
 			cbs.OnHashtags(marker.Tags)
 		}
 		if cbs.OnTranslation != nil && marker.Translation != "" {
-			job.Translation = marker.Translation
 			cbs.OnTranslation(marker.Translation)
 		}
 	}
@@ -532,9 +561,7 @@ func (s *Service) reportStage(job *Job, stage, detail string) {
 }
 
 func (s *Service) notifyDone(job *Job, path, caption string) {
-	s.mu.Lock()
-	cbs := job.callbacks
-	s.mu.Unlock()
+	cbs := s.callbacksOf(job)
 	if cbs != nil && cbs.OnDone != nil {
 		cbs.OnDone(path, caption)
 	}

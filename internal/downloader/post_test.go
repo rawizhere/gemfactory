@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -123,5 +124,38 @@ func TestResubmitDonePostDeliversWholeAlbum(t *testing.T) {
 		require.Equal(t, media, m)
 	case <-time.After(5 * time.Second):
 		t.Fatal("album was not delivered")
+	}
+}
+
+// Resubmitting a running job and listing jobs while the worker updates it must be race-free (run with -race).
+func TestJobAccessIsRaceFree(t *testing.T) {
+	s := newTestService(t)
+	req := ClipRequest{URL: "https://www.instagram.com/p/RACE1/", Shorts: true}
+
+	dir := s.workbenchDir("ig_RACE1")
+	p := filepath.Join(dir, "ig_RACE1_1.jpg")
+	require.NoError(t, os.WriteFile(p, []byte("img"), 0644))
+	writePostManifest(filepath.Join(dir, "ig_RACE1_post.json"), "title", []string{"#tag"}, "caption", []PostMedia{{Path: p}})
+
+	done := make(chan struct{}, 2)
+	cbs := func() *ClipCallbacks {
+		return &ClipCallbacks{
+			OnStage:    func(string, string) {},
+			OnHashtags: func([]string) {},
+			OnPostDone: func([]PostMedia, string) { done <- struct{}{} },
+		}
+	}
+	job, err := s.SubmitWithCallbacks(context.Background(), req, cbs())
+	require.NoError(t, err)
+	_, err = s.SubmitWithCallbacks(context.Background(), req, cbs())
+	require.NoError(t, err)
+	for i := 0; i < 50; i++ {
+		_, _ = json.Marshal(s.ListJobs())
+		_, _ = json.Marshal(job)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("post was not delivered")
 	}
 }

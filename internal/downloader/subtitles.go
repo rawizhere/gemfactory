@@ -78,14 +78,14 @@ func (s *Service) subtitlesForClip(
 		}
 		s.reportStage(job, StageTranslate, res.TargetLang)
 		var onAttempt func(string)
-		if cbs := job.callbacks; cbs != nil {
+		if cbs := s.callbacksOf(job); cbs != nil {
 			onAttempt = cbs.OnTranslateAttempt
 		}
 		prov, terr := s.translateVTTFile(ctx, trimmedPath, res.TargetLang, res.SourceLang, videoTitle, job.Request.SubsNoLLM, onAttempt)
 		if terr == nil && prov != "" {
-			job.Translation = prov
-			if job.callbacks != nil && job.callbacks.OnTranslation != nil {
-				job.callbacks.OnTranslation(prov)
+			s.setTranslation(job, prov)
+			if cbs := s.callbacksOf(job); cbs != nil && cbs.OnTranslation != nil {
+				cbs.OnTranslation(prov)
 			}
 		}
 		if terr != nil {
