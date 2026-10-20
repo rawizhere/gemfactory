@@ -1150,6 +1150,7 @@ function renderConfigTable(rows, editable) {
         saveBtn.disabled = true;
         try {
           await api('PUT', `/api/config/${encodeURIComponent(c.key)}`, { value: inputEl.value });
+          c.value = inputEl.value; // keep state in sync for re-renders of this section
           saveBtn.textContent = 'Saved';
           setTimeout(() => { saveBtn.textContent = 'Save'; saveBtn.disabled = false; }, 1500);
         } catch (err) {

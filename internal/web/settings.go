@@ -127,6 +127,16 @@ func settingRegistry() []settingSpec {
 	}
 }
 
+// isRegisteredSetting reports whether key has a dedicated editor in the settings sections.
+func isRegisteredSetting(key string) bool {
+	for _, spec := range settingRegistry() {
+		if spec.key == key {
+			return true
+		}
+	}
+	return false
+}
+
 func validateUserAgents(v string) error {
 	if len(scraper.ParseUserAgents(v)) == 0 {
 		return fmt.Errorf("add at least one user agent line")

@@ -462,23 +462,6 @@ func (s *Server) listConfig(w http.ResponseWriter, r *http.Request) {
 		Editable    bool   `json:"editable"`
 	}
 
-	isDedicatedKey := func(key string) bool {
-		switch key {
-		case "TRANSLATION_FALLBACK_ORDER", "TRANSLATION_PROMPT",
-			"SUBS_SOURCE_PREF_RU", "GEMINI_API_KEY", "GEMINI_MODELS",
-			"GROQ_API_KEY", "GROQ_MODELS", "OPENCODE_API_KEY", "OPENCODE_MODELS",
-			"DOWNLOAD_CONCURRENCY", "CLIP_CRF", "SUBS_CRF", "CLIP_PRESET", "CLIP_AUDIO_BITRATE", "CLIP_DELETE_STATUS",
-			"NVIDIA_API_KEY", "NVIDIA_MODELS",
-			"DOWNLOAD_RETENTION_HOURS", "TRANSLATION_TIMEOUT", "SUBS_GOOGLE_ONLY",
-			"TG_FILE_LIMIT_MB", "YTDLP_PROXY",
-			"GROK_ENABLED", "GROK_RATE_LIMIT", "GROK_MAX_CHARS",
-			"GROK_PROMPT", "GROK_RETELL_PROMPT", "GROK_OPINION_PROMPT":
-			return true
-		default:
-			return false
-		}
-	}
-
 	sensitive := func(key string) bool {
 		key = strings.ToUpper(key)
 		return strings.Contains(key, "TOKEN") ||
@@ -501,7 +484,7 @@ func (s *Server) listConfig(w http.ResponseWriter, r *http.Request) {
 
 	out := []entry{}
 	for _, c := range rows {
-		if isDedicatedKey(c.Key) || isDeadDBKey(c.Key) {
+		if isRegisteredSetting(c.Key) || isDeadDBKey(c.Key) {
 			continue
 		}
 		value := c.Value
@@ -538,6 +521,11 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 		strings.Contains(strings.ToUpper(key), "PASSWORD") ||
 		strings.Contains(strings.ToUpper(key), "SECRET") {
 		http.Error(w, "sensitive keys cannot be edited here", http.StatusForbidden)
+		return
+	}
+	if isRegisteredSetting(key) {
+		// Registered settings go through /api/settings for validation and runtime apply.
+		http.Error(w, key+" is managed in the settings sections", http.StatusBadRequest)
 		return
 	}
 
