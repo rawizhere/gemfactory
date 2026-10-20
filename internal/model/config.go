@@ -22,5 +22,4 @@ type ConfigRepository interface {
 	Get(ctx context.Context, key string) (*Config, error)
 	GetAll(ctx context.Context) ([]Config, error)
 	Set(ctx context.Context, key, value string) error
-	Reset(ctx context.Context) error
 }

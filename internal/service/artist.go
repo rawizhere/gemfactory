@@ -19,7 +19,7 @@ type ArtistService struct {
 
 func NewArtistService(db *bun.DB, logger *zap.Logger) *ArtistService {
 	return &ArtistService{
-		repo:   storage.NewArtistRepository(db, logger),
+		repo:   storage.NewArtistRepository(db),
 		logger: logger,
 	}
 }

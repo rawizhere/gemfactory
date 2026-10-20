@@ -96,10 +96,7 @@ func (h *GrokHandlers) Run(ctx context.Context, message *telego.Message, mode Gr
 
 	prompt := h.Services.Settings.Value(ctx, mode.promptKey, mode.defPrompt)
 
-	cfg := translate.ResolveConfig(func(k string) (string, bool) {
-		v := h.Services.Settings.Value(ctx, k, "")
-		return v, v != ""
-	})
+	cfg := translate.ResolveConfig(ctx, h.Services.Settings)
 
 	resp, _, err := translate.Complete(ctx, prompt, targetText, cfg)
 	if err != nil {

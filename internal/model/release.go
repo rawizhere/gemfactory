@@ -28,12 +28,10 @@ type Release struct {
 }
 
 type ReleaseRepository interface {
-	GetByID(ctx context.Context, id int) (*Release, error)
 	GetAll(ctx context.Context) ([]Release, error)
 	GetByArtistID(ctx context.Context, artistID int) ([]Release, error)
 	GetByArtist(ctx context.Context, artistName string) ([]Release, error)
 	GetByDateRange(ctx context.Context, start, end time.Time) ([]Release, error)
-	GetActive(ctx context.Context) ([]Release, error)
 	GetByArtistDateAndTrack(ctx context.Context, artistID int, date time.Time, titleTrack string) (*Release, error)
 	GetByArtistDateAndSource(ctx context.Context, artistID int, date time.Time, sourceURL string) (*Release, error)
 	GetTotalCount(ctx context.Context) (int, error)
@@ -41,5 +39,4 @@ type ReleaseRepository interface {
 	Update(ctx context.Context, release *Release) error
 	Delete(ctx context.Context, id int) error
 	DeleteByIDs(ctx context.Context, ids []int) (int, error)
-	Upsert(ctx context.Context, release *Release) error
 }

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gemfactory/internal/model"
 )
 
 type albumTitle struct {
@@ -90,7 +92,7 @@ func (c *HTTPClient) FetchAlbumsWindow(ctx context.Context, after, before time.T
 }
 
 func monthWindow(month, year string) (time.Time, time.Time, error) {
-	m := monthNumber(month)
+	m := model.MonthNumber(month)
 	if m == 0 {
 		return time.Time{}, time.Time{}, fmt.Errorf("invalid month: %q", strings.TrimSpace(month))
 	}

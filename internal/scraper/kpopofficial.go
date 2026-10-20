@@ -290,7 +290,7 @@ func releaseInMonth(d time.Time, month, year string) bool {
 	if d.IsZero() {
 		return false
 	}
-	m := monthNumber(month)
+	m := model.MonthNumber(month)
 	if m == 0 {
 		return true
 	}
@@ -311,10 +311,6 @@ func releaseInYear(d time.Time, year string) bool {
 		return d.Year() == y
 	}
 	return true
-}
-
-func monthNumber(name string) int {
-	return model.MonthNumber(name)
 }
 
 func normalizeURL(u string) string {

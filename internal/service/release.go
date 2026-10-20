@@ -30,8 +30,8 @@ type ReleaseService struct {
 
 func NewReleaseService(db *bun.DB, scraper *scraper.Fetcher, logger *zap.Logger) *ReleaseService {
 	return &ReleaseService{
-		repo:       storage.NewReleaseRepository(db, logger),
-		artistRepo: storage.NewArtistRepository(db, logger),
+		repo:       storage.NewReleaseRepository(db),
+		artistRepo: storage.NewArtistRepository(db),
 		scraper:    scraper,
 		logger:     logger,
 	}
@@ -448,40 +448,29 @@ func (s *ReleaseService) findArtist(scrapedName string, artistMap map[string]*mo
 		return normMap[normalizeName(val)]
 	}
 
-	if a := lookup(raw); a != nil {
-		return a
-	}
-
-	base := strings.TrimSpace(strings.Split(raw, "(")[0])
-	base = strings.TrimSpace(strings.Split(base, " -")[0])
-	if a := lookup(base); a != nil {
-		return a
-	}
-
-	if idx := strings.Index(raw, "("); idx != -1 {
-		inside := strings.Trim(raw[idx+1:], ") ")
-		if a := lookup(inside); a != nil {
+	// variants tries the name as-is, without a "(...)" / " -" suffix, and the text inside the parens.
+	variants := func(name string) *model.Artist {
+		if a := lookup(name); a != nil {
 			return a
 		}
+		base := strings.TrimSpace(strings.Split(name, "(")[0])
+		base = strings.TrimSpace(strings.Split(base, " -")[0])
+		if a := lookup(base); a != nil {
+			return a
+		}
+		if idx := strings.Index(name, "("); idx != -1 {
+			return lookup(strings.Trim(name[idx+1:], ") "))
+		}
+		return nil
 	}
 
-	candidates := collabSplitter.Split(raw, -1)
-	if len(candidates) > 1 {
+	if a := variants(raw); a != nil {
+		return a
+	}
+	if candidates := collabSplitter.Split(raw, -1); len(candidates) > 1 {
 		for _, cand := range candidates {
-			cand = strings.TrimSpace(cand)
-			if a := lookup(cand); a != nil {
+			if a := variants(strings.TrimSpace(cand)); a != nil {
 				return a
-			}
-			candBase := strings.TrimSpace(strings.Split(cand, "(")[0])
-			candBase = strings.TrimSpace(strings.Split(candBase, " -")[0])
-			if a := lookup(candBase); a != nil {
-				return a
-			}
-			if idx := strings.Index(cand, "("); idx != -1 {
-				inside := strings.Trim(cand[idx+1:], ") ")
-				if a := lookup(inside); a != nil {
-					return a
-				}
 			}
 		}
 	}

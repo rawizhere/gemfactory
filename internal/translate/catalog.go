@@ -29,14 +29,6 @@ const (
 	StatusError       = "error"
 )
 
-// providerBaseURL maps OpenAI-compatible providers to their API base.
-var providerBaseURL = map[string]string{
-	ProviderOpenRouter: "https://openrouter.ai/api/v1",
-	ProviderOpencode:   opencodeBaseURL,
-	ProviderNvidia:     nvidiaBaseURL,
-	ProviderGroq:       groqBaseURL,
-}
-
 // CatalogModel is one entry in a provider's model catalog.
 type CatalogModel struct {
 	Provider      string `json:"provider"`
@@ -73,42 +65,15 @@ var (
 	statusCache  = map[string]map[string]statusCacheEntry{}
 )
 
-func isSupportedProvider(p string) bool {
-	switch p {
-	case ProviderOpenRouter, ProviderOpencode, ProviderNvidia, ProviderGroq, ProviderGemini:
-		return true
-	}
-	return false
-}
-
-func httpGet(ctx context.Context, u string) ([]byte, error) {
+func httpGet(ctx context.Context, u, apiKey string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "gemfactory")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("catalog request to %s returned %d", u, resp.StatusCode)
-	}
-	return body, nil
-}
-
-func httpGetWithKey(ctx context.Context, u, apiKey string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "gemfactory")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -240,13 +205,25 @@ func fetchGeminiModels(ctx context.Context, apiKey string) ([]CatalogModel, erro
 func fetchCatalog(ctx context.Context, provider, apiKey string) ([]CatalogModel, error) {
 	switch provider {
 	case ProviderOpenRouter:
-		body, err := httpGet(ctx, providerBaseURL[provider]+"/models")
+		body, err := httpGet(ctx, providers[provider].baseURL+"/models", "")
 		if err != nil {
 			return nil, err
 		}
 		return ParseOpenRouterModels(body)
-	case ProviderOpencode:
-		body, err := httpGet(ctx, providerBaseURL[provider]+"/models")
+	case ProviderOpencode, ProviderNvidia, ProviderGroq:
+		// Only Groq's /models needs auth; sending a key elsewhere is unnecessary.
+		var key string
+		var free func(string) bool
+		switch provider {
+		case ProviderGroq:
+			if apiKey == "" {
+				return nil, fmt.Errorf("groq api key required")
+			}
+			key = apiKey
+		case ProviderOpencode:
+			free = OpencodeIsFree
+		}
+		body, err := httpGet(ctx, providers[provider].baseURL+"/models", key)
 		if err != nil {
 			return nil, err
 		}
@@ -254,30 +231,7 @@ func fetchCatalog(ctx context.Context, provider, apiKey string) ([]CatalogModel,
 		if err != nil {
 			return nil, err
 		}
-		return buildCatalog(ProviderOpencode, ids, OpencodeIsFree), nil
-	case ProviderNvidia:
-		body, err := httpGet(ctx, providerBaseURL[provider]+"/models")
-		if err != nil {
-			return nil, err
-		}
-		ids, err := ParseOpenAIModelIDs(body)
-		if err != nil {
-			return nil, err
-		}
-		return buildCatalog(ProviderNvidia, ids, nil), nil
-	case ProviderGroq:
-		if apiKey == "" {
-			return nil, fmt.Errorf("groq api key required")
-		}
-		body, err := httpGetWithKey(ctx, providerBaseURL[provider]+"/models", apiKey)
-		if err != nil {
-			return nil, err
-		}
-		ids, err := ParseOpenAIModelIDs(body)
-		if err != nil {
-			return nil, err
-		}
-		return buildCatalog(ProviderGroq, ids, nil), nil
+		return buildCatalog(provider, ids, free), nil
 	case ProviderGemini:
 		if apiKey == "" {
 			return nil, fmt.Errorf("gemini api key required")
@@ -340,7 +294,7 @@ func mergeStatuses(provider string, models []CatalogModel) []CatalogModel {
 
 // GetProviderCatalog returns the cached (or freshly fetched) model catalog for a provider.
 func GetProviderCatalog(ctx context.Context, provider, apiKey string, refresh bool) ([]CatalogModel, error) {
-	if !isSupportedProvider(provider) {
+	if !IsProvider(provider) {
 		return nil, fmt.Errorf("unsupported provider: %s", provider)
 	}
 	if !refresh {
@@ -358,7 +312,7 @@ func GetProviderCatalog(ctx context.Context, provider, apiKey string, refresh bo
 
 // CheckModelsAvailability pings each model (concurrency 4) and returns per-model status.
 func CheckModelsAvailability(ctx context.Context, provider, apiKey string, modelIDs []string) ([]ModelStatus, error) {
-	if !isSupportedProvider(provider) {
+	if !IsProvider(provider) {
 		return nil, fmt.Errorf("unsupported provider: %s", provider)
 	}
 	results := make([]ModelStatus, len(modelIDs))
@@ -383,11 +337,11 @@ func pingModel(ctx context.Context, provider, apiKey, id string) string {
 	if provider == ProviderGemini {
 		return pingGemini(ctx, apiKey, id)
 	}
-	base, ok := providerBaseURL[provider]
+	p, ok := providers[provider]
 	if !ok {
 		return StatusError
 	}
-	return pingOpenAI(ctx, base, apiKey, id)
+	return pingOpenAI(ctx, p.baseURL, apiKey, id)
 }
 
 func pingOpenAI(ctx context.Context, baseURL, apiKey, modelID string) string {

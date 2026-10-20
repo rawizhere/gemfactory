@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -18,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	cookiemonster "github.com/MercuryEngineering/CookieMonster"
 	"go.uber.org/zap"
 
 	"gemfactory/internal/settings"
@@ -45,7 +45,7 @@ func (s *Service) subtitlesForClip(
 	s.reportStage(job, StageSubtitles, requestedLang)
 	workbench := s.workbenchDir(videoID)
 
-	cfg := s.ResolveTranslationConfig(ctx)
+	cfg := translate.ResolveConfig(ctx, settings.New(s.configs))
 	res, err := ResolveSubtitleTrack(meta, requestedLang, cfg.SourcePrefRU)
 	if err != nil {
 		return "", err
@@ -333,8 +333,10 @@ func fetchTimedtext(ctx context.Context, rawURL, cookieFile string) ([]byte, err
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 	if cookieFile != "" {
-		for _, c := range parseNetscapeCookies(cookieFile) {
-			req.AddCookie(c)
+		if data, err := os.ReadFile(cookieFile); err == nil {
+			for _, c := range ParseNetscapeCookies(string(data)) {
+				req.AddCookie(c)
+			}
 		}
 	}
 
@@ -508,7 +510,7 @@ func (s *Service) translateVTTFile(ctx context.Context, vttPath, targetLang, sou
 		cueLineCounts[i] = len(ls)
 	}
 
-	cfg := s.ResolveTranslationConfig(ctx)
+	cfg := translate.ResolveConfig(ctx, settings.New(s.configs))
 	translated, provider, err := translate.Chain(ctx, texts, targetLang, sourceLang, cfg, videoTitle, s.logger, onAttempt)
 	if err != nil {
 		return "", err
@@ -548,12 +550,34 @@ func splitDialogueLines(s string) string {
 	return strings.Join(lines, "\n")
 }
 
-func parseNetscapeCookies(path string) []*http.Cookie {
-	cookies, err := cookiemonster.ParseFile(path)
-	if err != nil {
-		return nil
+// ParseNetscapeCookies reads cookies from Netscape cookies.txt content; comments, blank and short lines are skipped.
+func ParseNetscapeCookies(content string) []*http.Cookie {
+	var out []*http.Cookie
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		f := strings.Fields(line)
+		if len(f) < 6 {
+			continue
+		}
+		c := &http.Cookie{
+			Domain:   f[0],
+			HttpOnly: strings.EqualFold(f[1], "true"),
+			Path:     f[2],
+			Secure:   strings.EqualFold(f[3], "true"),
+			Name:     f[5],
+		}
+		if len(f) > 6 {
+			c.Value = f[6]
+		}
+		if exp, err := strconv.ParseFloat(f[4], 64); err == nil && exp > 0 {
+			c.Expires = time.Unix(int64(exp), 0)
+		}
+		out = append(out, c)
 	}
-	return cookies
+	return out
 }
 
 // subtitleDownloadAttempts is how many times a failing yt-dlp subtitle download is retried before giving up.
@@ -842,7 +866,7 @@ func FormatCaption(title string, tags []string) string {
 	if runes := []rune(title); len(runes) > maxTitleRunes {
 		title = string(runes[:maxTitleRunes-1]) + "…"
 	}
-	caption := "<b>" + htmlEscape(title) + "</b>"
+	caption := "<b>" + html.EscapeString(title) + "</b>"
 	if len(tags) > 0 {
 		caption += "\n\n" + strings.Join(tags, " ")
 	}
@@ -879,10 +903,6 @@ func hashtags(meta *SourceMeta, limit int) []string {
 		}
 	}
 	return tagList
-}
-
-func htmlEscape(s string) string {
-	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
 }
 
 func (s *Service) ExtractMetadata(ctx context.Context, url, videoID, cookieFile string) (*SourceMeta, error) {
@@ -1038,67 +1058,4 @@ func pickSourceLang(meta *SourceMeta, target string, pref []string) string {
 		return normalizeLang(k)
 	}
 	return ""
-}
-
-// ResolveTranslationConfig layers DB-stored settings on top of env defaults; the DB wins.
-func (s *Service) ResolveTranslationConfig(ctx context.Context) translate.Config {
-	cfg := translate.DefaultConfig()
-	if s.configs == nil {
-		return cfg
-	}
-	get := func(key string) (string, bool) {
-		val, err := s.configs.Get(ctx, key)
-		if err != nil || val == nil || strings.TrimSpace(val.Value) == "" {
-			return "", false
-		}
-		return strings.TrimSpace(val.Value), true
-	}
-	if v, ok := get("GEMINI_API_KEY"); ok {
-		cfg.GeminiKey = v
-	}
-	if v, ok := get("GROQ_API_KEY"); ok {
-		cfg.GroqKey = v
-	}
-	if v, ok := get("OPENCODE_API_KEY"); ok {
-		cfg.OpencodeKey = v
-	}
-	if v, ok := get("NVIDIA_API_KEY"); ok {
-		cfg.NvidiaKey = v
-	}
-	if v, ok := get("OPENROUTER_API_KEY"); ok {
-		cfg.OpenRouterKey = v
-	}
-	if v, ok := get("GEMINI_MODELS"); ok {
-		cfg.GeminiModels = translate.ParseCSV(v)
-	}
-	if v, ok := get("GROQ_MODELS"); ok {
-		cfg.GroqModels = translate.ParseCSV(v)
-	}
-	if v, ok := get("OPENCODE_MODELS"); ok {
-		cfg.OpencodeModels = translate.ParseCSV(v)
-	}
-	if v, ok := get("NVIDIA_MODELS"); ok {
-		cfg.NvidiaModels = translate.ParseCSV(v)
-	}
-	if v, ok := get("OPENROUTER_MODELS"); ok {
-		cfg.OpenRouterModels = translate.ParseCSV(v)
-	}
-	if v, ok := get("TRANSLATION_FALLBACK_ORDER"); ok {
-		cfg.FallbackOrder = translate.ParseCSV(v)
-	}
-	if v, ok := get("TRANSLATION_PROMPT"); ok {
-		cfg.Prompt = v
-	}
-	if v, ok := get("SUBS_SOURCE_PREF_RU"); ok {
-		cfg.SourcePrefRU = translate.ParseCSV(v)
-	}
-	if val, err := s.configs.Get(ctx, "SUBS_YOUTUBE_ONLY"); err == nil && val != nil {
-		cfg.YouTubeOnly = settings.IsTruthy(val.Value)
-	}
-	if v, ok := get("TRANSLATION_TIMEOUT"); ok {
-		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
-			cfg.Timeout = time.Duration(sec) * time.Second
-		}
-	}
-	return translate.ApplyDefaults(cfg)
 }

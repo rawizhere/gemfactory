@@ -56,17 +56,13 @@ func (l *Limiter) Check(userID int64, limit int, window time.Duration) (allowed,
 	return true, false
 }
 
-// Allow is Check without the notify signal.
-func (l *Limiter) Allow(userID int64, limit int, window time.Duration) bool {
-	allowed, _ := l.Check(userID, limit, window)
-	return allowed
-}
-
 // RateLimit drops message updates from users exceeding the request quota.
 func RateLimit(l *Limiter, limit int, window time.Duration) th.Handler {
 	return func(ctx *th.Context, update telego.Update) error {
-		if update.Message != nil && update.Message.From != nil && !l.Allow(update.Message.From.ID, limit, window) {
-			return nil
+		if update.Message != nil && update.Message.From != nil {
+			if allowed, _ := l.Check(update.Message.From.ID, limit, window); !allowed {
+				return nil
+			}
 		}
 		return ctx.Next(update)
 	}

@@ -143,11 +143,11 @@ func TestCatalogCacheTTL(t *testing.T) {
 
 func TestIsSupportedProvider(t *testing.T) {
 	for _, p := range []string{ProviderOpenRouter, ProviderOpencode, ProviderNvidia, ProviderGroq, ProviderGemini} {
-		if !isSupportedProvider(p) {
+		if !IsProvider(p) {
 			t.Errorf("%s should be supported", p)
 		}
 	}
-	if isSupportedProvider("bogus") {
+	if IsProvider("bogus") {
 		t.Error("bogus should not be supported")
 	}
 }

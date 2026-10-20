@@ -105,12 +105,6 @@ func (s *Service) SetConcurrency(n int) {
 	s.logger.Info("downloader concurrency updated", zap.Int("concurrency", n))
 }
 
-func (s *Service) Concurrency() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.concurrency
-}
-
 func (s *Service) acquireSlot() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -745,21 +739,13 @@ func (s *Service) GetEncodeOptions(ctx context.Context, hasSubs bool) EncodeOpti
 	if hasSubs {
 		crfKey = "SUBS_CRF"
 	}
-	crf := s.getConfigValue(ctx, crfKey, "20")
-	preset := s.getConfigValue(ctx, "CLIP_PRESET", "fast")
-	audioBitrate := s.getConfigValue(ctx, "CLIP_AUDIO_BITRATE", "192k")
-	maxFileMB := settings.New(s.configs).Int(ctx, "TG_FILE_LIMIT_MB", 49)
-
+	cfg := settings.New(s.configs)
 	return EncodeOptions{
-		CRF:          crf,
-		Preset:       preset,
-		AudioBitrate: audioBitrate,
-		MaxFileMB:    maxFileMB,
+		CRF:          cfg.Value(ctx, crfKey, "20"),
+		Preset:       cfg.Value(ctx, "CLIP_PRESET", "fast"),
+		AudioBitrate: cfg.Value(ctx, "CLIP_AUDIO_BITRATE", "192k"),
+		MaxFileMB:    cfg.Int(ctx, "TG_FILE_LIMIT_MB", 49),
 	}
-}
-
-func (s *Service) getConfigValue(ctx context.Context, key, defaultVal string) string {
-	return settings.New(s.configs).Value(ctx, key, defaultVal)
 }
 
 // resolveSegmentBounds clamps the requested interval to the actual video length and enforces the duration limit.

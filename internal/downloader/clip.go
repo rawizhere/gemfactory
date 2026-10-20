@@ -28,37 +28,29 @@ var ffmpegSectionSizeRe = regexp.MustCompile(`size=\s*([^\s]+)`)
 var ffmpegSectionSpeedRe = regexp.MustCompile(`speed=\s*([^\s]+)`)
 var ffmpegSectionBitrateRe = regexp.MustCompile(`bitrate=\s*([^\s]+)`)
 
+// FormatHumanSize renders a yt-dlp/ffmpeg size (binary units) as KB, MB or GB.
 func FormatHumanSize(raw string) string {
 	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
+	lower := strings.ToLower(raw)
+	num := strings.TrimRight(lower, "kmgib")
+	unit := lower[len(num):]
+	kib, err := strconv.ParseFloat(strings.TrimSpace(num), 64)
+	if err != nil || unit == "" {
+		return raw
 	}
-	rawLower := strings.ToLower(raw)
-	if strings.HasSuffix(rawLower, "kib") || strings.HasSuffix(rawLower, "kb") {
-		valStr := strings.TrimSuffix(strings.TrimSuffix(rawLower, "kib"), "kb")
-		if v, err := strconv.ParseFloat(strings.TrimSpace(valStr), 64); err == nil {
-			if v >= 1024 {
-				return fmt.Sprintf("%.1f MB", v/1024)
-			}
-			return fmt.Sprintf("%.0f KB", v)
-		}
+	switch unit[0] {
+	case 'm':
+		kib *= 1024
+	case 'g':
+		kib *= 1024 * 1024
 	}
-	if strings.HasSuffix(rawLower, "mib") || strings.HasSuffix(rawLower, "mb") {
-		valStr := strings.TrimSuffix(strings.TrimSuffix(rawLower, "mib"), "mb")
-		if v, err := strconv.ParseFloat(strings.TrimSpace(valStr), 64); err == nil {
-			if v >= 1024 {
-				return fmt.Sprintf("%.1f GB", v/1024)
-			}
-			return fmt.Sprintf("%.1f MB", v)
-		}
+	switch {
+	case kib >= 1024*1024:
+		return fmt.Sprintf("%.1f GB", kib/(1024*1024))
+	case kib >= 1024:
+		return fmt.Sprintf("%.1f MB", kib/1024)
 	}
-	if strings.HasSuffix(rawLower, "gib") || strings.HasSuffix(rawLower, "gb") {
-		valStr := strings.TrimSuffix(strings.TrimSuffix(rawLower, "gib"), "gb")
-		if v, err := strconv.ParseFloat(strings.TrimSpace(valStr), 64); err == nil {
-			return fmt.Sprintf("%.1f GB", v)
-		}
-	}
-	return raw
+	return fmt.Sprintf("%.0f KB", kib)
 }
 
 // formatSelector picks the yt-dlp -f expression for the given quality tier.

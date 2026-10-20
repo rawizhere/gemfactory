@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"gemfactory/internal/config"
 	"gemfactory/internal/downloader"
+	"gemfactory/internal/handlers"
 	"gemfactory/internal/health"
 	"gemfactory/internal/keyboard"
 	"gemfactory/internal/notify"
@@ -60,7 +61,7 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	configRepo := storage.NewConfigRepository(db.GetDB(), logger)
+	configRepo := storage.NewConfigRepository(db.GetDB())
 	provider := settings.New(configRepo)
 	if cfg.BotToken == "" {
 		cfg.BotToken = provider.Value(ctx, "BOT_TOKEN", "")
@@ -82,7 +83,7 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 	botCtx, botCancel := context.WithCancel(ctx)
 
 	// yt-dlp downloader: resolve binary, start nightly update loop.
-	cookieRepo := storage.NewCookieRepository(db.GetDB(), logger)
+	cookieRepo := storage.NewCookieRepository(db.GetDB())
 	downloaderSvc := downloader.NewService(cookieRepo, cfg.AppDataDir, cfg.DownloadConcurrency, logger)
 	downloaderSvc.SetConfigRepo(configRepo)
 	if c, err := configRepo.Get(botCtx, "DOWNLOAD_CONCURRENCY"); err == nil && c != nil {
@@ -112,8 +113,8 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 	if cfg.WebEnabled {
 		webServer = web.NewServer(cfg.WebPort, logger, web.Deps{
 			AppCfg:     cfg,
-			Artists:    storage.NewArtistRepository(db.GetDB(), logger),
-			Releases:   storage.NewReleaseRepository(db.GetDB(), logger),
+			Artists:    storage.NewArtistRepository(db.GetDB()),
+			Releases:   storage.NewReleaseRepository(db.GetDB()),
 			Configs:    configRepo,
 			Cookies:    cookieRepo,
 			Downloads:  downloaderSvc,
@@ -185,7 +186,7 @@ func (b *Bot) Start(ctx context.Context) error {
 
 	b.logger.Info("Bot started successfully")
 
-	return b.telegram.Start(ctx, b.router.RegisterBotCommands(), b.router.RegisterRoutes)
+	return b.telegram.Start(ctx, handlers.BotCommands(), b.router.RegisterRoutes)
 }
 
 func (b *Bot) Stop() error {

@@ -14,58 +14,32 @@ import (
 // KeyCheckTimeout bounds a single provider key probe.
 const KeyCheckTimeout = 4 * time.Second
 
-// keyFor returns the configured API key for a provider, or "" when none is set.
-func (c Config) keyFor(provider string) string {
-	switch provider {
-	case ProviderGemini:
-		return c.GeminiKey
-	case ProviderGroq:
-		return c.GroqKey
-	case ProviderOpencode:
-		return c.OpencodeKey
-	case ProviderNvidia:
-		return c.NvidiaKey
-	case ProviderOpenRouter:
-		return c.OpenRouterKey
-	}
-	return ""
-}
-
 // ProbeKey does one lightweight request against the provider using its configured
 // key and reports whether the key was rejected with 401/403. It returns false when
 // no key is configured or the probe could not run (network error, timeout, etc.).
 func ProbeKey(ctx context.Context, provider string, cfg Config) bool {
-	if cfg.keyFor(provider) == "" {
+	key := cfg.Keys[provider]
+	if key == "" {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(ctx, KeyCheckTimeout)
 	defer cancel()
 
-	switch provider {
-	case ProviderGemini:
-		return probeGeminiKey(ctx, cfg.GeminiKey)
-	case ProviderGroq:
-		return probeOpenAIKey(ctx, groqBaseURL, cfg.GroqKey)
-	case ProviderOpencode:
-		return probeOpenAIKey(ctx, opencodeBaseURL, cfg.OpencodeKey)
-	case ProviderNvidia:
-		return probeOpenAIKey(ctx, nvidiaBaseURL, cfg.NvidiaKey)
-	case ProviderOpenRouter:
-		return probeOpenAIKey(ctx, openRouterBaseURL, cfg.OpenRouterKey)
+	if provider == ProviderGemini {
+		return probeGeminiKey(ctx, key)
 	}
-	return false
+	return probeOpenAIKey(ctx, providers[provider].baseURL, key)
 }
 
 // CheckBrokenKeys probes every provider that has a configured key and returns the
 // set of providers whose key was rejected with 401/403. Providers without a key
 // are omitted. The whole sweep is bounded by the caller's context.
 func CheckBrokenKeys(ctx context.Context, cfg Config) map[string]bool {
-	providers := []string{ProviderGemini, ProviderGroq, ProviderOpencode, ProviderNvidia, ProviderOpenRouter}
-	out := make(map[string]bool, len(providers))
+	out := make(map[string]bool, len(providerOrder))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	for _, p := range providers {
-		if cfg.keyFor(p) == "" {
+	for _, p := range providerOrder {
+		if cfg.Keys[p] == "" {
 			continue
 		}
 		wg.Add(1)

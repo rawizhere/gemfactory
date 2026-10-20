@@ -3,7 +3,6 @@ module gemfactory
 go 1.27
 
 require (
-	github.com/MercuryEngineering/CookieMonster v0.0.0-20180304172713-1584578b3403
 	github.com/PuerkitoBio/goquery v1.13.0
 	github.com/agnivade/levenshtein v1.2.1
 	github.com/caarlos0/env/v11 v11.4.1

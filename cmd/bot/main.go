@@ -14,11 +14,7 @@ import (
 )
 
 func main() {
-	l, err := logger.New()
-	if err != nil {
-		panic(err)
-	}
-	log := l.Logger
+	log := logger.New()
 
 	if err := run(log); err != nil {
 		log.Error("Bot stopped with error", zap.Error(err))

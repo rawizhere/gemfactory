@@ -9,38 +9,14 @@ import (
 	"time"
 
 	"github.com/uptrace/bun"
-	"go.uber.org/zap"
 )
 
 type ReleaseRepository struct {
-	db     *bun.DB
-	logger *zap.Logger
+	db *bun.DB
 }
 
-func NewReleaseRepository(db *bun.DB, logger *zap.Logger) *ReleaseRepository {
-	return &ReleaseRepository{
-		db:     db,
-		logger: logger,
-	}
-}
-
-func (r *ReleaseRepository) GetByID(ctx context.Context, id int) (*model.Release, error) {
-	release := new(model.Release)
-
-	err := r.db.NewSelect().
-		Model(release).
-		Relation("Artist").
-		Where("release_id = ?", id).
-		Scan(ctx)
-
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to query release by ID: %w", err)
-	}
-
-	return release, nil
+func NewReleaseRepository(db *bun.DB) *ReleaseRepository {
+	return &ReleaseRepository{db: db}
 }
 
 func (r *ReleaseRepository) GetAll(ctx context.Context) ([]model.Release, error) {
@@ -94,20 +70,6 @@ func (r *ReleaseRepository) GetByDateRange(ctx context.Context, start, end time.
 		Scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query releases by date range: %w", err)
-	}
-	return releases, nil
-}
-
-func (r *ReleaseRepository) GetActive(ctx context.Context) ([]model.Release, error) {
-	var releases []model.Release
-	err := r.db.NewSelect().
-		Model(&releases).
-		Relation("Artist").
-		Where("release.is_active = true").
-		Order("date ASC").
-		Scan(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query active releases: %w", err)
 	}
 	return releases, nil
 }
@@ -197,23 +159,4 @@ func (r *ReleaseRepository) DeleteByIDs(ctx context.Context, ids []int) (int, er
 	}
 	affected, _ := res.RowsAffected()
 	return int(affected), nil
-}
-
-func (r *ReleaseRepository) Upsert(ctx context.Context, release *model.Release) error {
-	_, err := r.db.NewInsert().
-		Model(release).
-		On("CONFLICT (artist_id, date, source_url) DO UPDATE").
-		Set("display_artist = EXCLUDED.display_artist").
-		Set("title = EXCLUDED.title").
-		Set("title_track = EXCLUDED.title_track").
-		Set("album_name = EXCLUDED.album_name").
-		Set("mv = EXCLUDED.mv").
-		Set("spotify = EXCLUDED.spotify").
-		Set("is_active = true").
-		Set("updated_at = CURRENT_TIMESTAMP").
-		Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to upsert release: %w", err)
-	}
-	return nil
 }

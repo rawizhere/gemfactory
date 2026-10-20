@@ -22,27 +22,25 @@ import (
 
 // Router dispatches telegram updates to handler methods through middleware.
 type Router struct {
-	handlers   *handlers.Handlers
-	middleware *middleware.Middleware
-	config     *config.Config
-	services   *service.Services
-	logger     *zap.Logger
+	handlers *handlers.Handlers
+	config   *config.Config
+	services *service.Services
+	logger   *zap.Logger
 }
 
 func NewRouter(services *service.Services, config *config.Config, keyboard *keyboard.Manager, logger *zap.Logger, tg *telegram.Client, downloads *downloader.Service) *Router {
 	return &Router{
-		handlers:   handlers.New(services, config, keyboard, logger, tg, downloads),
-		middleware: middleware.New(config, logger),
-		config:     config,
-		services:   services,
-		logger:     logger,
+		handlers: handlers.New(services, config, keyboard, logger, tg, downloads),
+		config:   config,
+		services: services,
+		logger:   logger,
 	}
 }
 
 // RegisterRoutes wires command and callback handlers; only the first matching route runs.
 // Handlers added via Use must call ctx.Next(update), otherwise the chain stops silently.
 func (r *Router) RegisterRoutes(bh *th.BotHandler) {
-	bh.Use(r.middleware.Handlers()...)
+	bh.Use(middleware.Handlers(r.logger)...)
 	bh.Use(r.rememberAdmin())
 
 	commandRoutes := []struct {
@@ -128,8 +126,8 @@ func (r *Router) rememberAdmin() th.Handler {
 			return ctx.Next(update)
 		}
 		chatID := strconv.FormatInt(m.Chat.ID, 10)
-		if stored, err := r.services.Config.Get(ctx.Context(), notify.AdminChatIDKey); err != nil || stored != chatID {
-			if err := r.services.Config.Update(ctx.Context(), notify.AdminChatIDKey, chatID); err != nil {
+		if stored, err := r.services.Configs.Get(ctx.Context(), notify.AdminChatIDKey); err != nil || stored == nil || stored.Value != chatID {
+			if err := r.services.Configs.Set(ctx.Context(), notify.AdminChatIDKey, chatID); err != nil {
 				r.logger.Warn("Failed to store admin chat id", zap.Error(err))
 			}
 		}
@@ -226,8 +224,4 @@ func (r *Router) isClipHelpTopic(message *telego.Message) bool {
 	default:
 		return false
 	}
-}
-
-func (r *Router) RegisterBotCommands() []telego.BotCommand {
-	return r.handlers.RegisterBotCommands()
 }

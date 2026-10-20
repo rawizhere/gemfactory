@@ -7,23 +7,6 @@ import (
 	"gemfactory/internal/translate"
 )
 
-// keyForProvider returns the configured API key for a catalog provider.
-func keyForProvider(tc translate.Config, provider string) string {
-	switch provider {
-	case translate.ProviderGroq:
-		return tc.GroqKey
-	case translate.ProviderOpencode:
-		return tc.OpencodeKey
-	case translate.ProviderNvidia:
-		return tc.NvidiaKey
-	case translate.ProviderGemini:
-		return tc.GeminiKey
-	case translate.ProviderOpenRouter:
-		return tc.OpenRouterKey
-	}
-	return ""
-}
-
 // getModels returns a provider catalog with cached availability statuses.
 func (s *Server) getModels(w http.ResponseWriter, r *http.Request) {
 	provider := r.URL.Query().Get("provider")
@@ -32,7 +15,7 @@ func (s *Server) getModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	refresh := r.URL.Query().Get("refresh") == "true"
-	apiKey := keyForProvider(s.translationConfig(), provider)
+	apiKey := s.translationConfig(r.Context()).Keys[provider]
 
 	models, err := translate.GetProviderCatalog(r.Context(), provider, apiKey, refresh)
 	if err != nil {
@@ -60,7 +43,7 @@ func (s *Server) checkModels(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "models list is required", http.StatusBadRequest)
 		return
 	}
-	apiKey := keyForProvider(s.translationConfig(), req.Provider)
+	apiKey := s.translationConfig(r.Context()).Keys[req.Provider]
 
 	statuses, err := translate.CheckModelsAvailability(r.Context(), req.Provider, apiKey, req.Models)
 	if err != nil {

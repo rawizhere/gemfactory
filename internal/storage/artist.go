@@ -8,19 +8,14 @@ import (
 	"gemfactory/internal/model"
 
 	"github.com/uptrace/bun"
-	"go.uber.org/zap"
 )
 
 type ArtistRepository struct {
-	db     *bun.DB
-	logger *zap.Logger
+	db *bun.DB
 }
 
-func NewArtistRepository(db *bun.DB, logger *zap.Logger) *ArtistRepository {
-	return &ArtistRepository{
-		db:     db,
-		logger: logger,
-	}
+func NewArtistRepository(db *bun.DB) *ArtistRepository {
+	return &ArtistRepository{db: db}
 }
 
 func (r *ArtistRepository) GetByID(ctx context.Context, id int) (*model.Artist, error) {

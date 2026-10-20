@@ -9,16 +9,14 @@ import (
 	"strings"
 
 	"github.com/uptrace/bun"
-	"go.uber.org/zap"
 )
 
 type CookieRepository struct {
-	db     *bun.DB
-	logger *zap.Logger
+	db *bun.DB
 }
 
-func NewCookieRepository(db *bun.DB, logger *zap.Logger) model.CookieRepository {
-	return &CookieRepository{db: db, logger: logger}
+func NewCookieRepository(db *bun.DB) model.CookieRepository {
+	return &CookieRepository{db: db}
 }
 
 func (r *CookieRepository) GetByDomain(ctx context.Context, domain string) (*model.Cookie, error) {

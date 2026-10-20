@@ -2,7 +2,8 @@
 package translate
 
 import (
-	"os"
+	"context"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,31 @@ const (
 	ProviderNvidia     = "nvidia"
 	ProviderOpenRouter = "openrouter"
 )
+
+// provider describes one translation backend; baseURL is empty for Gemini, which uses its own SDK.
+type provider struct {
+	baseURL  string
+	defaults []string
+}
+
+var providers = map[string]provider{
+	ProviderGemini:     {"", DefaultGeminiModels},
+	ProviderGroq:       {"https://api.groq.com/openai/v1", DefaultGroqModels},
+	ProviderOpencode:   {"https://opencode.ai/zen/v1", DefaultOpencodeModels},
+	ProviderNvidia:     {"https://integrate.api.nvidia.com/v1", DefaultNvidiaModels},
+	ProviderOpenRouter: {"https://openrouter.ai/api/v1", DefaultOpenRouterModels},
+}
+
+// providerOrder is the default fallback chain.
+var providerOrder = []string{ProviderGemini, ProviderOpenRouter, ProviderOpencode, ProviderNvidia, ProviderGroq}
+
+// modelsFor returns the configured model chain for p, or its built-in default.
+func (c Config) modelsFor(p string) []string {
+	if m := c.Models[p]; len(m) > 0 {
+		return m
+	}
+	return providers[p].defaults
+}
 
 // DefaultOpencodeModels is the free-model fallback chain on OpenCode Zen.
 var DefaultOpencodeModels = []string{
@@ -119,21 +145,13 @@ const DefaultSourcePrefRU = "en,ko"
 
 // Config holds the provider fallback order, API keys, models, custom prompt and LLM request timeout.
 type Config struct {
-	YouTubeOnly      bool // use YouTube auto-translate, skip all LLM providers
-	GeminiKey        string
-	GroqKey          string
-	OpencodeKey      string
-	NvidiaKey        string
-	OpenRouterKey    string
-	GeminiModels     []string
-	GroqModels       []string
-	OpencodeModels   []string
-	NvidiaModels     []string
-	OpenRouterModels []string
-	FallbackOrder    []string
-	Prompt           string
-	SourcePrefRU     []string // preferred source languages when translating into ru
-	Timeout          time.Duration
+	YouTubeOnly   bool                // use YouTube auto-translate, skip all LLM providers
+	Keys          map[string]string   // provider -> API key
+	Models        map[string][]string // provider -> model chain
+	FallbackOrder []string
+	Prompt        string
+	SourcePrefRU  []string // preferred source languages when translating into ru
+	Timeout       time.Duration
 }
 
 var DefaultGeminiModels = []string{
@@ -160,131 +178,59 @@ func ParseCSV(s string) []string {
 	return res
 }
 
-// DefaultConfig resolves the translation config from env with built-in defaults.
-func DefaultConfig() Config {
+// ResolveConfig reads the translation config with the DB -> env -> default precedence.
+func ResolveConfig(ctx context.Context, s settings.Provider) Config {
 	cfg := Config{
-		GeminiKey:        strings.TrimSpace(os.Getenv("GEMINI_API_KEY")),
-		GroqKey:          strings.TrimSpace(os.Getenv("GROQ_API_KEY")),
-		OpencodeKey:      strings.TrimSpace(os.Getenv("OPENCODE_API_KEY")),
-		NvidiaKey:        strings.TrimSpace(os.Getenv("NVIDIA_API_KEY")),
-		OpenRouterKey:    strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")),
-		GeminiModels:     ParseCSV(os.Getenv("GEMINI_MODELS")),
-		GroqModels:       ParseCSV(os.Getenv("GROQ_MODELS")),
-		OpencodeModels:   ParseCSV(os.Getenv("OPENCODE_MODELS")),
-		NvidiaModels:     ParseCSV(os.Getenv("NVIDIA_MODELS")),
-		OpenRouterModels: ParseCSV(os.Getenv("OPENROUTER_MODELS")),
-		FallbackOrder:    ParseCSV(os.Getenv("TRANSLATION_FALLBACK_ORDER")),
-		Prompt:           strings.TrimSpace(os.Getenv("TRANSLATION_PROMPT")),
-		SourcePrefRU:     ParseCSV(os.Getenv("SUBS_SOURCE_PREF_RU")),
+		YouTubeOnly:   s.Bool(ctx, "SUBS_YOUTUBE_ONLY", false),
+		Keys:          map[string]string{},
+		Models:        map[string][]string{},
+		FallbackOrder: ParseCSV(s.Value(ctx, "TRANSLATION_FALLBACK_ORDER", "")),
+		Prompt:        s.Value(ctx, "TRANSLATION_PROMPT", DefaultTranslationPrompt),
+		SourcePrefRU:  ParseCSV(s.Value(ctx, "SUBS_SOURCE_PREF_RU", DefaultSourcePrefRU)),
+		Timeout:       parseTimeout(s.Value(ctx, "TRANSLATION_TIMEOUT", "")),
 	}
-	cfg.YouTubeOnly = settings.IsTruthy(os.Getenv("SUBS_YOUTUBE_ONLY"))
-	return ApplyDefaults(cfg)
-}
-
-// ResolveConfig layers DB-backed settings on top of env defaults.
-func ResolveConfig(getter func(string) (string, bool)) Config {
-	cfg := DefaultConfig()
-	if getter == nil {
-		return cfg
-	}
-	if v, ok := getter("GEMINI_API_KEY"); ok {
-		cfg.GeminiKey = v
-	}
-	if v, ok := getter("GROQ_API_KEY"); ok {
-		cfg.GroqKey = v
-	}
-	if v, ok := getter("OPENCODE_API_KEY"); ok {
-		cfg.OpencodeKey = v
-	}
-	if v, ok := getter("NVIDIA_API_KEY"); ok {
-		cfg.NvidiaKey = v
-	}
-	if v, ok := getter("OPENROUTER_API_KEY"); ok {
-		cfg.OpenRouterKey = v
-	}
-	if v, ok := getter("GEMINI_MODELS"); ok {
-		cfg.GeminiModels = ParseCSV(v)
-	}
-	if v, ok := getter("GROQ_MODELS"); ok {
-		cfg.GroqModels = ParseCSV(v)
-	}
-	if v, ok := getter("OPENCODE_MODELS"); ok {
-		cfg.OpencodeModels = ParseCSV(v)
-	}
-	if v, ok := getter("NVIDIA_MODELS"); ok {
-		cfg.NvidiaModels = ParseCSV(v)
-	}
-	if v, ok := getter("OPENROUTER_MODELS"); ok {
-		cfg.OpenRouterModels = ParseCSV(v)
-	}
-	if v, ok := getter("TRANSLATION_FALLBACK_ORDER"); ok {
-		cfg.FallbackOrder = ParseCSV(v)
-	}
-	if v, ok := getter("TRANSLATION_PROMPT"); ok {
-		cfg.Prompt = v
-	}
-	if v, ok := getter("SUBS_SOURCE_PREF_RU"); ok {
-		cfg.SourcePrefRU = ParseCSV(v)
-	}
-	if v, ok := getter("SUBS_YOUTUBE_ONLY"); ok {
-		cfg.YouTubeOnly = settings.IsTruthy(v)
-	}
-	if v, ok := getter("TRANSLATION_TIMEOUT"); ok {
-		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
-			cfg.Timeout = time.Duration(sec) * time.Second
-		}
-	}
-	return ApplyDefaults(cfg)
-}
-
-func ApplyDefaults(cfg Config) Config {
-	if len(cfg.GeminiModels) == 0 {
-		cfg.GeminiModels = DefaultGeminiModels
-	}
-	if len(cfg.GroqModels) == 0 {
-		cfg.GroqModels = DefaultGroqModels
-	}
-	if len(cfg.OpencodeModels) == 0 {
-		cfg.OpencodeModels = DefaultOpencodeModels
-	}
-	if len(cfg.NvidiaModels) == 0 {
-		cfg.NvidiaModels = DefaultNvidiaModels
-	}
-	if len(cfg.OpenRouterModels) == 0 {
-		cfg.OpenRouterModels = DefaultOpenRouterModels
-	}
-	if len(cfg.SourcePrefRU) == 0 {
-		cfg.SourcePrefRU = ParseCSV(DefaultSourcePrefRU)
-	}
-	if cfg.Prompt == "" {
-		cfg.Prompt = DefaultTranslationPrompt
-	}
-	if cfg.Timeout <= 0 {
-		cfg.Timeout = defaultTimeout()
+	for _, p := range providerOrder {
+		env := strings.ToUpper(p)
+		cfg.Keys[p] = s.Value(ctx, env+"_API_KEY", "")
+		cfg.Models[p] = ParseCSV(s.Value(ctx, env+"_MODELS", strings.Join(providers[p].defaults, ",")))
 	}
 	return cfg
 }
 
-// defaultTimeout bounds a single LLM request; a whole subtitle file goes out in one call.
-func defaultTimeout() time.Duration {
-	if v, err := time.ParseDuration(os.Getenv("TRANSLATION_TIMEOUT")); err == nil && v > 0 {
-		return v
+const defaultTimeout = 180 * time.Second
+
+// parseTimeout accepts seconds (web panel) or a Go duration (env, e.g. "3m").
+func parseTimeout(v string) time.Duration {
+	if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
+		return time.Duration(sec) * time.Second
 	}
-	return 180 * time.Second
+	if d, err := time.ParseDuration(v); err == nil && d > 0 {
+		return d
+	}
+	return defaultTimeout
 }
 
 func BuildFallbackChain(cfg Config) []string {
-	if len(cfg.FallbackOrder) > 0 {
-		var chain []string
-		for _, p := range cfg.FallbackOrder {
-			p = strings.ToLower(strings.TrimSpace(p))
-			if p == ProviderGemini || p == ProviderGroq || p == ProviderOpencode || p == ProviderNvidia || p == ProviderOpenRouter {
-				chain = append(chain, p)
-			}
-		}
-		if len(chain) > 0 {
-			return chain
+	var chain []string
+	for _, p := range cfg.FallbackOrder {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if _, ok := providers[p]; ok {
+			chain = append(chain, p)
 		}
 	}
-	return []string{ProviderGemini, ProviderOpenRouter, ProviderOpencode, ProviderNvidia, ProviderGroq}
+	if len(chain) > 0 {
+		return chain
+	}
+	return AllProviders()
+}
+
+// AllProviders lists every provider in default fallback order.
+func AllProviders() []string {
+	return slices.Clone(providerOrder)
+}
+
+// IsProvider reports whether p names a known provider.
+func IsProvider(p string) bool {
+	_, ok := providers[p]
+	return ok
 }

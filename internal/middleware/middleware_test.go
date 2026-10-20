@@ -37,11 +37,16 @@ func TestLimiterAllow(t *testing.T) {
 	l := NewLimiter()
 
 	for i := 0; i < 3; i++ {
-		require.True(t, l.Allow(1, 3, 50*time.Millisecond), "request %d must be allowed", i+1)
+		require.True(t, allow(l, 1, 3, 50*time.Millisecond), "request %d must be allowed", i+1)
 	}
-	require.False(t, l.Allow(1, 3, 50*time.Millisecond), "4th request within window must be rejected")
-	require.True(t, l.Allow(2, 3, 50*time.Millisecond), "other user must not be affected")
+	require.False(t, allow(l, 1, 3, 50*time.Millisecond), "4th request within window must be rejected")
+	require.True(t, allow(l, 2, 3, 50*time.Millisecond), "other user must not be affected")
 
 	time.Sleep(60 * time.Millisecond)
-	require.True(t, l.Allow(1, 3, 50*time.Millisecond), "request in a fresh window must be allowed")
+	require.True(t, allow(l, 1, 3, 50*time.Millisecond), "request in a fresh window must be allowed")
+}
+
+func allow(l *Limiter, userID int64, limit int, window time.Duration) bool {
+	ok, _ := l.Check(userID, limit, window)
+	return ok
 }

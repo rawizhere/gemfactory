@@ -8,13 +8,6 @@ import (
 )
 
 func TestNewLogger(t *testing.T) {
-	t.Setenv("LOG_LEVEL", "debug")
-	l, err := New()
-	require.NoError(t, err, "failed to create logger")
-	require.Equal(t, zapcore.DebugLevel, l.Level.Level())
-}
-
-func TestGetLogLevel(t *testing.T) {
 	tests := []struct {
 		env  string
 		want zapcore.Level
@@ -25,10 +18,11 @@ func TestGetLogLevel(t *testing.T) {
 		{"error", zapcore.ErrorLevel},
 		{"fatal", zapcore.FatalLevel},
 		{"unknown", zapcore.InfoLevel},
+		{"", zapcore.InfoLevel},
 	}
 
 	for _, tt := range tests {
 		t.Setenv("LOG_LEVEL", tt.env)
-		require.Equal(t, tt.want, getLogLevel(), "getLogLevel() for %q", tt.env)
+		require.Equal(t, tt.want, zapcore.LevelOf(New().Core()), "level for %q", tt.env)
 	}
 }

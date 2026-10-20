@@ -43,12 +43,6 @@ func TestCleanArtistName(t *testing.T) {
 	require.Equal(t, "BLACKPINK extra", cleanArtistName(" BLACKPINK \u202bextra\u202c "))
 }
 
-func TestMonthNumber(t *testing.T) {
-	require.Equal(t, 4, monthNumber("April"))
-	require.Equal(t, 12, monthNumber(" december "))
-	require.Zero(t, monthNumber("Foo"), "unexpected monthNumber results")
-}
-
 func TestCleanAlbumURL(t *testing.T) {
 	require.Equal(t, "https://kpopofficial.com/album/x/", cleanAlbumURL("https://kpopofficial.com/album/x/?utm=1#top"))
 }

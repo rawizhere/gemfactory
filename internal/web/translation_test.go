@@ -26,7 +26,7 @@ func TestRestrictTestToModel(t *testing.T) {
 	}{
 		{
 			name:      "empty model keeps full chain",
-			tc:        translate.Config{GeminiModels: []string{"a", "b"}, OpencodeModels: []string{"c"}},
+			tc:        translate.Config{Models: map[string][]string{translate.ProviderGemini: {"a", "b"}, translate.ProviderOpencode: {"c"}}},
 			chain:     base,
 			model:     "",
 			wantChain: base,
@@ -34,7 +34,7 @@ func TestRestrictTestToModel(t *testing.T) {
 		},
 		{
 			name:      "malformed model keeps full chain",
-			tc:        translate.Config{OpencodeModels: []string{"c"}},
+			tc:        translate.Config{Models: map[string][]string{translate.ProviderOpencode: {"c"}}},
 			chain:     base,
 			model:     "opencode-no-slash",
 			wantChain: base,
@@ -49,7 +49,7 @@ func TestRestrictTestToModel(t *testing.T) {
 		},
 		{
 			name:      "restricts to a present provider and single model",
-			tc:        translate.Config{OpencodeModels: []string{"old"}},
+			tc:        translate.Config{Models: map[string][]string{translate.ProviderOpencode: {"old"}}},
 			chain:     base,
 			model:     "opencode/nemotron-3.5-lightning-free",
 			wantChain: []string{translate.ProviderOpencode},
@@ -57,7 +57,7 @@ func TestRestrictTestToModel(t *testing.T) {
 		},
 		{
 			name:      "provider missing from chain is still probed",
-			tc:        translate.Config{GroqModels: []string{"x"}},
+			tc:        translate.Config{Models: map[string][]string{translate.ProviderGroq: {"x"}}},
 			chain:     []string{translate.ProviderGemini},
 			model:     "groq/llama",
 			wantChain: []string{translate.ProviderGroq},
@@ -73,19 +73,7 @@ func TestRestrictTestToModel(t *testing.T) {
 				t.Fatalf("chain = %v, want %v", got, c.wantChain)
 			}
 			for p, want := range c.wantModel {
-				var gotModels []string
-				switch p {
-				case translate.ProviderGemini:
-					gotModels = tc.GeminiModels
-				case translate.ProviderGroq:
-					gotModels = tc.GroqModels
-				case translate.ProviderOpencode:
-					gotModels = tc.OpencodeModels
-				case translate.ProviderNvidia:
-					gotModels = tc.NvidiaModels
-				case translate.ProviderOpenRouter:
-					gotModels = tc.OpenRouterModels
-				}
+				gotModels := tc.Models[p]
 				if !reflect.DeepEqual(gotModels, want) {
 					t.Fatalf("provider %s models = %v, want %v", p, gotModels, want)
 				}

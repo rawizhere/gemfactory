@@ -34,7 +34,8 @@ func New(services *service.Services, config *config.Config, keyboard *keyboard.M
 	}
 }
 
-func (h *Handlers) RegisterBotCommands() []telego.BotCommand {
+// BotCommands is the command menu shown in Telegram clients.
+func BotCommands() []telego.BotCommand {
 	return []telego.BotCommand{
 		{Command: "start", Description: "Start the bot"},
 		{Command: "help", Description: "Show help and command usage"},

@@ -41,8 +41,15 @@ func stripMarkdownBold(s string) string {
 	return mdBoldRe.ReplaceAllString(s, "$1")
 }
 
-func TranslateWithGemini(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction, videoTitle string, timeout time.Duration, onAttempt func(string), models ...[]string) ([]string, string, error) {
-	geminiModels := firstModels(models, DefaultGeminiModels)
+// Translate runs provider's model chain from cfg over texts.
+func Translate(ctx context.Context, provider string, cfg Config, texts []string, targetLang, sourceLang, videoTitle string, onAttempt func(string)) ([]string, string, error) {
+	if provider == ProviderGemini {
+		return translateGemini(ctx, texts, targetLang, sourceLang, cfg.Keys[provider], cfg.Prompt, videoTitle, cfg.Timeout, onAttempt, cfg.modelsFor(provider))
+	}
+	return translateOpenAICompatible(ctx, provider, providers[provider].baseURL, cfg.Keys[provider], cfg.modelsFor(provider), texts, targetLang, sourceLang, cfg.Prompt, videoTitle, cfg.Timeout, onAttempt)
+}
+
+func translateGemini(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction, videoTitle string, timeout time.Duration, onAttempt func(string), geminiModels []string) ([]string, string, error) {
 	jsonMsg := buildTranslateUserMsg(texts, targetLang, sourceLang, videoTitle, outputJSON)
 	numberedMsg := buildTranslateUserMsg(texts, targetLang, sourceLang, videoTitle, outputNumbered)
 
@@ -182,47 +189,12 @@ func geminiAPIErrorDetails(err error) (int, string) {
 	return 0, strings.ToLower(err.Error())
 }
 
-// OpenAI-compatible endpoints used by the translation providers.
-const (
-	groqBaseURL       = "https://api.groq.com/openai/v1"
-	opencodeBaseURL   = "https://opencode.ai/zen/v1"
-	nvidiaBaseURL     = "https://integrate.api.nvidia.com/v1"
-	openRouterBaseURL = "https://openrouter.ai/api/v1"
-)
-
-func TranslateWithGroq(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction, videoTitle string, timeout time.Duration, onAttempt func(string), models ...[]string) ([]string, string, error) {
-	return translateOpenAICompatible(ctx, ProviderGroq, groqBaseURL, apiKey, firstModels(models, DefaultGroqModels), texts, targetLang, sourceLang, systemInstruction, videoTitle, timeout, onAttempt)
-}
-
-// TranslateWithOpencode calls OpenCode Zen (OpenAI-compatible) with the given free-model chain.
-func TranslateWithOpencode(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction, videoTitle string, timeout time.Duration, onAttempt func(string), models ...[]string) ([]string, string, error) {
-	return translateOpenAICompatible(ctx, ProviderOpencode, opencodeBaseURL, apiKey, firstModels(models, DefaultOpencodeModels), texts, targetLang, sourceLang, systemInstruction, videoTitle, timeout, onAttempt)
-}
-
-// TranslateWithNvidia calls NVIDIA NIM (OpenAI-compatible) with the given model chain.
-func TranslateWithNvidia(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction, videoTitle string, timeout time.Duration, onAttempt func(string), models ...[]string) ([]string, string, error) {
-	return translateOpenAICompatible(ctx, ProviderNvidia, nvidiaBaseURL, apiKey, firstModels(models, DefaultNvidiaModels), texts, targetLang, sourceLang, systemInstruction, videoTitle, timeout, onAttempt)
-}
-
-// TranslateWithOpenRouter calls OpenRouter (OpenAI-compatible) with the given model chain.
-func TranslateWithOpenRouter(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction, videoTitle string, timeout time.Duration, onAttempt func(string), models ...[]string) ([]string, string, error) {
-	return translateOpenAICompatible(ctx, ProviderOpenRouter, openRouterBaseURL, apiKey, firstModels(models, DefaultOpenRouterModels), texts, targetLang, sourceLang, systemInstruction, videoTitle, timeout, onAttempt)
-}
-
 // requestTimeout falls back to the built-in default when the caller passes no explicit value.
 func requestTimeout(timeout time.Duration) time.Duration {
 	if timeout > 0 {
 		return timeout
 	}
-	return defaultTimeout()
-}
-
-// firstModels returns the caller-supplied model chain or the default one.
-func firstModels(models []([]string), def []string) []string {
-	if len(models) > 0 && len(models[0]) > 0 {
-		return models[0]
-	}
-	return def
+	return defaultTimeout
 }
 
 // translateOpenAICompatible walks an OpenAI-compatible model chain until one produces parseable output.
@@ -509,60 +481,23 @@ func missingLines(result []string) []int {
 
 // Complete walks the fallback chain for a free-form chat completion.
 func Complete(ctx context.Context, systemPrompt, userMsg string, cfg Config) (string, string, error) {
-	chain := BuildFallbackChain(cfg)
 	var lastErr error
-	for _, provider := range chain {
-		switch provider {
-		case ProviderOpenRouter:
-			if cfg.OpenRouterKey == "" {
-				continue
-			}
-			text, model, err := completeOpenAICompatible(ctx, ProviderOpenRouter, openRouterBaseURL, cfg.OpenRouterKey, cfg.OpenRouterModels, systemPrompt, userMsg, cfg.Timeout)
-			if err == nil && strings.TrimSpace(text) != "" {
-				return text, ProviderOpenRouter + "/" + model, nil
-			}
-			lastErr = err
-
-		case ProviderOpencode:
-			if cfg.OpencodeKey == "" {
-				continue
-			}
-			text, model, err := completeOpenAICompatible(ctx, ProviderOpencode, opencodeBaseURL, cfg.OpencodeKey, cfg.OpencodeModels, systemPrompt, userMsg, cfg.Timeout)
-			if err == nil && strings.TrimSpace(text) != "" {
-				return text, ProviderOpencode + "/" + model, nil
-			}
-			lastErr = err
-
-		case ProviderNvidia:
-			if cfg.NvidiaKey == "" {
-				continue
-			}
-			text, model, err := completeOpenAICompatible(ctx, ProviderNvidia, nvidiaBaseURL, cfg.NvidiaKey, cfg.NvidiaModels, systemPrompt, userMsg, cfg.Timeout)
-			if err == nil && strings.TrimSpace(text) != "" {
-				return text, ProviderNvidia + "/" + model, nil
-			}
-			lastErr = err
-
-		case ProviderGroq:
-			if cfg.GroqKey == "" {
-				continue
-			}
-			text, model, err := completeOpenAICompatible(ctx, ProviderGroq, groqBaseURL, cfg.GroqKey, cfg.GroqModels, systemPrompt, userMsg, cfg.Timeout)
-			if err == nil && strings.TrimSpace(text) != "" {
-				return text, ProviderGroq + "/" + model, nil
-			}
-			lastErr = err
-
-		case ProviderGemini:
-			if cfg.GeminiKey == "" {
-				continue
-			}
-			text, model, err := completeGemini(ctx, cfg.GeminiKey, cfg.GeminiModels, systemPrompt, userMsg, cfg.Timeout)
-			if err == nil && strings.TrimSpace(text) != "" {
-				return text, ProviderGemini + "/" + model, nil
-			}
-			lastErr = err
+	for _, provider := range BuildFallbackChain(cfg) {
+		key := cfg.Keys[provider]
+		if key == "" {
+			continue
 		}
+		var text, model string
+		var err error
+		if provider == ProviderGemini {
+			text, model, err = completeGemini(ctx, key, cfg.modelsFor(provider), systemPrompt, userMsg, cfg.Timeout)
+		} else {
+			text, model, err = completeOpenAICompatible(ctx, provider, providers[provider].baseURL, key, cfg.modelsFor(provider), systemPrompt, userMsg, cfg.Timeout)
+		}
+		if err == nil && strings.TrimSpace(text) != "" {
+			return text, provider + "/" + model, nil
+		}
+		lastErr = err
 	}
 	if lastErr != nil {
 		return "", "", lastErr
@@ -610,8 +545,7 @@ func completeOpenAICompatible(ctx context.Context, provider, baseURL, apiKey str
 	return "", "", lastErr
 }
 
-func completeGemini(ctx context.Context, apiKey string, models []string, systemPrompt, userMsg string, timeout time.Duration) (string, string, error) {
-	geminiModels := firstModels([]([]string){models}, DefaultGeminiModels)
+func completeGemini(ctx context.Context, apiKey string, geminiModels []string, systemPrompt, userMsg string, timeout time.Duration) (string, string, error) {
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:     apiKey,
 		Backend:    genai.BackendGeminiAPI,

@@ -14,9 +14,7 @@ import (
 )
 
 type Postgres struct {
-	db     *bun.DB
-	sqldb  *sql.DB
-	logger *zap.Logger
+	db *bun.DB
 }
 
 func NewPostgres(ctx context.Context, databaseURL string, logger *zap.Logger) (*Postgres, error) {
@@ -84,11 +82,7 @@ func NewPostgres(ctx context.Context, databaseURL string, logger *zap.Logger) (*
 		return nil, err
 	}
 
-	return &Postgres{
-		db:     db,
-		sqldb:  sqldb,
-		logger: logger,
-	}, nil
+	return &Postgres{db: db}, nil
 }
 
 func (p *Postgres) Close() error {

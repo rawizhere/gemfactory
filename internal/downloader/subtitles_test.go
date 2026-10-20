@@ -397,3 +397,19 @@ func TestVTTTextLines(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte("WEBVTT\nKind: captions\nLanguage: en\n\n00:00:00.000 --> 00:00:01.000\nПривет\nмир\n\n00:00:01.000 --> 00:00:02.000\nПока\n"), 0644))
 	require.Equal(t, []string{"Привет", "мир", "Пока"}, vttTextLines(path))
 }
+
+func TestParseNetscapeCookies(t *testing.T) {
+	content := "# Netscape HTTP Cookie File\n\n" +
+		".youtube.com\tTRUE\t/\tTRUE\t1893456000\tSID\tabc\n" +
+		"youtube.com\tFALSE\t/\tFALSE\t0\tEMPTY\n" +
+		"short\tline\n"
+	cookies := ParseNetscapeCookies(content)
+	require.Len(t, cookies, 2)
+	require.Equal(t, ".youtube.com", cookies[0].Domain)
+	require.Equal(t, "SID", cookies[0].Name)
+	require.Equal(t, "abc", cookies[0].Value)
+	require.True(t, cookies[0].Secure)
+	require.Equal(t, int64(1893456000), cookies[0].Expires.Unix())
+	require.Equal(t, "EMPTY", cookies[1].Name)
+	require.True(t, cookies[1].Expires.IsZero())
+}

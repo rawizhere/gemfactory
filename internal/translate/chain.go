@@ -15,67 +15,17 @@ func Chain(ctx context.Context, texts []string, targetLang, sourceLang string, c
 	if len(texts) == 0 {
 		return nil, "", nil
 	}
-	chain := BuildFallbackChain(cfg)
-	instr := cfg.Prompt
-
 	var lastErr error
-	for _, provider := range chain {
-		switch provider {
-		case ProviderOpencode:
-			if cfg.OpencodeKey == "" {
-				continue
-			}
-			translated, model, err := TranslateWithOpencode(ctx, texts, targetLang, sourceLang, cfg.OpencodeKey, instr, videoTitle, cfg.Timeout, onAttempt, cfg.OpencodeModels)
-			if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
-				return preserveSpeakerTags(texts, translated), ProviderOpencode + "/" + model, nil
-			}
-			logTranslateFailure(log, provider, model, err, texts, translated, targetLang)
-			lastErr = fmt.Errorf("opencode (%s): %w", modelOrEmpty(model), errIf(err))
-
-		case ProviderNvidia:
-			if cfg.NvidiaKey == "" {
-				continue
-			}
-			translated, model, err := TranslateWithNvidia(ctx, texts, targetLang, sourceLang, cfg.NvidiaKey, instr, videoTitle, cfg.Timeout, onAttempt, cfg.NvidiaModels)
-			if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
-				return preserveSpeakerTags(texts, translated), ProviderNvidia + "/" + model, nil
-			}
-			logTranslateFailure(log, provider, model, err, texts, translated, targetLang)
-			lastErr = fmt.Errorf("nvidia (%s): %w", modelOrEmpty(model), errIf(err))
-
-		case ProviderGemini:
-			if cfg.GeminiKey == "" {
-				continue
-			}
-			translated, model, err := TranslateWithGemini(ctx, texts, targetLang, sourceLang, cfg.GeminiKey, instr, videoTitle, cfg.Timeout, onAttempt, cfg.GeminiModels)
-			if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
-				return preserveSpeakerTags(texts, translated), ProviderGemini + "/" + model, nil
-			}
-			logTranslateFailure(log, provider, model, err, texts, translated, targetLang)
-			lastErr = fmt.Errorf("gemini (%s): %w", modelOrEmpty(model), errIf(err))
-
-		case ProviderGroq:
-			if cfg.GroqKey == "" {
-				continue
-			}
-			translated, model, err := TranslateWithGroq(ctx, texts, targetLang, sourceLang, cfg.GroqKey, instr, videoTitle, cfg.Timeout, onAttempt, cfg.GroqModels)
-			if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
-				return preserveSpeakerTags(texts, translated), ProviderGroq + "/" + model, nil
-			}
-			logTranslateFailure(log, provider, model, err, texts, translated, targetLang)
-			lastErr = fmt.Errorf("groq (%s): %w", modelOrEmpty(model), errIf(err))
-
-		case ProviderOpenRouter:
-			if cfg.OpenRouterKey == "" {
-				continue
-			}
-			translated, model, err := TranslateWithOpenRouter(ctx, texts, targetLang, sourceLang, cfg.OpenRouterKey, instr, videoTitle, cfg.Timeout, onAttempt, cfg.OpenRouterModels)
-			if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
-				return preserveSpeakerTags(texts, translated), ProviderOpenRouter + "/" + model, nil
-			}
-			logTranslateFailure(log, provider, model, err, texts, translated, targetLang)
-			lastErr = fmt.Errorf("openrouter (%s): %w", modelOrEmpty(model), errIf(err))
+	for _, provider := range BuildFallbackChain(cfg) {
+		if cfg.Keys[provider] == "" {
+			continue
 		}
+		translated, model, err := Translate(ctx, provider, cfg, texts, targetLang, sourceLang, videoTitle, onAttempt)
+		if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
+			return preserveSpeakerTags(texts, translated), provider + "/" + model, nil
+		}
+		logTranslateFailure(log, provider, model, err, texts, translated, targetLang)
+		lastErr = fmt.Errorf("%s (%s): %w", provider, modelOrEmpty(model), errIf(err))
 	}
 
 	if lastErr != nil {

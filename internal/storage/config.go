@@ -8,19 +8,14 @@ import (
 	"gemfactory/internal/model"
 
 	"github.com/uptrace/bun"
-	"go.uber.org/zap"
 )
 
 type ConfigRepository struct {
-	db     *bun.DB
-	logger *zap.Logger
+	db *bun.DB
 }
 
-func NewConfigRepository(db *bun.DB, logger *zap.Logger) model.ConfigRepository {
-	return &ConfigRepository{
-		db:     db,
-		logger: logger,
-	}
+func NewConfigRepository(db *bun.DB) model.ConfigRepository {
+	return &ConfigRepository{db: db}
 }
 
 func (r *ConfigRepository) Get(ctx context.Context, key string) (*model.Config, error) {
@@ -71,17 +66,5 @@ func (r *ConfigRepository) Set(ctx context.Context, key, value string) error {
 		return fmt.Errorf("failed to set config: %w", err)
 	}
 
-	return nil
-}
-
-func (r *ConfigRepository) Reset(ctx context.Context) error {
-	// Clear everything: managed settings are re-created on demand when saved,
-	// and startup-only values live in env, not here.
-	_, err := r.db.NewDelete().
-		Model((*model.Config)(nil)).
-		Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to delete config: %w", err)
-	}
 	return nil
 }

@@ -5,9 +5,10 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
+
+	"gemfactory/internal/downloader"
 )
 
 var domainRe = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`)
@@ -74,28 +75,18 @@ func (s *Server) listCookies(w http.ResponseWriter, r *http.Request) {
 }
 
 func parseNetscapeMetadata(content string) (count int, minExp int64, maxExp int64) {
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
+	cookies := downloader.ParseNetscapeCookies(content)
+	for _, c := range cookies {
+		if c.Expires.IsZero() {
 			continue
 		}
-		fields := strings.Fields(line)
-		if len(fields) < 6 {
-			continue
+		exp := c.Expires.Unix()
+		if minExp == 0 || exp < minExp {
+			minExp = exp
 		}
-		count++
-		if len(fields) >= 5 {
-			if exp, err := strconv.ParseInt(fields[4], 10, 64); err == nil && exp > 0 {
-				if minExp == 0 || exp < minExp {
-					minExp = exp
-				}
-				if exp > maxExp {
-					maxExp = exp
-				}
-			}
-		}
+		maxExp = max(maxExp, exp)
 	}
-	return
+	return len(cookies), minExp, maxExp
 }
 
 func (s *Server) getCookie(w http.ResponseWriter, r *http.Request) {
@@ -178,16 +169,8 @@ func validateNetscape(content string) error {
 func DetectDomains(content string) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, line := range strings.Split(content, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 6 {
-			continue
-		}
-		d := strings.TrimPrefix(strings.ToLower(fields[0]), ".")
+	for _, c := range downloader.ParseNetscapeCookies(content) {
+		d := strings.TrimPrefix(strings.ToLower(c.Domain), ".")
 		if d == "" {
 			continue
 		}
