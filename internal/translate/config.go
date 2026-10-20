@@ -26,11 +26,11 @@ type provider struct {
 }
 
 var providers = map[string]provider{
-	ProviderGemini:     {"", DefaultGeminiModels},
-	ProviderGroq:       {"https://api.groq.com/openai/v1", DefaultGroqModels},
-	ProviderOpencode:   {"https://opencode.ai/zen/v1", DefaultOpencodeModels},
-	ProviderNvidia:     {"https://integrate.api.nvidia.com/v1", DefaultNvidiaModels},
-	ProviderOpenRouter: {"https://openrouter.ai/api/v1", DefaultOpenRouterModels},
+	ProviderGemini:     {"", defaultGeminiModels},
+	ProviderGroq:       {"https://api.groq.com/openai/v1", defaultGroqModels},
+	ProviderOpencode:   {"https://opencode.ai/zen/v1", defaultOpencodeModels},
+	ProviderNvidia:     {"https://integrate.api.nvidia.com/v1", defaultNvidiaModels},
+	ProviderOpenRouter: {"https://openrouter.ai/api/v1", defaultOpenRouterModels},
 }
 
 // providerOrder is the default fallback chain.
@@ -44,23 +44,23 @@ func (c Config) modelsFor(p string) []string {
 	return providers[p].defaults
 }
 
-// DefaultOpencodeModels is the free-model fallback chain on OpenCode Zen.
-var DefaultOpencodeModels = []string{
+// defaultOpencodeModels is the free-model fallback chain on OpenCode Zen.
+var defaultOpencodeModels = []string{
 	"laguna-s-2.1-free",
 	"nemotron-3.5-lightning-free",
 	"hy3-free",
 }
 
-// DefaultNvidiaModels is the free-model chain on NVIDIA NIM.
-var DefaultNvidiaModels = []string{
+// defaultNvidiaModels is the free-model chain on NVIDIA NIM.
+var defaultNvidiaModels = []string{
 	"minimaxai/minimax-m3",
 	"openai/gpt-oss-120b",
 	"meta/muse-glimmer-30b",
 	"stepfun-ai/step-3.7-flash",
 }
 
-// DefaultOpenRouterModels is the fallback model chain on OpenRouter.
-var DefaultOpenRouterModels = []string{
+// defaultOpenRouterModels is the fallback model chain on OpenRouter.
+var defaultOpenRouterModels = []string{
 	"google/gemini-2.5-flash-lite",
 	"mistralai/mistral-small-24b-instruct-2501",
 	"meta-llama/llama-3.3-70b-instruct",
@@ -154,7 +154,7 @@ type Config struct {
 	Timeout       time.Duration
 }
 
-var DefaultGeminiModels = []string{
+var defaultGeminiModels = []string{
 	"gemini-3.5-flash-lite",
 	"gemini-3.1-flash-lite",
 	"gemini-3.5-flash",
@@ -162,7 +162,7 @@ var DefaultGeminiModels = []string{
 	"gemini-flash-latest",
 }
 
-var DefaultGroqModels = []string{
+var defaultGroqModels = []string{
 	"openai/gpt-oss-120b",
 }
 
@@ -227,6 +227,11 @@ func BuildFallbackChain(cfg Config) []string {
 // AllProviders lists every provider in default fallback order.
 func AllProviders() []string {
 	return slices.Clone(providerOrder)
+}
+
+// DefaultModels returns the built-in model chain for provider p.
+func DefaultModels(p string) []string {
+	return providers[p].defaults
 }
 
 // IsProvider reports whether p names a known provider.

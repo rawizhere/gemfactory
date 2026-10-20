@@ -429,44 +429,39 @@ func (s *Service) downloadInfoJSON(ctx context.Context, info json.RawMessage, ba
 
 var postHTTPClient = &http.Client{Timeout: 3 * time.Minute}
 
-func newMediaRequest(ctx context.Context, rawURL string) (*http.Request, error) {
+// fetch GETs rawURL with a browser User-Agent and fails on non-200 responses; the caller closes the body.
+func fetch(ctx context.Context, rawURL string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36")
-	return req, nil
-}
-
-func httpGet(ctx context.Context, rawURL string) ([]byte, error) {
-	req, err := newMediaRequest(ctx, rawURL)
-	if err != nil {
-		return nil, err
-	}
 	resp, err := postHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
+	return resp, nil
+}
+
+func httpGet(ctx context.Context, rawURL string) ([]byte, error) {
+	resp, err := fetch(ctx, rawURL)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
 	return io.ReadAll(io.LimitReader(resp.Body, 10<<20))
 }
 
 func downloadHTTP(ctx context.Context, rawURL, outPath string) error {
-	req, err := newMediaRequest(ctx, rawURL)
-	if err != nil {
-		return err
-	}
-	resp, err := postHTTPClient.Do(req)
+	resp, err := fetch(ctx, rawURL)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
 	tmp := outPath + ".part"
 	f, err := os.Create(tmp)
 	if err != nil {

@@ -40,9 +40,6 @@ func Load() (*Config, error) {
 	if err := env.Parse(cfg); err != nil {
 		return nil, fmt.Errorf("config parsing failed: %w", err)
 	}
-	if cfg.DownloadConcurrency <= 0 {
-		cfg.DownloadConcurrency = 4
-	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)

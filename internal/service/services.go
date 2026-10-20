@@ -26,7 +26,7 @@ func NewServices(db *storage.Postgres, cfg *config.Config, logger *zap.Logger) *
 	scraperClient := scraper.NewFetcher(initialUserAgents(context.Background(), settingsProvider), logger)
 
 	return &Services{
-		Artist:   NewArtistService(db.GetDB(), logger),
+		Artist:   NewArtistService(db.GetDB()),
 		Release:  NewReleaseService(db.GetDB(), scraperClient, logger),
 		Configs:  configRepo,
 		Settings: settingsProvider,

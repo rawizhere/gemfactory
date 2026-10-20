@@ -94,17 +94,7 @@ func (c *Client) Start(ctx context.Context, commands []telego.BotCommand, regist
 }
 
 func (c *Client) SendMessage(ctx context.Context, chatID int64, text string) error {
-	chunks := splitMessage(text, maxMessageLength)
-	for _, chunk := range chunks {
-		params := telegoutil.Message(telegoutil.ID(chatID), chunk).WithParseMode(telego.ModeHTML)
-		params.LinkPreviewOptions = &telego.LinkPreviewOptions{IsDisabled: true}
-		_, err := c.bot.SendMessage(ctx, params)
-		if err != nil {
-			c.logger.Error("Failed to send message", zap.Int64("chat_id", chatID), zap.Error(err))
-			return err
-		}
-	}
-	return nil
+	return c.SendMessageWithMarkup(ctx, chatID, text, nil)
 }
 
 func (c *Client) SendMessageWithMarkup(ctx context.Context, chatID int64, text string, markup telego.ReplyMarkup) error {
@@ -119,7 +109,7 @@ func (c *Client) SendMessageWithMarkup(ctx context.Context, chatID int64, text s
 
 		_, err := c.bot.SendMessage(ctx, params)
 		if err != nil {
-			c.logger.Error("Failed to send message with markup", zap.Int64("chat_id", chatID), zap.Error(err))
+			c.logger.Error("Failed to send message", zap.Int64("chat_id", chatID), zap.Error(err))
 			return err
 		}
 	}
@@ -273,17 +263,24 @@ func formatSpeed(bytesPerSec float64) string {
 	return humanize.Bytes(uint64(bytesPerSec)) + "/s"
 }
 
-func (c *Client) SendVideoFile(ctx context.Context, chatID int64, filePath, caption string, onProgress UploadProgressCallback, replyToMsgID int) error {
+// openUpload opens filePath for upload, wrapping it to report progress when onProgress is set.
+func openUpload(filePath string, onProgress UploadProgressCallback) (*os.File, telegoapi.NamedReader, error) {
 	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, nil, err
+	}
+	if stat, statErr := f.Stat(); statErr == nil && stat.Size() > 0 && onProgress != nil {
+		return f, newProgressFileReader(f, stat.Size(), onProgress), nil
+	}
+	return f, f, nil
+}
+
+func (c *Client) SendVideoFile(ctx context.Context, chatID int64, filePath, caption string, onProgress UploadProgressCallback, replyToMsgID int) error {
+	f, fileReader, err := openUpload(filePath, onProgress)
 	if err != nil {
 		return fmt.Errorf("open video file: %w", err)
 	}
 	defer func() { _ = f.Close() }()
-
-	var fileReader telegoapi.NamedReader = f
-	if stat, statErr := f.Stat(); statErr == nil && stat.Size() > 0 && onProgress != nil {
-		fileReader = newProgressFileReader(f, stat.Size(), onProgress)
-	}
 
 	video := telegoutil.Video(telegoutil.ID(chatID), telegoutil.File(fileReader))
 	if caption != "" {
@@ -436,16 +433,11 @@ func (c *Client) sendPhotoFile(ctx context.Context, chatID int64, filePath, capt
 }
 
 func (c *Client) SendAudioFile(ctx context.Context, chatID int64, filePath, caption string, onProgress UploadProgressCallback, replyToMsgID int) error {
-	f, err := os.Open(filePath)
+	f, fileReader, err := openUpload(filePath, onProgress)
 	if err != nil {
 		return fmt.Errorf("open audio file: %w", err)
 	}
 	defer func() { _ = f.Close() }()
-
-	var fileReader telegoapi.NamedReader = f
-	if stat, statErr := f.Stat(); statErr == nil && stat.Size() > 0 && onProgress != nil {
-		fileReader = newProgressFileReader(f, stat.Size(), onProgress)
-	}
 
 	audio := telegoutil.Audio(telegoutil.ID(chatID), telegoutil.File(fileReader))
 	if caption != "" {

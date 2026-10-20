@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -39,31 +40,21 @@ func intRange(min, max int) func(string) error {
 }
 
 func oneOf(allowed ...string) func(string) error {
-	set := make(map[string]bool, len(allowed))
-	for _, a := range allowed {
-		set[a] = true
-	}
 	return func(v string) error {
-		if !set[strings.TrimSpace(v)] {
+		if !slices.Contains(allowed, strings.TrimSpace(v)) {
 			return fmt.Errorf("must be one of: %s", strings.Join(allowed, ", "))
 		}
 		return nil
 	}
 }
 
-func boolSpec() func(string) error {
-	return oneOf("true", "false")
-}
+var boolSpec = oneOf("true", "false")
 
 func csvOf(allowed ...string) func(string) error {
-	set := make(map[string]bool, len(allowed))
-	for _, a := range allowed {
-		set[a] = true
-	}
 	return func(v string) error {
 		for _, part := range strings.Split(v, ",") {
 			p := strings.ToLower(strings.TrimSpace(part))
-			if p != "" && !set[p] {
+			if p != "" && !slices.Contains(allowed, p) {
 				return fmt.Errorf("unknown value %q", part)
 			}
 		}
@@ -79,7 +70,7 @@ func normalizeBool(v string) string {
 }
 
 func settingRegistry() []settingSpec {
-	return []settingSpec{
+	specs := []settingSpec{
 		{key: "DOWNLOAD_CONCURRENCY", def: "4", validate: intRange(1, 20),
 			apply: func(s *Server, v string) {
 				if n, err := strconv.Atoi(v); err == nil && s.Downloads != nil {
@@ -98,14 +89,14 @@ func settingRegistry() []settingSpec {
 			}
 			return nil
 		}},
-		{key: "CLIP_DELETE_STATUS", def: "false", validate: boolSpec()},
+		{key: "CLIP_DELETE_STATUS", def: "false", validate: boolSpec},
 		{key: "TRANSLATION_TIMEOUT", def: "180", validate: intRange(10, 600)},
-		{key: "SUBS_YOUTUBE_ONLY", def: "false", validate: boolSpec()},
-		{key: "TRANSLATION_FALLBACK_ORDER", def: "gemini,openrouter,opencode,nvidia,groq",
-			validate: csvOf(translate.ProviderGemini, translate.ProviderNvidia, translate.ProviderGroq, translate.ProviderOpencode, translate.ProviderOpenRouter)},
+		{key: "SUBS_YOUTUBE_ONLY", def: "false", validate: boolSpec},
+		{key: "TRANSLATION_FALLBACK_ORDER", def: strings.Join(translate.AllProviders(), ","),
+			validate: csvOf(translate.AllProviders()...)},
 		{key: "SUBS_SOURCE_PREF_RU", def: "en,ko"},
 		{key: "TRANSLATION_PROMPT", def: translate.DefaultTranslationPrompt},
-		{key: "GROK_ENABLED", def: "true", validate: boolSpec()},
+		{key: "GROK_ENABLED", def: "true", validate: boolSpec},
 		{key: "GROK_RATE_LIMIT", def: strconv.Itoa(translate.DefaultGrokRateLimit), validate: intRange(1, 1000)},
 		{key: "GROK_MAX_CHARS", def: strconv.Itoa(translate.DefaultGrokMaxChars), validate: intRange(100, 50000)},
 		{key: "GROK_PROMPT", def: translate.DefaultGrokPrompt},
@@ -114,17 +105,14 @@ func settingRegistry() []settingSpec {
 		{key: "SCRAPER_USER_AGENTS", def: strings.Join(config.DefaultScraperUserAgents, "\n"),
 			validate: validateUserAgents,
 			apply:    applyScraperUserAgents},
-		{key: "GEMINI_API_KEY", masked: true},
-		{key: "GROQ_API_KEY", masked: true},
-		{key: "OPENCODE_API_KEY", masked: true},
-		{key: "NVIDIA_API_KEY", masked: true},
-		{key: "OPENROUTER_API_KEY", masked: true},
-		{key: "GEMINI_MODELS", def: strings.Join(translate.DefaultGeminiModels, ",")},
-		{key: "GROQ_MODELS", def: strings.Join(translate.DefaultGroqModels, ",")},
-		{key: "OPENCODE_MODELS", def: strings.Join(translate.DefaultOpencodeModels, ",")},
-		{key: "NVIDIA_MODELS", def: strings.Join(translate.DefaultNvidiaModels, ",")},
-		{key: "OPENROUTER_MODELS", def: strings.Join(translate.DefaultOpenRouterModels, ",")},
 	}
+	for _, p := range translate.AllProviders() {
+		env := strings.ToUpper(p)
+		specs = append(specs,
+			settingSpec{key: env + "_API_KEY", masked: true},
+			settingSpec{key: env + "_MODELS", def: strings.Join(translate.DefaultModels(p), ",")})
+	}
+	return specs
 }
 
 // isRegisteredSetting reports whether key has a dedicated editor in the settings sections.

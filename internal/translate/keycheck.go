@@ -80,7 +80,7 @@ func probeGeminiKey(ctx context.Context, apiKey string) bool {
 	if err != nil {
 		return false
 	}
-	_, err = client.Models.Get(ctx, DefaultGeminiModels[0], nil)
+	_, err = client.Models.Get(ctx, defaultGeminiModels[0], nil)
 	if err == nil {
 		return false
 	}

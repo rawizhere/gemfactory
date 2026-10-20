@@ -16,8 +16,6 @@ import (
 	"github.com/agnivade/levenshtein"
 	"github.com/uptrace/bun"
 	"go.uber.org/zap"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 type ReleaseService struct {
@@ -85,11 +83,11 @@ func (s *ReleaseService) GetReleasesForMonth(ctx context.Context, month string, 
 	}
 
 	var result strings.Builder
-	caser := cases.Title(language.English)
+	monthName := time.Month(model.MonthNumber(month)).String()
 	if year > 0 {
-		fmt.Fprintf(&result, "Releases for %s %d:\n\n", caser.String(month), year)
+		fmt.Fprintf(&result, "Releases for %s %d:\n\n", monthName, year)
 	} else {
-		fmt.Fprintf(&result, "Releases for %s:\n\n", caser.String(month))
+		fmt.Fprintf(&result, "Releases for %s:\n\n", monthName)
 	}
 
 	if len(releases) == 0 {

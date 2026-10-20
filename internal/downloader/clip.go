@@ -236,7 +236,7 @@ func (s *Service) downloadOnce(ctx context.Context, req ClipRequest, outPath, co
 						onProgress(upd)
 					}
 				} else if tm := ffmpegSectionTimeRe.FindStringSubmatch(text); len(tm) > 1 && expectedDurationMS > 0 {
-					if curMS, perr := parseFFmpegTimeString(tm[1]); perr == nil {
+					if curMS, perr := ParseTimecode(tm[1]); perr == nil {
 						pct := int(curMS / expectedDurationMS * 100.0)
 						if pct > 100 {
 							pct = 100
@@ -371,44 +371,6 @@ func scanLinesOrCR(data []byte, atEOF bool) (advance int, token []byte, err erro
 		return len(data), data, nil
 	}
 	return 0, nil, nil
-}
-
-func parseFFmpegTimeString(ts string) (float64, error) {
-	parts := strings.Split(ts, ":")
-	switch len(parts) {
-	case 1:
-		s, err := strconv.ParseFloat(parts[0], 64)
-		if err != nil {
-			return 0, err
-		}
-		return s * 1000, nil
-	case 2:
-		m, err := strconv.ParseFloat(parts[0], 64)
-		if err != nil {
-			return 0, err
-		}
-		s, err := strconv.ParseFloat(parts[1], 64)
-		if err != nil {
-			return 0, err
-		}
-		return m*60000 + s*1000, nil
-	case 3:
-		h, err := strconv.ParseFloat(parts[0], 64)
-		if err != nil {
-			return 0, err
-		}
-		m, err := strconv.ParseFloat(parts[1], 64)
-		if err != nil {
-			return 0, err
-		}
-		s, err := strconv.ParseFloat(parts[2], 64)
-		if err != nil {
-			return 0, err
-		}
-		return h*3600000 + m*60000 + s*1000, nil
-	default:
-		return 0, fmt.Errorf("invalid time %q", ts)
-	}
 }
 
 var (

@@ -130,37 +130,11 @@ func (s *Server) createArtists(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, err := s.Artists.GetAll(r.Context())
+	added, skipped, err := s.addArtists(r.Context(), map[model.Gender][]string{gender: req.Names})
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	known := make(map[string]bool, len(existing))
-	for _, a := range existing {
-		known[strings.ToLower(a.Name)] = true
-	}
-
-	added, skipped := 0, []string{}
-	seen := make(map[string]bool)
-	for _, raw := range req.Names {
-		name := strings.TrimSpace(raw)
-		if name == "" || seen[strings.ToLower(name)] {
-			continue
-		}
-		seen[strings.ToLower(name)] = true
-		if known[strings.ToLower(name)] {
-			skipped = append(skipped, name)
-			continue
-		}
-		artist := &model.Artist{Name: (name), Gender: gender}
-		if err := s.Artists.Create(r.Context(), artist); err != nil {
-			s.fail(w, err)
-			return
-		}
-		known[strings.ToLower(name)] = true
-		added++
-	}
-
 	writeJSON(w, map[string]any{"added": added, "skipped": skipped})
 }
 
@@ -171,53 +145,57 @@ func (s *Server) importArtistsJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	existing, err := s.Artists.GetAll(r.Context())
+	byGender := make(map[model.Gender][]string, len(req))
+	for rawGender, names := range req {
+		switch strings.ToLower(strings.TrimSpace(rawGender)) {
+		case "male", "m":
+			byGender[model.GenderMale] = append(byGender[model.GenderMale], names...)
+		case "female", "f":
+			byGender[model.GenderFemale] = append(byGender[model.GenderFemale], names...)
+		case "mixed", "mix":
+			byGender[model.GenderMixed] = append(byGender[model.GenderMixed], names...)
+		}
+	}
+
+	added, skipped, err := s.addArtists(r.Context(), byGender)
 	if err != nil {
 		s.fail(w, err)
 		return
+	}
+	writeJSON(w, map[string]any{"added": added, "skipped": skipped, "total": added + len(skipped)})
+}
+
+// addArtists creates the given names, skipping blanks, duplicates and names that already exist (case-insensitive).
+func (s *Server) addArtists(ctx context.Context, byGender map[model.Gender][]string) (int, []string, error) {
+	existing, err := s.Artists.GetAll(ctx)
+	if err != nil {
+		return 0, nil, err
 	}
 	known := make(map[string]bool, len(existing))
 	for _, a := range existing {
 		known[strings.ToLower(a.Name)] = true
 	}
 
-	added, skipped := 0, []string{}
-	seen := make(map[string]bool)
-
-	for rawGender, names := range req {
-		var gender model.Gender
-		switch strings.ToLower(strings.TrimSpace(rawGender)) {
-		case "male", "m":
-			gender = model.GenderMale
-		case "female", "f":
-			gender = model.GenderFemale
-		case "mixed", "mix":
-			gender = model.GenderMixed
-		default:
-			continue
-		}
-
+	added, skipped, seen := 0, []string{}, map[string]bool{}
+	for gender, names := range byGender {
 		for _, raw := range names {
 			name := strings.TrimSpace(raw)
-			if name == "" || seen[strings.ToLower(name)] {
+			key := strings.ToLower(name)
+			if name == "" || seen[key] {
 				continue
 			}
-			seen[strings.ToLower(name)] = true
-			if known[strings.ToLower(name)] {
+			seen[key] = true
+			if known[key] {
 				skipped = append(skipped, name)
 				continue
 			}
-			artist := &model.Artist{Name: (name), Gender: gender}
-			if err := s.Artists.Create(r.Context(), artist); err != nil {
-				s.fail(w, err)
-				return
+			if err := s.Artists.Create(ctx, &model.Artist{Name: name, Gender: gender}); err != nil {
+				return added, skipped, err
 			}
-			known[strings.ToLower(name)] = true
 			added++
 		}
 	}
-
-	writeJSON(w, map[string]any{"added": added, "skipped": skipped, "total": added + len(skipped)})
+	return added, skipped, nil
 }
 
 func (s *Server) runParser(w http.ResponseWriter, r *http.Request) {

@@ -56,7 +56,7 @@ func TestCacheHitRequiresVideoFile(t *testing.T) {
 
 func newTestService(t *testing.T) *Service {
 	t.Helper()
-	return NewService(nil, t.TempDir(), 1, zap.NewNop())
+	return NewService(nil, nil, t.TempDir(), 1, zap.NewNop())
 }
 
 func TestCleanupOnceRemovesOldArtifactsOnly(t *testing.T) {

@@ -9,8 +9,6 @@ import (
 	"github.com/mymmrac/telego"
 	"github.com/mymmrac/telego/telegoutil"
 	"go.uber.org/zap"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 
 	"gemfactory/internal/config"
 	"gemfactory/internal/model"
@@ -28,9 +26,10 @@ type Manager struct {
 	lastMonth         int
 }
 
-func NewManager(releaseService *service.ReleaseService, config *config.Config, logger *zap.Logger) *Manager {
+func NewManager(releaseService *service.ReleaseService, tg *telegram.Client, config *config.Config, logger *zap.Logger) *Manager {
 	k := &Manager{
 		releaseService: releaseService,
+		tg:             tg,
 		logger:         logger,
 		config:         config,
 	}
@@ -40,13 +39,14 @@ func NewManager(releaseService *service.ReleaseService, config *config.Config, l
 	return k
 }
 
-func (k *Manager) SetTelegramClient(tg *telegram.Client) {
-	k.tg = tg
-}
-
 func (k *Manager) initKeyboards() {
 	k.initAllMonthsKeyboard()
 	k.updateMainMonthKeyboard()
+}
+
+// monthButton is a "January" button with "month_january" callback data.
+func monthButton(m time.Month) telego.InlineKeyboardButton {
+	return telegoutil.InlineKeyboardButton(m.String()).WithCallbackData("month_" + strings.ToLower(m.String()))
 }
 
 func (k *Manager) initAllMonthsKeyboard() {
@@ -54,9 +54,7 @@ func (k *Manager) initAllMonthsKeyboard() {
 	for i := 0; i < len(model.Months); i += 3 {
 		var row []telego.InlineKeyboardButton
 		for j := 0; j < 3 && i+j < len(model.Months); j++ {
-			month := model.Months[i+j]
-			row = append(row, telegoutil.InlineKeyboardButton(cases.Title(language.English).String(month)).
-				WithCallbackData("month_"+month))
+			row = append(row, monthButton(time.Month(i+j+1)))
 		}
 		rows = append(rows, row)
 	}
@@ -80,22 +78,11 @@ func (k *Manager) updateMainMonthKeyboard() {
 		return
 	}
 
-	prevMonth := currentMonth - 1
-	if prevMonth < 1 {
-		prevMonth = 12
-	}
-	nextMonth := currentMonth + 1
-	if nextMonth > 12 {
-		nextMonth = 1
-	}
-
+	cur := time.Month(currentMonth)
 	buttons := []telego.InlineKeyboardButton{
-		telegoutil.InlineKeyboardButton(cases.Title(language.English).String(model.Months[prevMonth-1])).
-			WithCallbackData("month_" + model.Months[prevMonth-1]),
-		telegoutil.InlineKeyboardButton(cases.Title(language.English).String(model.Months[currentMonth-1])).
-			WithCallbackData("month_" + model.Months[currentMonth-1]),
-		telegoutil.InlineKeyboardButton(cases.Title(language.English).String(model.Months[nextMonth-1])).
-			WithCallbackData("month_" + model.Months[nextMonth-1]),
+		monthButton((cur+10)%12 + 1), // previous month
+		monthButton(cur),
+		monthButton(cur%12 + 1), // next month
 		telegoutil.InlineKeyboardButton("...").WithCallbackData("show_all_months"),
 	}
 
@@ -137,10 +124,7 @@ func (k *Manager) HandleMonthCallback(ctx context.Context, callback *telego.Call
 		response = fmt.Sprintf("No releases found for %s.", month)
 	}
 
-	if k.tg != nil {
-		return k.tg.SendMessageWithMarkup(ctx, chatID, response, k.GetMainKeyboard())
-	}
-	return nil
+	return k.tg.SendMessageWithMarkup(ctx, chatID, response, k.GetMainKeyboard())
 }
 
 // HandleAllMonthsCallback switches the inline keyboard to the full month grid.
@@ -151,10 +135,7 @@ func (k *Manager) HandleAllMonthsCallback(ctx context.Context, callback *telego.
 	chatID := callback.Message.GetChat().ID
 	messageID := callback.Message.GetMessageID()
 
-	if k.tg != nil {
-		return k.tg.EditMessageReplyMarkup(ctx, chatID, messageID, k.GetAllMonthsKeyboard())
-	}
-	return nil
+	return k.tg.EditMessageReplyMarkup(ctx, chatID, messageID, k.GetAllMonthsKeyboard())
 }
 
 // HandleMainCallback restores the default inline keyboard.
@@ -165,8 +146,5 @@ func (k *Manager) HandleMainCallback(ctx context.Context, callback *telego.Callb
 	chatID := callback.Message.GetChat().ID
 	messageID := callback.Message.GetMessageID()
 
-	if k.tg != nil {
-		return k.tg.EditMessageReplyMarkup(ctx, chatID, messageID, k.GetMainKeyboard())
-	}
-	return nil
+	return k.tg.EditMessageReplyMarkup(ctx, chatID, messageID, k.GetMainKeyboard())
 }

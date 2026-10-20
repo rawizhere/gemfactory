@@ -647,13 +647,13 @@ trimLoop:
 			}
 			startStr := strings.Fields(parts[0])[0]
 			endStr := strings.Fields(parts[1])[0]
-			cs, err := parseVTTTimestamp(startStr)
+			cs, err := ParseTimecode(startStr)
 			if err != nil {
 				inCue = false
 				current = vttCue{}
 				continue
 			}
-			ce, err := parseVTTTimestamp(endStr)
+			ce, err := ParseTimecode(endStr)
 			if err != nil {
 				inCue = false
 				current = vttCue{}
@@ -770,30 +770,6 @@ func longestWordOverlap(a, b []string) int {
 func isNumericLine(s string) bool {
 	_, err := strconv.Atoi(strings.TrimSpace(s))
 	return err == nil
-}
-
-// parseVTTTimestamp parses "HH:MM:SS.mmm" or "MM:SS.mmm" into milliseconds.
-func parseVTTTimestamp(ts string) (float64, error) {
-	parts := strings.Split(ts, ":")
-	if len(parts) == 2 {
-		parts = append([]string{"00"}, parts...)
-	}
-	if len(parts) != 3 {
-		return 0, fmt.Errorf("invalid VTT timestamp %q", ts)
-	}
-	h, err := strconv.ParseFloat(parts[0], 64)
-	if err != nil {
-		return 0, err
-	}
-	m, err := strconv.ParseFloat(parts[1], 64)
-	if err != nil {
-		return 0, err
-	}
-	sec, err := strconv.ParseFloat(parts[2], 64)
-	if err != nil {
-		return 0, err
-	}
-	return h*3600000 + m*60000 + sec*1000, nil
 }
 
 // SubtitleTrack describes a single subtitle URL entry from yt-dlp metadata.

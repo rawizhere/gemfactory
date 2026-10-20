@@ -9,19 +9,14 @@ import (
 	"strings"
 
 	"github.com/uptrace/bun"
-	"go.uber.org/zap"
 )
 
 type ArtistService struct {
-	repo   model.ArtistRepository
-	logger *zap.Logger
+	repo model.ArtistRepository
 }
 
-func NewArtistService(db *bun.DB, logger *zap.Logger) *ArtistService {
-	return &ArtistService{
-		repo:   storage.NewArtistRepository(db),
-		logger: logger,
-	}
+func NewArtistService(db *bun.DB) *ArtistService {
+	return &ArtistService{repo: storage.NewArtistRepository(db)}
 }
 
 func (s *ArtistService) Add(ctx context.Context, artists []string, isFemale bool) (int, error) {
@@ -46,29 +41,6 @@ func (s *ArtistService) Add(ctx context.Context, artists []string, isFemale bool
 	return len(models), nil
 }
 
-func (s *ArtistService) Remove(ctx context.Context, artists []string) (int, error) {
-	removedCount := 0
-	for _, artistName := range artists {
-		artist, err := s.repo.GetByName(ctx, artistName)
-		if err != nil {
-			return removedCount, fmt.Errorf("failed to get artist %s: %w", artistName, err)
-		}
-
-		if artist == nil {
-			s.logger.Warn("Artist not found", zap.String("artist", artistName))
-			continue
-		}
-
-		err = s.repo.Delete(ctx, artist.ArtistID)
-		if err != nil {
-			return removedCount, fmt.Errorf("failed to delete artist %s: %w", artistName, err)
-		}
-		removedCount++
-	}
-
-	return removedCount, nil
-}
-
 func (s *ArtistService) Deactivate(ctx context.Context, artists []string) (int, error) {
 	if len(artists) == 0 {
 		return 0, nil
@@ -84,16 +56,8 @@ func (s *ArtistService) Deactivate(ctx context.Context, artists []string) (int, 
 	return s.repo.DeactivateByNames(ctx, cleanNames)
 }
 
-func (s *ArtistService) GetAll(ctx context.Context) ([]model.Artist, error) {
-	return s.repo.GetAll(ctx)
-}
-
-func (s *ArtistService) GetAllActive(ctx context.Context) ([]model.Artist, error) {
-	return s.repo.GetActive(ctx)
-}
-
 func (s *ArtistService) Export(ctx context.Context) (string, error) {
-	allArtists, err := s.GetAll(ctx)
+	allArtists, err := s.repo.GetAll(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get all artists: %w", err)
 	}
@@ -101,7 +65,7 @@ func (s *ArtistService) Export(ctx context.Context) (string, error) {
 }
 
 func (s *ArtistService) FormatList(ctx context.Context) (string, error) {
-	artists, err := s.GetAllActive(ctx)
+	artists, err := s.repo.GetActive(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get active artists: %w", err)
 	}

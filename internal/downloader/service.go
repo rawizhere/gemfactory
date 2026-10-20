@@ -79,12 +79,13 @@ type Service struct {
 	order       []string
 }
 
-func NewService(cookies model.CookieRepository, dataDir string, concurrency int, logger *zap.Logger) *Service {
+func NewService(cookies model.CookieRepository, configs model.ConfigRepository, dataDir string, concurrency int, logger *zap.Logger) *Service {
 	if concurrency < 1 {
 		concurrency = 1
 	}
 	s := &Service{
 		cookies:     cookies,
+		configs:     configs,
 		dataDir:     filepath.Join(dataDir, "downloads", "youtube"),
 		logger:      logger,
 		jobs:        make(map[string]*Job),
@@ -119,10 +120,6 @@ func (s *Service) releaseSlot() {
 	defer s.mu.Unlock()
 	s.activeJobs--
 	s.cond.Broadcast()
-}
-
-func (s *Service) SetConfigRepo(configs model.ConfigRepository) {
-	s.configs = configs
 }
 
 func (s *Service) SubmitWithCallbacks(ctx context.Context, req ClipRequest, cbs *ClipCallbacks) (*Job, error) {
