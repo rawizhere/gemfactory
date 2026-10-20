@@ -1,4 +1,4 @@
-import { $, $$, el, tableWrap, api, showMsg, exportToCSV } from './api.js';
+import { $, $$, el, tableWrap, api, showMsg, exportToCSV, confirmDialog, toast } from './api.js';
 
 let releases = [];
 let currentPage = 1;
@@ -254,7 +254,7 @@ export function renderReleases() {
     const tdDel = el('td', { style: 'text-align:right' });
     const delBtn = el('button', { class: 'btn btn-danger btn-sm', type: 'button' }, 'Delete');
     delBtn.addEventListener('click', async () => {
-      if (!confirm(`Delete release "${r.title}" (${r.artist})?`)) return;
+      if (!(await confirmDialog(`Delete release "${r.title}" (${r.artist})?`))) return;
       try {
         delBtn.disabled = true;
         await api('DELETE', `/api/releases/${r.id}`);
@@ -262,7 +262,7 @@ export function renderReleases() {
         renderReleases();
         await loadReleases();
       } catch (err) {
-        alert(`Delete failed: ${err.message}`);
+        toast(`Delete failed: ${err.message}`, 'error');
         await loadReleases();
       }
     });
@@ -408,7 +408,7 @@ export function initReleases() {
   $('#rel-delete').addEventListener('click', async () => {
     const ids = Array.from($$('#releases-table input[type=checkbox]:checked')).map((cb) => Number(cb.value));
     if (!ids.length) return;
-    if (!confirm(`Delete ${ids.length} selected releases?`)) return;
+    if (!(await confirmDialog(`Delete ${ids.length} selected releases?`))) return;
 
     try {
       const idsToDelete = new Set(ids);
@@ -417,7 +417,7 @@ export function initReleases() {
       renderReleases();
       await loadReleases();
     } catch (err) {
-      alert(`Bulk delete failed: ${err.message}`);
+      toast(`Bulk delete failed: ${err.message}`, 'error');
       await loadReleases();
     }
   });

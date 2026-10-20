@@ -40,6 +40,7 @@ function getAvailableActions() {
       type: 'Action',
       action: () => {
         onSwitchTab?.('releases');
+        $('.parser-card').open = true;
         $('#parse-month')?.focus();
       },
     },

@@ -185,7 +185,8 @@ function fieldsTable(rows) {
   const tbody = el('tbody');
   rows.forEach((r) => tbody.appendChild(r));
   table.appendChild(tbody);
-  return table;
+  // Scrolls sideways on narrow screens instead of widening the page.
+  return el('div', { style: 'overflow-x:auto' }, table);
 }
 
 function renderSectionFields(section, root) {
@@ -269,9 +270,17 @@ function renderGeminiCard(root) {
   const status = keyStatus();
   const head = el('div', { class: 'pipeline-detail-head' });
   const titleWrap = el('div', { class: 'pipeline-detail-title-wrap' });
-  titleWrap.appendChild(el('span', { class: `status-dot ${status.dot}` }));
+  const dot = el('span', { class: `status-dot ${status.dot}` });
+  let badge = status.badge;
+  titleWrap.appendChild(dot);
   titleWrap.appendChild(el('h3', { class: 'pipeline-detail-title' }, 'Google Gemini'));
-  titleWrap.appendChild(status.badge);
+  titleWrap.appendChild(badge);
+  const refreshStatus = () => {
+    const next = keyStatus();
+    dot.className = `status-dot ${next.dot}`;
+    badge.replaceWith(next.badge);
+    badge = next.badge;
+  };
   head.appendChild(titleWrap);
   card.appendChild(head);
 
@@ -290,6 +299,7 @@ function renderGeminiCard(root) {
     state.edited.set('GEMINI_API_KEY', keyInput.value);
     state.keyRejected = false;
     updateSaveBar();
+    refreshStatus();
   });
   const showBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Show');
   showBtn.addEventListener('click', () => {

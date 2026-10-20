@@ -1,4 +1,4 @@
-import { $, el, tableWrap, api, showMsg } from './api.js';
+import { $, el, tableWrap, api, showMsg, confirmDialog, toast } from './api.js';
 
 function cookieHealthBadge(c) {
   let cls = 'badge on';
@@ -54,7 +54,7 @@ export async function loadCookies() {
       tr.appendChild(tdDomain);
 
       // Cookie count
-      const tdCount = el('td', { class: 'num' }, `${c.cookie_count || 0} cookies`);
+      const tdCount = el('td', { class: 'num' }, `${c.cookie_count || 0} cookie${c.cookie_count === 1 ? '' : 's'}`);
       tr.appendChild(tdCount);
 
       // Health status badge
@@ -71,12 +71,12 @@ export async function loadCookies() {
 
       const delBtn = el('button', { class: 'btn btn-danger btn-sm', type: 'button' }, 'Delete');
       delBtn.addEventListener('click', async () => {
-        if (!confirm(`Delete cookies for "${c.domain}"?`)) return;
+        if (!(await confirmDialog(`Delete cookies for "${c.domain}"?`))) return;
         try {
           await api('DELETE', `/api/cookies/${encodeURIComponent(c.domain)}`);
           await loadCookies();
         } catch (err) {
-          alert(err.message);
+          toast(err.message, 'error');
         }
       });
       tdAct.appendChild(delBtn);

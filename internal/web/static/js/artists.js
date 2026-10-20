@@ -1,4 +1,4 @@
-import { $, $$, el, tableWrap, api, showMsg, exportToCSV } from './api.js';
+import { $, $$, el, tableWrap, api, showMsg, exportToCSV, confirmDialog, toast } from './api.js';
 
 let artists = [];
 let releaseCounts = {};
@@ -154,7 +154,7 @@ export function renderArtists() {
             await api('PATCH', `/api/artists/${a.artist_id}`, { name: newName });
             a.name = newName;
           } catch (err) {
-            alert(`Failed to rename: ${err.message}`);
+            toast(`Failed to rename: ${err.message}`, 'error');
           }
         }
         renderArtists();
@@ -184,7 +184,7 @@ export function renderArtists() {
           a.gender = target;
           renderArtists();
         } catch (err) {
-          alert(`Failed to change gender: ${err.message}`);
+          toast(`Failed to change gender: ${err.message}`, 'error');
         }
       })
     );
@@ -212,7 +212,7 @@ export function renderArtists() {
         statusBtn.disabled = false;
       } catch (err) {
         statusBtn.disabled = false;
-        alert(`Failed to update status: ${err.message}`);
+        toast(`Failed to update status: ${err.message}`, 'error');
       }
     });
     tdStatus.appendChild(statusBtn);
@@ -222,7 +222,7 @@ export function renderArtists() {
     const tdDel = el('td', { style: 'text-align:right' });
     const delBtn = el('button', { class: 'btn btn-danger btn-sm', type: 'button' }, 'Delete');
     delBtn.addEventListener('click', async () => {
-      if (!confirm(`Delete artist "${a.name}"? Their releases will also be deleted.`)) return;
+      if (!(await confirmDialog(`Delete artist "${a.name}"? Their releases will also be deleted.`))) return;
       try {
         delBtn.disabled = true;
         await api('DELETE', `/api/artists/${a.artist_id}`);
@@ -230,7 +230,7 @@ export function renderArtists() {
         renderArtists();
         await loadArtists();
       } catch (err) {
-        alert(`Delete failed: ${err.message}`);
+        toast(`Delete failed: ${err.message}`, 'error');
         await loadArtists();
       }
     });
@@ -338,7 +338,7 @@ export function initArtists() {
         );
         await loadArtists();
       } catch (err) {
-        alert(`Failed to update status: ${err.message}`);
+        toast(`Failed to update status: ${err.message}`, 'error');
       } finally {
         toggleActiveBtn.disabled = false;
       }
@@ -408,10 +408,10 @@ export function initArtists() {
         }
 
         const res = await api('POST', '/api/artists/import-json', parsed);
-        alert(`Imported ${res.added} new artists (${res.skipped?.length || 0} already existed).`);
+        toast(`Imported ${res.added} new artists (${res.skipped?.length || 0} already existed).`, 'success');
         await loadArtists();
       } catch (err) {
-        alert(`Import failed: ${err.message}`);
+        toast(`Import failed: ${err.message}`, 'error');
       } finally {
         importBtn.disabled = false;
         importBtn.textContent = 'Import JSON';
@@ -426,7 +426,7 @@ export function initArtists() {
     const byId = Object.fromEntries(artists.map((a) => [String(a.artist_id), a]));
     const names = checkedBoxes.map((cb) => byId[cb.value]?.name).filter(Boolean);
 
-    if (!confirm(`Delete selected artists (${names.length})? Their releases will also be deleted:\n${names.join(', ')}`)) {
+    if (!(await confirmDialog(`Delete selected artists (${names.length})? Their releases will also be deleted:\n${names.join(', ')}`))) {
       return;
     }
 
@@ -437,7 +437,7 @@ export function initArtists() {
       renderArtists();
       await loadArtists();
     } catch (err) {
-      alert(`Bulk delete failed: ${err.message}`);
+      toast(`Bulk delete failed: ${err.message}`, 'error');
       await loadArtists();
     }
   });

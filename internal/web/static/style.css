@@ -158,8 +158,13 @@ h2 {
   display: flex;
   align-items: baseline;
   gap: 0.6rem;
-  margin-bottom: 0.45rem;
+  cursor: pointer;
+  list-style: none;
 }
+.parser-header::-webkit-details-marker { display: none; }
+.parser-header::before { content: "▸"; color: var(--muted); font-size: 0.7rem; }
+.parser-card[open] .parser-header { margin-bottom: 0.45rem; }
+.parser-card[open] .parser-header::before { content: "▾"; }
 .parser-title {
   font-size: 0.76rem;
   font-weight: 600;
@@ -710,7 +715,7 @@ footer {
 .confirm-dialog::backdrop {
   background: rgba(0, 0, 0, 0.55);
 }
-.confirm-text { margin: 0 0 1rem; font-size: 0.9rem; }
+.confirm-text { margin: 0 0 1rem; font-size: 0.9rem; white-space: pre-line; }
 .confirm-actions {
   display: flex;
   justify-content: flex-end;
@@ -752,6 +757,9 @@ footer {
 @media (max-width: 768px) {
   .trans-general-grid {
     grid-template-columns: 1fr;
+  }
+  nav[role="tablist"] {
+    gap: 0.8rem;
   }
 }
 .trans-col {
@@ -946,11 +954,12 @@ footer {
 
 .pipeline-key-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
 }
 .pipeline-key-row input {
-  flex: 1;
+  flex: 1 1 12rem;
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 

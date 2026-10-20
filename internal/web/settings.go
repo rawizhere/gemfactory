@@ -67,6 +67,8 @@ func settingRegistry() []settingSpec {
 			}},
 		{key: "DOWNLOAD_RETENTION_HOURS", def: "24", validate: intRange(1, 8760)},
 		{key: "TG_FILE_LIMIT_MB", def: "49", validate: intRange(1, 2048)},
+		{key: "CLIP_MAX_DURATION_SECONDS", def: "300", validate: intRange(5, 3600)},
+		{key: "CLIP_MAX_DURATION_HQ_SECONDS", def: "30", validate: intRange(5, 600)},
 		{key: "YTDLP_PROXY", def: ""},
 		{key: "CLIP_CRF", def: "20", validate: intRange(15, 35)},
 		{key: "SUBS_CRF", def: "20", validate: intRange(15, 35)},

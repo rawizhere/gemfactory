@@ -59,11 +59,11 @@
   <!-- RELEASES TAB -->
   <section id="tab-releases" role="tabpanel">
     <!-- Parser Tool Bar -->
-    <div class="parser-card">
-      <div class="parser-header">
+    <details class="parser-card">
+      <summary class="parser-header">
         <span class="parser-title">Run Web Scraper</span>
-        <span class="hint" style="margin:0">Crawl kpopofficial.com for releases</span>
-      </div>
+        <span class="hint" style="margin:0">Crawl kpopofficial.com for releases; runs daily on its own</span>
+      </summary>
       <form id="parser-form" class="parser-form">
         <select id="parse-month" aria-label="Parse Month">
           <option value="all">Whole Year (All 12 Months)</option>
@@ -84,7 +84,7 @@
         <button class="btn btn-primary btn-sm" type="submit" id="parse-btn">Run Scraper</button>
         <span class="parser-status msg" id="parse-msg"></span>
       </form>
-    </div>
+    </details>
 
     <div class="bar" style="margin-top:1rem">
       <div class="search-wrap grow">
@@ -168,6 +168,8 @@
         <option value="male">Male</option>
         <option value="mixed">Mixed</option>
       </select>
+    </div>
+    <div class="bar">
       <label class="chk"><input type="checkbox" id="artist-check-all"> select all</label>
       <button class="btn btn-ghost btn-sm" type="button" id="artist-toggle-active" disabled>Toggle status</button>
       <button class="btn btn-danger btn-sm" type="button" id="artist-delete" disabled>Delete selected</button>
