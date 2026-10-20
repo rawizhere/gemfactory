@@ -67,6 +67,9 @@ export function renderArtists() {
   const genderFilter = $('#artist-gender-filter')?.value || '';
   const box = $('#artists-table');
   box.textContent = '';
+  // Rows are rebuilt, so any previous selection is gone.
+  $('#artist-check-all').checked = false;
+  lastCheckedIndex = -1;
   updateClearBtn();
 
   const rows = artists.filter((a) => {
@@ -335,7 +338,6 @@ export function initArtists() {
         await Promise.all(
           selected.map((a) => api('PATCH', `/api/artists/${a.artist_id}`, { is_active: targetState }))
         );
-        $('#artist-check-all').checked = false;
         await loadArtists();
       } catch (err) {
         alert(`Failed to update status: ${err.message}`);
@@ -434,7 +436,6 @@ export function initArtists() {
       const idsToDelete = new Set(checkedBoxes.map((cb) => Number(cb.value)));
       await Promise.all(checkedBoxes.map((cb) => api('DELETE', `/api/artists/${cb.value}`)));
       artists = artists.filter((x) => !idsToDelete.has(x.artist_id));
-      $('#artist-check-all').checked = false;
       renderArtists();
       await loadArtists();
     } catch (err) {

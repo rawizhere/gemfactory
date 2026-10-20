@@ -93,9 +93,6 @@ function renderPager(totalRows) {
   }
 
   const totalPages = Math.ceil(totalRows / pageSize);
-  if (currentPage > totalPages) currentPage = totalPages;
-  if (currentPage < 1) currentPage = 1;
-
   const info = el('span', null, `Page ${currentPage} of ${totalPages} (${totalRows} items)`);
 
   const controls = el('div', { class: 'pager-controls' });
@@ -159,8 +156,14 @@ function updateRelBar() {
 export function renderReleases() {
   const box = $('#releases-table');
   box.textContent = '';
+  // Rows are rebuilt, so any previous selection is gone.
+  $('#rel-check-all').checked = false;
+  lastCheckedIndex = -1;
 
   const allVisible = getVisibleReleases();
+  // Clamp before slicing: deletions or filters can leave currentPage past the last page.
+  const totalPages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(allVisible.length / pageSize));
+  currentPage = Math.min(Math.max(currentPage, 1), totalPages);
   $('#rel-count').textContent = `${allVisible.length} of ${releases.length}`;
 
   if (!allVisible.length) {
@@ -411,7 +414,6 @@ export function initReleases() {
       const idsToDelete = new Set(ids);
       await api('POST', '/api/releases/delete', { ids });
       releases = releases.filter((x) => !idsToDelete.has(x.id));
-      $('#rel-check-all').checked = false;
       renderReleases();
       await loadReleases();
     } catch (err) {
