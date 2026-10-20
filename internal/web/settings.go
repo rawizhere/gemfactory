@@ -240,19 +240,18 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		v := strings.TrimSpace(raw)
 
-		if spec.masked {
-			if v == "" || isMaskedKey(v) {
-				continue // empty or echoed-back mask = keep current
-			}
+		if spec.masked && isMaskedKey(v) {
+			continue // echoed-back mask = keep current
 		}
 
-		if spec.validate != nil {
+		// Empty clears the DB value: env or default applies again (for API keys this removes the key).
+		if v != "" && spec.validate != nil {
 			if err := spec.validate(v); err != nil {
 				http.Error(w, fmt.Sprintf("%s: %v", key, err), http.StatusBadRequest)
 				return
 			}
 		}
-		if spec.key == "CLIP_DELETE_STATUS" || spec.key == "SUBS_GOOGLE_ONLY" || spec.key == "GROK_ENABLED" {
+		if v != "" && (spec.key == "CLIP_DELETE_STATUS" || spec.key == "SUBS_GOOGLE_ONLY" || spec.key == "GROK_ENABLED") {
 			v = normalizeBool(v)
 		}
 		updates = append(updates, pending{spec: spec, val: v})
@@ -266,7 +265,9 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, u := range updates {
 		if u.spec.apply != nil {
-			u.spec.apply(s, u.val)
+			// Resolve again so a cleared value applies the env/default it falls back to.
+			v, _ := s.resolveSetting(ctx, u.spec)
+			u.spec.apply(s, v)
 		}
 	}
 

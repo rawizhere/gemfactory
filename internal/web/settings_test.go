@@ -75,3 +75,22 @@ func TestUpdateConfigRejectsRegisteredSettings(t *testing.T) {
 	require.Equal(t, 400, rec.Code)
 	require.Empty(t, cfg.values)
 }
+
+func postSettings(s *Server, body string) int {
+	rec := httptest.NewRecorder()
+	s.updateSettings(rec, httptest.NewRequest("POST", "/api/settings", strings.NewReader(body)))
+	return rec.Code
+}
+
+func TestUpdateSettingsClearsValues(t *testing.T) {
+	s, cfg := newConfigServer(map[string]string{"GROQ_API_KEY": "gsk_secret", "CLIP_CRF": "25"})
+
+	require.Equal(t, 200, postSettings(s, `{"GROQ_API_KEY":"gsk_se••••••••cret"}`), "echoed mask")
+	require.Equal(t, "gsk_secret", cfg.values["GROQ_API_KEY"], "echoed mask keeps the key")
+
+	require.Equal(t, 200, postSettings(s, `{"GROQ_API_KEY":"","CLIP_CRF":""}`))
+	require.Empty(t, cfg.values["GROQ_API_KEY"], "empty removes the key")
+	require.Empty(t, cfg.values["CLIP_CRF"], "empty reverts to default despite validation")
+
+	require.Equal(t, 400, postSettings(s, `{"CLIP_CRF":"99"}`), "non-empty values are still validated")
+}
