@@ -1,84 +1,11 @@
 package web
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/dustin/go-humanize"
-
-	"gemfactory/internal/downloader"
 )
-
-func (s *Server) submitDownload(w http.ResponseWriter, r *http.Request) {
-	if s.Downloads == nil {
-		http.Error(w, "downloader unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	var req downloader.ClipRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-	job, err := s.Downloads.Submit(r.Context(), req)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	writeJSON(w, job)
-}
-
-func (s *Server) listDownloads(w http.ResponseWriter, r *http.Request) {
-	if s.Downloads == nil {
-		http.Error(w, "downloader unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	writeJSON(w, s.Downloads.ListJobs())
-}
-
-func (s *Server) getDownload(w http.ResponseWriter, r *http.Request) {
-	if s.Downloads == nil {
-		http.Error(w, "downloader unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	job, ok := s.Downloads.GetJob(r.PathValue("id"))
-	if !ok {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	writeJSON(w, job)
-}
-
-func (s *Server) downloadFile(w http.ResponseWriter, r *http.Request) {
-	if s.Downloads == nil {
-		http.Error(w, "downloader unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	job, ok := s.Downloads.GetJob(r.PathValue("id"))
-	if !ok || job.Status != downloader.StatusDone || job.OutputDir == "" {
-		http.Error(w, "not ready", http.StatusNotFound)
-		return
-	}
-	f, err := os.Open(job.OutputDir)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	defer func() { _ = f.Close() }()
-
-	w.Header().Set("Content-Type", "video/mp4")
-	w.Header().Set("Content-Disposition",
-		"attachment; filename=\""+filepath.Base(job.OutputDir)+"\"")
-
-	var mod time.Time
-	if st, err := os.Stat(job.OutputDir); err == nil {
-		mod = st.ModTime()
-	}
-	http.ServeContent(w, r, filepath.Base(job.OutputDir), mod, f)
-}
 
 func (s *Server) getStorageUsage(w http.ResponseWriter, r *http.Request) {
 	if s.Downloads == nil {

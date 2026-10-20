@@ -53,7 +53,6 @@ func NewServer(port string, logger *zap.Logger, deps Deps) *Server {
 	mux.HandleFunc("POST /api/parse", s.runParser)
 	mux.HandleFunc("GET /api/stats", s.getStats)
 	mux.HandleFunc("GET /api/artists", s.listArtists)
-	mux.HandleFunc("POST /api/artists", s.createArtist)
 	mux.HandleFunc("POST /api/artists/batch", s.createArtists)
 	mux.HandleFunc("POST /api/artists/import-json", s.importArtistsJSON)
 	mux.HandleFunc("PATCH /api/artists/{id}", s.updateArtist)
@@ -71,12 +70,7 @@ func NewServer(port string, logger *zap.Logger, deps Deps) *Server {
 	mux.HandleFunc("DELETE /api/cookies/{domain}", s.deleteCookie)
 	mux.HandleFunc("GET /api/downloads/storage", s.getStorageUsage)
 	mux.HandleFunc("POST /api/downloads/storage/clean", s.cleanStorage)
-	mux.HandleFunc("POST /api/downloads", s.submitDownload)
-	mux.HandleFunc("GET /api/downloads", s.listDownloads)
-	mux.HandleFunc("GET /api/downloads/{id}", s.getDownload)
-	mux.HandleFunc("GET /api/downloads/{id}/file", s.downloadFile)
 	mux.HandleFunc("GET /api/translation", s.getTranslationConfig)
-	mux.HandleFunc("POST /api/translation", s.updateTranslationConfig)
 	mux.HandleFunc("POST /api/translation/test", s.testTranslation)
 	mux.HandleFunc("GET /api/translation/models", s.getModels)
 	mux.HandleFunc("POST /api/translation/models/check", s.checkModels)
@@ -119,45 +113,6 @@ func (s *Server) listArtists(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, artists)
-}
-
-func (s *Server) createArtist(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Name   string `json:"name"`
-		Gender string `json:"gender"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
-		return
-	}
-
-	gender, ok := parseGender(w, req.Gender)
-	if !ok {
-		return
-	}
-
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
-		return
-	}
-
-	existing, err := s.Artists.GetByName(r.Context(), name)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	if existing != nil {
-		http.Error(w, "artist already exists", http.StatusConflict)
-		return
-	}
-
-	artist := &model.Artist{Name: (name), Gender: gender}
-	if err := s.Artists.Create(r.Context(), artist); err != nil {
-		s.fail(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusCreated)
 }
 
 func (s *Server) createArtists(w http.ResponseWriter, r *http.Request) {

@@ -131,10 +131,6 @@ func (s *Service) SetConfigRepo(configs model.ConfigRepository) {
 	s.configs = configs
 }
 
-func (s *Service) Submit(ctx context.Context, req ClipRequest) (*Job, error) {
-	return s.SubmitWithCallbacks(ctx, req, nil)
-}
-
 func (s *Service) SubmitWithCallbacks(ctx context.Context, req ClipRequest, cbs *ClipCallbacks) (*Job, error) {
 	videoID := ""
 	if req.Start != "" || req.End != "" {
@@ -242,26 +238,6 @@ func (s *Service) setTranslation(job *Job, providerModel string) {
 	s.mu.Lock()
 	job.Translation = providerModel
 	s.mu.Unlock()
-}
-
-func (s *Service) GetJob(id string) (*Job, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	job, ok := s.jobs[id]
-	if !ok {
-		return nil, false
-	}
-	return snapshot(job), true
-}
-
-func (s *Service) ListJobs() []*Job {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]*Job, 0, len(s.order))
-	for _, id := range s.order {
-		out = append(out, snapshot(s.jobs[id]))
-	}
-	return out
 }
 
 // ProgressUpdate holds real-time progress details for heavy stages (download / re-encode).

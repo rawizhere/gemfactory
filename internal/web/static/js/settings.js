@@ -1295,7 +1295,7 @@ export async function loadConfig() {
     const [data, configRows, transConfig] = await Promise.all([
       api('GET', '/api/settings'),
       api('GET', '/api/config').catch(() => []),
-      api('GET', '/api/translation?health=1').catch(() => null),
+      api('GET', '/api/translation').catch(() => null),
     ]);
     state.entries = new Map(data.settings.map((e) => [e.key, e]));
     state.system = data.system || [];

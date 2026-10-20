@@ -96,11 +96,11 @@ func TestSubmitAcceptsOverlongIntervals(t *testing.T) {
 
 	// Overlong intervals are clamped/fail later, after metadata reveals the real duration.
 	// Invalid URL on purpose: its error proves the video-id lookup is now the first rejection point.
-	_, err := s.Submit(context.Background(), ClipRequest{URL: "https://example.com/video", Start: "0:00", End: "6:01"})
+	_, err := s.SubmitWithCallbacks(context.Background(), ClipRequest{URL: "https://example.com/video", Start: "0:00", End: "6:01"}, nil)
 	require.ErrorContains(t, err, "cannot extract video id")
 	require.NotContains(t, err.Error(), "is too long", "duration must not be validated at submit time")
 
-	_, err = s.Submit(context.Background(), ClipRequest{URL: "https://example.com/video", Start: "0:31", End: "0:30"})
+	_, err = s.SubmitWithCallbacks(context.Background(), ClipRequest{URL: "https://example.com/video", Start: "0:31", End: "0:30"}, nil)
 	require.ErrorContains(t, err, "must be after start", "reversed interval still fails at submit")
 }
 
