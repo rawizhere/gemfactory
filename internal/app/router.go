@@ -58,7 +58,6 @@ func (r *Router) RegisterRoutes(bh *th.BotHandler) {
 		{"add_artist", func(ctx *th.Context, m telego.Message) error { r.handlers.Admin.AddArtist(ctx, &m); return nil }},
 		{"remove_artist", func(ctx *th.Context, m telego.Message) error { r.handlers.Admin.RemoveArtist(ctx, &m); return nil }},
 		{"export", func(ctx *th.Context, m telego.Message) error { r.handlers.Admin.Export(ctx, &m); return nil }},
-		{"config", func(ctx *th.Context, m telego.Message) error { r.handlers.Admin.Config(ctx, &m); return nil }},
 		{"parse", func(ctx *th.Context, m telego.Message) error { r.handlers.Admin.Parse(ctx, &m); return nil }},
 		{"clip", clipHandler(r.handlers, "clip")},
 		{"gif", clipHandler(r.handlers, "gif")},

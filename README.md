@@ -29,7 +29,6 @@ Telegram bot for tracking music releases and downloading media clips.
 - `/add_artist [name] [-f|-m]` - Add artist to list
 - `/remove_artist [name]` - Remove artist from list
 - `/admin` - Admin panel entry
-- `/config [key] [value]` - Set configuration
 - `/metrics` - Bot metrics
 - `/parse [month/year]` - Parse releases for specific month/year
 - `/export` - Export all artists

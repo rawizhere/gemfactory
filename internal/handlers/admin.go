@@ -28,7 +28,6 @@ func (h *AdminHandlers) Admin(ctx context.Context, message *telego.Message) {
 		"/add_artist [names] [-f|-m] - Add artists\n" +
 		"/remove_artist [names] - Deactivate artists\n" +
 		"/export - Export artist list\n" +
-		"/config [key] [value] - Configuration\n" +
 		"/parse [month] [year] - Run parser"
 
 	_ = h.TG.SendMessage(ctx, message.Chat.ID, text)
@@ -86,36 +85,6 @@ func (h *AdminHandlers) RemoveArtist(ctx context.Context, message *telego.Messag
 	}
 
 	_ = h.TG.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("Deactivated artists: %d", count))
-}
-
-func (h *AdminHandlers) Config(ctx context.Context, message *telego.Message) {
-	if !h.IsAdmin(message.From) {
-		return
-	}
-
-	parts := strings.Fields(message.Text)
-	if len(parts) == 1 {
-		res, err := h.Services.Config.GetAll(ctx)
-		if err != nil {
-			h.HandleError(ctx, message.Chat.ID, err, "Failed to get config")
-			return
-		}
-		_ = h.TG.SendMessage(ctx, message.Chat.ID, res)
-		return
-	}
-
-	if len(parts) >= 3 {
-		key := strings.ToUpper(parts[1])
-		val := strings.Join(parts[2:], " ")
-		if err := h.Services.Config.Update(ctx, key, val); err != nil {
-			h.HandleError(ctx, message.Chat.ID, err, "Failed to update config")
-			return
-		}
-		_ = h.TG.SendMessage(ctx, message.Chat.ID, fmt.Sprintf("Config updated: %s = %s", key, val))
-		return
-	}
-
-	_ = h.TG.SendMessage(ctx, message.Chat.ID, "Usage: /config OR /config <KEY> <VALUE>")
 }
 
 func (h *AdminHandlers) Parse(ctx context.Context, message *telego.Message) {

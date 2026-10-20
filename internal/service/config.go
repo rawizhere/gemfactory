@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"gemfactory/internal/model"
-	"strings"
 
 	"go.uber.org/zap"
 )
@@ -37,35 +36,4 @@ func (s *ConfigService) Get(ctx context.Context, key string) (string, error) {
 		return "", fmt.Errorf("config %s not found", key)
 	}
 	return c.Value, nil
-}
-
-func (s *ConfigService) GetAll(ctx context.Context) (string, error) {
-	configs, err := s.repo.GetAll(ctx)
-	if err != nil {
-		return "", fmt.Errorf("failed to get all configs: %w", err)
-	}
-
-	sensitiveKeys := map[string]bool{
-		"BOT_TOKEN": true,
-	}
-
-	var result strings.Builder
-	result.WriteString("Current Configuration:\n\n")
-
-	for _, c := range configs {
-		var value string
-		if sensitiveKeys[c.Key] {
-			value = "[HIDDEN FOR SECURITY - CHECK ENVIRONMENT]"
-		} else {
-			value = c.Value
-		}
-
-		fmt.Fprintf(&result, "<b>%s</b>: %s\n", c.Key, value)
-		if c.Description != "" {
-			fmt.Fprintf(&result, "   %s\n", c.Description)
-		}
-		result.WriteString("\n")
-	}
-
-	return result.String(), nil
 }
