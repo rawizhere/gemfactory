@@ -11,11 +11,11 @@ func TestBuildFallbackChain(t *testing.T) {
 		cfg  Config
 		want []string
 	}{
-		{Config{}, []string{ProviderOpenRouter, ProviderOpencode, ProviderNvidia, ProviderGroq}},
+		{Config{}, []string{ProviderGemini, ProviderOpenRouter, ProviderOpencode, ProviderNvidia, ProviderGroq}},
 		{Config{FallbackOrder: []string{"nvidia", "gemini", "groq", "opencode"}}, []string{"nvidia", "gemini", "groq", "opencode"}},
 		{Config{FallbackOrder: []string{"groq", "gemini"}}, []string{"groq", "gemini"}},
 		{Config{FallbackOrder: []string{"openrouter", "gemini", "garbage", "groq"}}, []string{"openrouter", "gemini", "groq"}},
-		{Config{GoogleOnly: true}, []string{ProviderGoogle}},
+		{Config{FallbackOrder: []string{"google", "groq"}}, []string{"groq"}},
 	}
 
 	for _, tt := range tests {
@@ -105,14 +105,6 @@ func TestStripMarkdownBold(t *testing.T) {
 	require.Equal(t, "a * b ** c", stripMarkdownBold("a * b ** c"), "lone asterisks must survive")
 }
 
-func TestBuildSystemInstruction(t *testing.T) {
-	base := "rules"
-	require.Equal(t, base, BuildSystemInstruction(base, "en"), "want base without addendum")
-	require.Equal(t, base, BuildSystemInstruction(base, "ru"), "custom prompt must not append ruAddendum")
-	require.Equal(t, ruAddendum, BuildSystemInstruction("", "ru"), "empty prompt with ru target must use ruAddendum")
-	require.Equal(t, "", BuildSystemInstruction("", "en"), "empty prompt with non-ru target returns empty")
-}
-
 func TestSanitizeKeepsEmojiSequences(t *testing.T) {
 	in := "😂 👨‍👩‍👧 ✈️ ♪"
 	require.Equal(t, in, SanitizeTypography(in), "emoji sequences must stay unchanged")
@@ -140,4 +132,51 @@ func TestLinePassesTargetContextCues(t *testing.T) {
 	require.True(t, linePassesTarget("[작고 소중한 비눗방울 전달]", "[작고 소중한 비눗방울 전달]", "ru"), "bracketed caption kept as-is must pass")
 	require.True(t, linePassesTarget("우와!", "Wow!", "ru"), "interjection may stay Latin")
 	require.False(t, linePassesTarget("안녕하세요", "안녕하세요", "ru"), "regular untranslated line must fail")
+}
+
+func TestParseNumberedLinesRejectsMissing(t *testing.T) {
+	_, err := parseNumberedLines("1. Привет\n3. Пока", 3)
+	require.Error(t, err, "a dropped line must fail instead of falling back to the source")
+	_, err = parseNumberedLines("1. Привет\n2.\n3. Пока", 3)
+	require.Error(t, err, "an empty line must fail")
+}
+
+func TestParseJSONLines(t *testing.T) {
+	res, err := parseJSONLines(`["Привет", "Пока ♪"]`, 2)
+	require.NoError(t, err)
+	require.Equal(t, []string{"Привет", "Пока ♪"}, res)
+
+	res, err = parseJSONLines("```json\n[\"Да\"]\n```", 1)
+	require.NoError(t, err)
+	require.Equal(t, []string{"Да"}, res)
+
+	_, err = parseJSONLines(`["Привет"]`, 2)
+	require.Error(t, err, "count mismatch")
+	_, err = parseJSONLines(`["Привет", " "]`, 2)
+	require.Error(t, err, "empty line")
+	_, err = parseJSONLines(`not json`, 1)
+	require.Error(t, err)
+}
+
+func TestBuildTranslateUserMsgFormats(t *testing.T) {
+	numbered := buildTranslateUserMsg([]string{"a", "b"}, "ru", "en", "", outputNumbered)
+	require.Contains(t, numbered, "exactly 2 numbered lines")
+	require.Contains(t, numbered, "1. a\n2. b")
+
+	js := buildTranslateUserMsg([]string{"a", "b"}, "ru", "en", "", outputJSON)
+	require.Contains(t, js, "JSON array of exactly 2 strings")
+}
+
+func TestLinePassesTargetDroppedAndNames(t *testing.T) {
+	require.False(t, linePassesTarget("Hello there", "", "ru"), "dropped line must fail")
+	require.True(t, linePassesTarget("트와이스!", "TWICE!", "ru"), "group name kept in Latin")
+	require.True(t, linePassesTarget("MBTI?", "MBTI?", "ru"), "acronym kept in Latin")
+	require.True(t, linePassesTarget("aespa", "aespa", "ru"), "single lowercase name unchanged")
+	require.False(t, linePassesTarget("Thank you so much", "Thank you so much", "ru"), "untranslated sentence must fail")
+}
+
+func TestTextLooksTarget(t *testing.T) {
+	require.True(t, TextLooksTarget([]string{"Привет", "Как дела?"}, "ru"))
+	require.False(t, TextLooksTarget([]string{"Hello", "How are you?"}, "ru"))
+	require.False(t, TextLooksTarget(nil, "ru"))
 }

@@ -14,7 +14,7 @@ import (
 )
 
 func TestRestrictTestToModel(t *testing.T) {
-	base := []string{translate.ProviderGoogle, translate.ProviderGemini, translate.ProviderOpencode, translate.ProviderOpenRouter}
+	base := []string{translate.ProviderGemini, translate.ProviderOpencode, translate.ProviderOpenRouter}
 
 	cases := []struct {
 		name      string
@@ -62,13 +62,6 @@ func TestRestrictTestToModel(t *testing.T) {
 			model:     "groq/llama",
 			wantChain: []string{translate.ProviderGroq},
 			wantModel: map[string][]string{translate.ProviderGroq: {"llama"}},
-		},
-		{
-			name:      "google has no model list but chain narrows",
-			tc:        translate.Config{},
-			chain:     base,
-			model:     "google/web",
-			wantChain: []string{translate.ProviderGoogle},
 		},
 	}
 

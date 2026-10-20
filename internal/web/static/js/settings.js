@@ -261,7 +261,6 @@ function collectProviderOverrides() {
 }
 
 function getProvider(id) {
-  if (id === 'google') return { id: 'google', label: 'Google Translate', keyPlaceholder: '' };
   return PROVIDERS.find((p) => p.id === id) || { id, label: id, keyPlaceholder: 'API key' };
 }
 
@@ -1003,16 +1002,16 @@ function renderTranslationGeneralCard(root) {
   if (fTimeout.hint) colTimeout.appendChild(el('span', { class: 'fld-hint' }, fTimeout.hint));
   grid.appendChild(colTimeout);
 
-  const fGoogle = FIELD('SUBS_GOOGLE_ONLY', 'Google Translate Only', 'bool', { hint: 'Skip LLMs' });
-  const colGoogle = el('div', { class: 'trans-col' });
-  const headGoogle = el('label', { class: 'trans-col-head trans-toggle' });
-  const editGoogle = buildEditor(fGoogle);
-  headGoogle.appendChild(editGoogle);
-  headGoogle.appendChild(el('span', null, fGoogle.label));
-  headGoogle.appendChild(srcBadge(fGoogle.key));
-  colGoogle.appendChild(headGoogle);
-  if (fGoogle.hint) colGoogle.appendChild(el('span', { class: 'fld-hint' }, fGoogle.hint));
-  grid.appendChild(colGoogle);
+  const fYouTube = FIELD('SUBS_YOUTUBE_ONLY', 'YouTube Auto-translate Only', 'bool', { hint: 'Skip LLMs' });
+  const colYouTube = el('div', { class: 'trans-col' });
+  const headYouTube = el('label', { class: 'trans-col-head trans-toggle' });
+  const editYouTube = buildEditor(fYouTube);
+  headYouTube.appendChild(editYouTube);
+  headYouTube.appendChild(el('span', null, fYouTube.label));
+  headYouTube.appendChild(srcBadge(fYouTube.key));
+  colYouTube.appendChild(headYouTube);
+  if (fYouTube.hint) colYouTube.appendChild(el('span', { class: 'fld-hint' }, fYouTube.hint));
+  grid.appendChild(colYouTube);
 
   card.appendChild(grid);
   root.appendChild(card);

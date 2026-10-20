@@ -6,7 +6,7 @@ Telegram bot for tracking music releases and downloading media clips.
 - **Filters**: View releases by month, filtered by gender (`-f` / `-m`) or user-defined artist lists.
 - **Auto-Updates**: Keeps the release calendar up to date in the background.
 - **Media Downloader**: Download video clips, GIFs, MP3 audio, and translated subtitles via yt-dlp.
-- **Multi-Provider Subtitle Translation**: Subtitle translation using Google Translate, Gemini, or Groq with automatic fallback.
+- **Multi-Provider Subtitle Translation**: Subtitle translation via Gemini, OpenRouter, OpenCode, NVIDIA or Groq with automatic fallback, and YouTube auto-translate as the last resort.
 - **Web Admin Panel**: Web UI to manage artists, releases, scraper settings, and translation settings.
 - **Dynamic Configuration**: Settings are stored in DB and updated in real-time.
 
@@ -21,7 +21,7 @@ Telegram bot for tracking music releases and downloading media clips.
 - `/search [artist]` - Search releases by artist
 - `/artists` - Show active artists lists
 - `/clip [url] [start] [end] [720p] [hq]` - Download video clip
-- `/subs [url] [start] [end] [lang] [720p] [hq] [nollm]` - Cut clip with burned-in subtitles; `nollm` translates via Google Translate, skipping AI providers
+- `/subs [url] [start] [end] [lang] [720p] [hq] [nollm]` - Cut clip with burned-in subtitles; `nollm` uses YouTube auto-translate, skipping AI providers
 - `/gif [url] [start] [end]` - Download clip as GIF
 - `/mp3 [url] [start] [end]` - Extract audio track
 

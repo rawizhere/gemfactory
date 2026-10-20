@@ -40,7 +40,7 @@ type ParsedCommand struct {
 	Quality   string // e.g. "720p"
 	HQ        bool
 	Meta      bool
-	NoLLM     bool // translate subs via Google Translate only
+	NoLLM     bool // translate subs via YouTube auto-translate only
 	GIF       bool
 	Shorts    bool
 	AudioOnly bool

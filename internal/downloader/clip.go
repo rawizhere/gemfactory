@@ -347,7 +347,7 @@ func variantSuffix(req ClipRequest) string {
 		parts = append(parts, sanitizeName(req.SubsLang))
 	}
 	if req.SubsNoLLM {
-		parts = append(parts, "gt")
+		parts = append(parts, "yt")
 	}
 	if len(parts) == 0 {
 		return ""

@@ -11,7 +11,6 @@ import (
 )
 
 const (
-	ProviderGoogle     = "google"
 	ProviderGemini     = "gemini"
 	ProviderGroq       = "groq"
 	ProviderOpencode   = "opencode"
@@ -44,13 +43,43 @@ var DefaultOpenRouterModels = []string{
 
 const translatorRole = "You are a professional video subtitle translator."
 
-const DefaultTranslationPrompt = `Translate subtitles for entertainment videos: variety shows, vlogs, livestreams, song lyrics. The source language varies — detect it from the lines themselves.
-1. Meaning over words: natural spoken register matching the original's energy; never wooden literalism or calques.
-2. Names: personal, stage and group names, fandoms and products are names — transliterate them by sound into the target script (YE-ON / YEEUN -> Йеон / Йеын, NAYEON -> Наён, WONYOUNG -> Вонён, CHAEWON -> Чэвон, YUJIN -> Юджин, JI-HYO -> Джихё, JAE-SUK -> Джэсок); if translating a token yields a common word, it is a name. Acronyms (MBTI, TMI, PPL) and stylized brand/model names stay in Latin script.
-3. Formatting: keep speaker tags ([ALL], Host:) intact. Preserve leading dashes for simultaneous speech of two speakers (- Реплика 1 - Реплика 2); never merge phrases of different speakers. Translate bracketed notes naturally inside the brackets; preserve ♪, emojis, tildes, asterisks and Asian brackets.
-4. Output rules: return numbered lines only. Do not use markdown code blocks (NO ` + "```" + `).
-5. Song lyrics: translate the thought and rhythm, not word-by-word.
-6. Silently fix obvious ASR/speech-recognition errors from context.`
+// DefaultTranslationPrompt is the fallback when TRANSLATION_PROMPT is empty; the live prompt is edited in the web panel.
+// Output-format rules live in the per-provider user message, so editing the prompt cannot break parsing.
+const DefaultTranslationPrompt = `Target: Russian subtitles for K-pop variety shows, vlogs, livestreams and song lyrics.
+
+1. Lines and dialogue
+- Each numbered line is one on-screen subtitle. A sentence often continues on the next line: read the neighbours, then translate so the lines read naturally in order, keeping each line's content under its own number. Do not merge, split, move or drop lines.
+- "- A - B" in one line is two speakers: keep both dashes in that same line, keep their phrases separate, no line breaks.
+- A speaker tag at the start of a line ([ALL], [WONYOUNG], Host:) is copied unchanged.
+- Any other bracketed text is an editor's note: translate it inside the same brackets ([Laughter] -> [Смех], (Sighs) -> (Вздыхает), [Music] -> [Музыка]).
+- Copy ♪, ♫, emojis, ~, *, 「」, 【】, 《》 and quotes unchanged and in place.
+
+2. Names
+- People (idols, members, hosts, guests): Cyrillic by sound, spelled the same in every line.
+  Examples: NAYEON -> Наён, WONYOUNG -> Вонён, CHAEWON -> Чэвон, YUJIN -> Юджин, JI-HYO -> Джихё, JAE-SUK -> Джэсок, SO-MIN -> Сомин, YE-ON -> Йеон, YEEUN -> Йеын, Winter -> Винтер, Joy -> Джой.
+  Sounds: eo -> о, eu -> ы, ae -> э, yeo/yo -> ё, final ng -> н, j -> дж, ch -> ч.
+  Surnames: Kim -> Ким, Lee/Yi -> Ли, Park -> Пак, Choi -> Чхве, Jung/Jeong -> Чон, Kang -> Кан, Cho -> Чо, Yoon -> Юн, Jang -> Чан, Lim -> Им, Han -> Хан, Shin -> Син, Song -> Сон, Hwang -> Хван.
+- A hyphenated or all-caps name (YE-ON, JI-HYO) is one name, never split into syllables or translated as words.
+- Groups, fandoms, shows and brands stay in Latin as written: RESCENE, aespa, TWICE, ONCE.
+- If a word would translate into an ordinary word but stands where a name fits, it is a name.
+- Acronyms stay in Latin: MBTI, TMI, OOTD, PPL, ASMR.
+- Honorifics in Cyrillic: онни, оппа, нуна, хён, макнэ, сонбэ(ним); "-ssi" -> "-сси".
+
+3. Style
+- Lively spoken Russian with the energy of the original; translate idioms, slang and jokes by meaning, not word-for-word.
+- "ты" between members, friends and hosts; the audience is "вы" / "ребята".
+- Short lines a viewer reads in 2–3 seconds; drop filler words instead of padding.
+- Korean interjections get Russian equivalents: 대박 -> Офигеть, 헐 -> Чего?!, 아이고 -> Ой-ой, 화이팅 -> Вперёд!
+- Mixed Korean and English in one line becomes one natural Russian sentence.
+- Lyrics: meaning and mood in short lines, no forced rhyme.
+- Keep swearing at the same strength; do not censor, soften or comment.
+- Silently fix obvious typos and speech-recognition errors.
+
+4. Example
+[WONYOUNG] Wait, I really didn't -> [WONYOUNG] Стоп, я правда совсем
+expect that at all -> такого не ожидала
+- Are you serious? - Yes! -> - Ты серьёзно? - Ага!
+[Laughter] 대박 ♪ -> [Смех] Офигеть ♪`
 
 // Grok defaults used when GROK_RATE_LIMIT / GROK_MAX_CHARS are unset; the web panel shows the same values.
 const (
@@ -85,25 +114,12 @@ const DefaultGrokOpinionPrompt = `Ты — Grok в Telegram. У тебя спр�
 4. Не читай лекций, не морализируй, не проговаривай оговорки про то, что ты ИИ.
 5. Лаконично (1–3 предложения). Не используй абсолютно никаких эмодзи.`
 
-const ruAddendum = `For Russian: informal "ты", lively youth phrasing; transliterate Korean honorifics (онни, оппа, макнэ, хён); names transliterate by sound (Liv -> Лив, May -> Мэй), a common noun next to a name stays a common word (리브 미모 = красота Лив, not "Liv Mimo"); bracketed notes translate naturally ([Laughter] -> [Смех]).`
-
 // DefaultSourcePrefRU is the fallback source-language order for ru subtitles.
 const DefaultSourcePrefRU = "en,ko"
 
-// BuildSystemInstruction returns prompt or falls back to ruAddendum when prompt is empty.
-func BuildSystemInstruction(prompt, targetLang string) string {
-	if prompt != "" {
-		return prompt
-	}
-	if targetLang == "ru" {
-		return ruAddendum
-	}
-	return ""
-}
-
 // Config holds the provider fallback order, API keys, models, custom prompt and LLM request timeout.
 type Config struct {
-	GoogleOnly       bool // force Google Translate, skip all LLM providers
+	YouTubeOnly      bool // use YouTube auto-translate, skip all LLM providers
 	GeminiKey        string
 	GroqKey          string
 	OpencodeKey      string
@@ -161,7 +177,7 @@ func DefaultConfig() Config {
 		Prompt:           strings.TrimSpace(os.Getenv("TRANSLATION_PROMPT")),
 		SourcePrefRU:     ParseCSV(os.Getenv("SUBS_SOURCE_PREF_RU")),
 	}
-	cfg.GoogleOnly = settings.IsTruthy(os.Getenv("SUBS_GOOGLE_ONLY"))
+	cfg.YouTubeOnly = settings.IsTruthy(os.Getenv("SUBS_YOUTUBE_ONLY"))
 	return ApplyDefaults(cfg)
 }
 
@@ -210,8 +226,8 @@ func ResolveConfig(getter func(string) (string, bool)) Config {
 	if v, ok := getter("SUBS_SOURCE_PREF_RU"); ok {
 		cfg.SourcePrefRU = ParseCSV(v)
 	}
-	if v, ok := getter("SUBS_GOOGLE_ONLY"); ok {
-		cfg.GoogleOnly = settings.IsTruthy(v)
+	if v, ok := getter("SUBS_YOUTUBE_ONLY"); ok {
+		cfg.YouTubeOnly = settings.IsTruthy(v)
 	}
 	if v, ok := getter("TRANSLATION_TIMEOUT"); ok {
 		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {
@@ -258,14 +274,11 @@ func defaultTimeout() time.Duration {
 }
 
 func BuildFallbackChain(cfg Config) []string {
-	if cfg.GoogleOnly {
-		return []string{ProviderGoogle}
-	}
 	if len(cfg.FallbackOrder) > 0 {
 		var chain []string
 		for _, p := range cfg.FallbackOrder {
 			p = strings.ToLower(strings.TrimSpace(p))
-			if p == ProviderGoogle || p == ProviderGemini || p == ProviderGroq || p == ProviderOpencode || p == ProviderNvidia || p == ProviderOpenRouter {
+			if p == ProviderGemini || p == ProviderGroq || p == ProviderOpencode || p == ProviderNvidia || p == ProviderOpenRouter {
 				chain = append(chain, p)
 			}
 		}
@@ -273,5 +286,5 @@ func BuildFallbackChain(cfg Config) []string {
 			return chain
 		}
 	}
-	return []string{ProviderOpenRouter, ProviderOpencode, ProviderNvidia, ProviderGroq}
+	return []string{ProviderGemini, ProviderOpenRouter, ProviderOpencode, ProviderNvidia, ProviderGroq}
 }

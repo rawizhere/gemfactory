@@ -93,7 +93,7 @@ func (h *ClipHandlers) Help(ctx context.Context, message *telego.Message) {
 				"• Multiple timecode pairs produce multiple clips in one command\n" +
 				"• Default language is en; auto-translated if not available\n" +
 				"• <code>720p</code> — Limit quality to 720p (smaller file size)\n" +
-				"• <code>nollm</code> — translate via Google Translate, skipping AI providers\n" +
+				"• <code>nollm</code> — YouTube auto-translate, skipping AI providers\n" +
 				"Example: <code>/subs https://youtu.be/r0u5URS3VXE 4:00 4:01 4:02 4:04 ru 720p nollm</code>"
 		case "mp3":
 			text = "<b>/mp3</b> — Extract audio track from video\n\n" +

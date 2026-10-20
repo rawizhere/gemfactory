@@ -22,7 +22,7 @@ type ClipRequest struct {
 	Start     string `json:"start,omitempty"`
 	End       string `json:"end,omitempty"`
 	SubsLang  string `json:"subs_lang,omitempty"`   // empty = no subs
-	SubsNoLLM bool   `json:"subs_no_llm,omitempty"` // translate via Google Translate only
+	SubsNoLLM bool   `json:"subs_no_llm,omitempty"` // translate via YouTube auto-translate only
 	Quality   string `json:"quality,omitempty"`     // e.g. "720p", "720", "1080p"
 	HQ        bool   `json:"hq,omitempty"`          // up to 2K
 	GIF       bool   `json:"gif,omitempty"`         // drop audio track

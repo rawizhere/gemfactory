@@ -22,7 +22,7 @@ func TestVariantSuffix(t *testing.T) {
 		{ClipRequest{GIF: true}, "-gif"},
 		{ClipRequest{SubsLang: "ru"}, "-ru"},
 		{ClipRequest{HQ: true, GIF: true, SubsLang: "en-US"}, "-hq-gif-en-US"},
-		{ClipRequest{SubsLang: "ru", SubsNoLLM: true}, "-ru-gt"},
+		{ClipRequest{SubsLang: "ru", SubsNoLLM: true}, "-ru-yt"},
 	}
 	for _, c := range cases {
 		require.Equal(t, c.want, variantSuffix(c.req), "variantSuffix(%+v)", c.req)

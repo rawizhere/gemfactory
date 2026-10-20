@@ -379,3 +379,21 @@ func TestDownloadSubtitlesDirectEmptyBodyFails(t *testing.T) {
 	_, statErr := os.Stat(out)
 	require.Error(t, statErr, "no subtitle file must be written when every attempt returns an empty body")
 }
+
+func TestWithTranslationLang(t *testing.T) {
+	got := withTranslationLang("https://www.youtube.com/api/timedtext?v=abc&lang=en&sparams=ip", "ru")
+	u, err := url.Parse(got)
+	require.NoError(t, err)
+	require.Equal(t, "ru", u.Query().Get("tlang"))
+	require.Equal(t, "en", u.Query().Get("lang"), "source params must survive")
+
+	full, err := url.Parse(buildTimedtextURL(got, "pot", "vtt"))
+	require.NoError(t, err)
+	require.Equal(t, "ru", full.Query().Get("tlang"), "buildTimedtextURL must keep tlang")
+}
+
+func TestVTTTextLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "a.vtt")
+	require.NoError(t, os.WriteFile(path, []byte("WEBVTT\nKind: captions\nLanguage: en\n\n00:00:00.000 --> 00:00:01.000\nПривет\nмир\n\n00:00:01.000 --> 00:00:02.000\nПока\n"), 0644))
+	require.Equal(t, []string{"Привет", "мир", "Пока"}, vttTextLines(path))
+}

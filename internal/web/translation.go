@@ -47,8 +47,6 @@ func restrictTestToModel(tc *translate.Config, chain []string, model string) []s
 		tc.NvidiaModels = []string{m}
 	case translate.ProviderOpenRouter:
 		tc.OpenRouterModels = []string{m}
-	case translate.ProviderGoogle:
-		// Google web translate has no model id; the provider restriction is enough.
 	default:
 		return chain
 	}
@@ -140,7 +138,7 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 	if prompt == "" {
 		prompt = tc.Prompt
 	}
-	instr := translate.BuildSystemInstruction(prompt, targetLang)
+	instr := prompt
 
 	chain := restrictTestToModel(&tc, translate.BuildFallbackChain(tc), req.Model)
 
@@ -151,10 +149,6 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 
 	var items []testItem
 	for _, p := range chain {
-		if p == translate.ProviderGoogle {
-			items = append(items, testItem{Provider: p, Model: "web"})
-			continue
-		}
 		var models []string
 		switch p {
 		case translate.ProviderGemini:
@@ -243,7 +237,7 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 				key = tc.OpenRouterKey
 			}
 
-			if item.Provider != translate.ProviderGoogle && key == "" {
+			if key == "" {
 				sendNDJSON(map[string]any{
 					"type":       "result",
 					"provider":   item.Provider,
@@ -260,8 +254,6 @@ func (s *Server) testTranslation(w http.ResponseWriter, r *http.Request) {
 			var err error
 
 			switch item.Provider {
-			case translate.ProviderGoogle:
-				texts, err = translate.TranslateWithGoogle(ctx, []string{sampleText}, targetLang)
 			case translate.ProviderGemini:
 				texts, _, err = translate.TranslateWithGemini(ctx, []string{sampleText}, targetLang, "", key, instr, videoTitle, tc.Timeout, nil, []string{item.Model})
 			case translate.ProviderGroq:

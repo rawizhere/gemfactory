@@ -81,7 +81,23 @@ func (s *Service) subtitlesForClip(
 		if cbs := s.callbacksOf(job); cbs != nil {
 			onAttempt = cbs.OnTranslateAttempt
 		}
-		prov, terr := s.translateVTTFile(ctx, trimmedPath, res.TargetLang, res.SourceLang, videoTitle, job.Request.SubsNoLLM, onAttempt)
+		var prov string
+		var terr error
+		if job.Request.SubsNoLLM || cfg.YouTubeOnly {
+			prov, terr = s.youtubeTranslatedVTT(ctx, job, res, cookieFile, startMs, endMs, trimmedPath)
+		} else {
+			prov, terr = s.translateVTTFile(ctx, trimmedPath, res.TargetLang, res.SourceLang, videoTitle, onAttempt)
+			if terr != nil {
+				s.logger.Warn("llm translation failed, falling back to youtube auto-translate",
+					zap.String("video_id", videoID), zap.Error(terr))
+				yprov, yerr := s.youtubeTranslatedVTT(ctx, job, res, cookieFile, startMs, endMs, trimmedPath)
+				if yerr == nil {
+					prov, terr = yprov+"-fallback", nil
+				} else {
+					terr = fmt.Errorf("%w; youtube fallback: %v", terr, yerr)
+				}
+			}
+		}
 		if terr == nil && prov != "" {
 			s.setTranslation(job, prov)
 			if cbs := s.callbacksOf(job); cbs != nil && cbs.OnTranslation != nil {
@@ -377,7 +393,71 @@ func trySubtitleFetch(ctx context.Context, rawURL, pot, cookieFile, outPath stri
 	return os.WriteFile(outPath, vtt, 0644)
 }
 
-func (s *Service) translateVTTFile(ctx context.Context, vttPath, targetLang, sourceLang, videoTitle string, noLLM bool, onAttempt func(string)) (string, error) {
+// youtubeTranslatedVTT fetches YouTube's own auto-translation of the source track (tlang) and trims it to the clip.
+// yt-dlp is not a fallback here: asked for the source language it would hand back untranslated subtitles.
+func (s *Service) youtubeTranslatedVTT(ctx context.Context, job *Job, res *SubtitleTrackResolution, cookieFile string, startMs, endMs float64, outPath string) (string, error) {
+	fullVTT := filepath.Join(s.workbenchDir(job.VideoID), "fullsubs_"+job.VideoID+"."+res.SourceLang+"-"+res.TargetLang+".vtt")
+	if _, err := os.Stat(fullVTT); err != nil {
+		trackURL := withTranslationLang(res.TrackURL, res.TargetLang)
+		derr := downloadSubtitlesDirect(ctx, trackURL, cookieFile, fullVTT)
+		if derr != nil && cookieFile != "" {
+			derr = downloadSubtitlesDirect(ctx, trackURL, "", fullVTT)
+		}
+		if derr != nil {
+			return "", fmt.Errorf("youtube auto-translate: %w", derr)
+		}
+	}
+	// Trim beside outPath and swap in only after validation, so a failure leaves the source subtitles intact.
+	tmpPath := outPath + ".yt.tmp"
+	defer func() { _ = os.Remove(tmpPath) }()
+	cues, err := TrimVTTFile(fullVTT, startMs, endMs, tmpPath)
+	if err != nil {
+		return "", fmt.Errorf("youtube auto-translate: %w", err)
+	}
+	if cues == 0 || !translate.TextLooksTarget(vttTextLines(tmpPath), res.TargetLang) {
+		_ = os.Remove(fullVTT)
+		return "", fmt.Errorf("youtube auto-translate returned no %s text", res.TargetLang)
+	}
+	if err := os.Rename(tmpPath, outPath); err != nil {
+		return "", fmt.Errorf("youtube auto-translate: %w", err)
+	}
+	return "youtube/auto-translate", nil
+}
+
+// withTranslationLang asks timedtext for YouTube's machine translation of the track into lang.
+func withTranslationLang(rawURL, lang string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	q := u.Query()
+	q.Set("tlang", lang)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// vttTextLines returns the cue text lines of a VTT file, skipping the header and timestamps.
+func vttTextLines(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	inCue := false
+	for _, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
+		switch {
+		case strings.Contains(line, "-->"):
+			inCue = true
+		case strings.TrimSpace(line) == "":
+			inCue = false
+		case inCue:
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+func (s *Service) translateVTTFile(ctx context.Context, vttPath, targetLang, sourceLang, videoTitle string, onAttempt func(string)) (string, error) {
 	data, err := os.ReadFile(vttPath)
 	if err != nil {
 		return "", err
@@ -429,9 +509,6 @@ func (s *Service) translateVTTFile(ctx context.Context, vttPath, targetLang, sou
 	}
 
 	cfg := s.ResolveTranslationConfig(ctx)
-	if noLLM {
-		cfg.GoogleOnly = true
-	}
 	translated, provider, err := translate.Chain(ctx, texts, targetLang, sourceLang, cfg, videoTitle, s.logger, onAttempt)
 	if err != nil {
 		return "", err
@@ -1015,8 +1092,8 @@ func (s *Service) ResolveTranslationConfig(ctx context.Context) translate.Config
 	if v, ok := get("SUBS_SOURCE_PREF_RU"); ok {
 		cfg.SourcePrefRU = translate.ParseCSV(v)
 	}
-	if val, err := s.configs.Get(ctx, "SUBS_GOOGLE_ONLY"); err == nil && val != nil {
-		cfg.GoogleOnly = settings.IsTruthy(val.Value)
+	if val, err := s.configs.Get(ctx, "SUBS_YOUTUBE_ONLY"); err == nil && val != nil {
+		cfg.YouTubeOnly = settings.IsTruthy(val.Value)
 	}
 	if v, ok := get("TRANSLATION_TIMEOUT"); ok {
 		if sec, err := strconv.Atoi(v); err == nil && sec > 0 {

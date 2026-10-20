@@ -16,19 +16,11 @@ func Chain(ctx context.Context, texts []string, targetLang, sourceLang string, c
 		return nil, "", nil
 	}
 	chain := BuildFallbackChain(cfg)
-	instr := BuildSystemInstruction(cfg.Prompt, targetLang)
+	instr := cfg.Prompt
 
 	var lastErr error
 	for _, provider := range chain {
 		switch provider {
-		case ProviderGoogle:
-			translated, err := TranslateWithGoogle(ctx, texts, targetLang)
-			if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
-				return preserveSpeakerTags(texts, translated), ProviderGoogle + "/web", nil
-			}
-			logTranslateFailure(log, provider, "web", err, texts, translated, targetLang)
-			lastErr = fmt.Errorf("google: %w", err)
-
 		case ProviderOpencode:
 			if cfg.OpencodeKey == "" {
 				continue
@@ -87,15 +79,6 @@ func Chain(ctx context.Context, texts []string, targetLang, sourceLang string, c
 	}
 
 	if lastErr != nil {
-		// Last-resort Google web translate before failing the job.
-		if !cfg.GoogleOnly {
-			translated, gerr := TranslateWithGoogle(ctx, texts, targetLang)
-			if gerr == nil && TranslationLooksTarget(texts, translated, targetLang) {
-				log.Info("translation chain failed, google web fallback succeeded")
-				return preserveSpeakerTags(texts, translated), ProviderGoogle + "/web-fallback", nil
-			}
-			logTranslateFailure(log, ProviderGoogle, "web-fallback", gerr, texts, translated, targetLang)
-		}
 		return nil, "", lastErr
 	}
 	return nil, "", fmt.Errorf("all translation providers failed or unconfigured")
@@ -180,12 +163,20 @@ func TranslationLooksTarget(src, res []string, targetLang string) bool {
 	return bad*4 <= len(res)
 }
 
-// linePassesTarget checks one cue against target-language rules: Cyrillic for ru, no passthrough of the source line.
+// TextLooksTarget reports whether already-translated lines (e.g. YouTube auto-translate) are mostly in targetLang.
+func TextLooksTarget(lines []string, targetLang string) bool {
+	return TranslationLooksTarget(make([]string, len(lines)), lines, targetLang)
+}
+
+// linePassesTarget checks one cue against target-language rules: Cyrillic for ru, no passthrough of the source line, no dropped lines.
 func linePassesTarget(srcLine, line, targetLang string) bool {
 	srcLine = speakerTagRe.ReplaceAllString(strings.TrimSpace(srcLine), "")
 	body := speakerTagRe.ReplaceAllString(strings.TrimSpace(line), "")
 
-	if contextOnlyCaption(body) {
+	if body == "" {
+		return srcLine == ""
+	}
+	if contextOnlyCaption(body) || keptNameLine(srcLine, body) {
 		return true
 	}
 
@@ -216,6 +207,34 @@ func contextOnlyCaption(body string) bool {
 		return true
 	}
 	return interjectionRe.MatchString(rest)
+}
+
+// keptNameLine passes a line that is only a name or acronym the prompt keeps in Latin ("TWICE!", "MBTI?", "aespa").
+func keptNameLine(srcLine, body string) bool {
+	words := strings.FieldsFunc(body, isNotWordRune)
+	if len(words) == 0 || len(words) > 3 {
+		return false
+	}
+	allCaps := true
+	for _, w := range words {
+		for _, r := range w {
+			if r >= 128 {
+				return false
+			}
+		}
+		if len([]rune(w)) < 2 || strings.ToUpper(w) != w {
+			allCaps = false
+		}
+	}
+	if allCaps {
+		return true
+	}
+	srcWords := strings.FieldsFunc(srcLine, isNotWordRune)
+	return len(words) == 1 && len(srcWords) == 1 && strings.EqualFold(words[0], srcWords[0])
+}
+
+func isNotWordRune(r rune) bool {
+	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 }
 
 func looksLikePassthrough(srcLine, out string) bool {

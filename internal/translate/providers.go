@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -43,140 +41,10 @@ func stripMarkdownBold(s string) string {
 	return mdBoldRe.ReplaceAllString(s, "$1")
 }
 
-func TranslateWithGoogle(ctx context.Context, texts []string, targetLang string) ([]string, error) {
-	var out []string
-	for _, batch := range batchByRuneLimit(texts, googleMaxQueryRunes) {
-		part, err := translateWithGoogleBatch(ctx, batch, targetLang)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, part...)
-	}
-	return out, nil
-}
-
-// googleMaxQueryRunes keeps each GET query safely under the URL length limit.
-const googleMaxQueryRunes = 1400
-
-func batchByRuneLimit(texts []string, limit int) [][]string {
-	var batches [][]string
-	var cur []string
-	size := 0
-	for _, t := range texts {
-		if size > 0 && size+len(t)+1 > limit {
-			batches = append(batches, cur)
-			cur = nil
-			size = 0
-		}
-		cur = append(cur, t)
-		size += len(t) + 1
-	}
-	if len(cur) > 0 {
-		batches = append(batches, cur)
-	}
-	return batches
-}
-
-func translateWithGoogleBatch(ctx context.Context, texts []string, targetLang string) ([]string, error) {
-	joined := strings.Join(texts, "\n")
-	apiURL := fmt.Sprintf(
-		"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=%s&dt=t&q=%s",
-		url.QueryEscape(targetLang),
-		url.QueryEscape(joined),
-	)
-
-	client := &http.Client{Timeout: 30 * time.Second}
-
-	var body []byte
-	var err error
-	for attempt := 0; attempt < 4; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(3 * time.Second << (attempt - 1)):
-			}
-		}
-		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
-		if reqErr != nil {
-			return nil, reqErr
-		}
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-
-		resp, doErr := client.Do(req)
-		if doErr != nil {
-			err = fmt.Errorf("google translate request failed: %w", doErr)
-			continue
-		}
-		b, readErr := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		if readErr != nil {
-			err = readErr
-			continue
-		}
-		if resp.StatusCode == http.StatusOK {
-			body = b
-			err = nil
-			break
-		}
-		err = fmt.Errorf("google translate returned status %d: %s", resp.StatusCode, truncate(string(b), 300))
-		if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode < 500 {
-			return nil, err
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	var raw []interface{}
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("failed to parse google translate response: %w", err)
-	}
-
-	if len(raw) == 0 {
-		return nil, fmt.Errorf("empty google translate response")
-	}
-
-	segments, ok := raw[0].([]interface{})
-	if !ok {
-		return nil, fmt.Errorf("unexpected google translate response format")
-	}
-
-	var sb strings.Builder
-	for _, seg := range segments {
-		if pair, ok := seg.([]interface{}); ok && len(pair) > 0 {
-			if str, ok := pair[0].(string); ok {
-				sb.WriteString(str)
-			}
-		}
-	}
-
-	result := sb.String()
-	lines := strings.Split(strings.ReplaceAll(result, "\r\n", "\n"), "\n")
-
-	if len(lines) != len(texts) {
-		lines = alignTranslatedLines(lines, len(texts))
-	}
-
-	return lines, nil
-}
-
-func alignTranslatedLines(lines []string, expectedLen int) []string {
-	if len(lines) == expectedLen {
-		return lines
-	}
-	out := make([]string, expectedLen)
-	for i := range out {
-		if i < len(lines) {
-			out[i] = lines[i]
-		}
-	}
-	return out
-}
-
 func TranslateWithGemini(ctx context.Context, texts []string, targetLang, sourceLang, apiKey, systemInstruction, videoTitle string, timeout time.Duration, onAttempt func(string), models ...[]string) ([]string, string, error) {
 	geminiModels := firstModels(models, DefaultGeminiModels)
-	userMsg := buildTranslateUserMsg(texts, targetLang, sourceLang, videoTitle)
+	jsonMsg := buildTranslateUserMsg(texts, targetLang, sourceLang, videoTitle, outputJSON)
+	numberedMsg := buildTranslateUserMsg(texts, targetLang, sourceLang, videoTitle, outputNumbered)
 
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:     apiKey,
@@ -192,8 +60,8 @@ func TranslateWithGemini(ctx context.Context, texts []string, targetLang, source
 	var lastErr error
 	for _, model := range geminiModels {
 		fireAttempt(onAttempt, ProviderGemini, model)
-		withSafety, withThinking := true, true
-		for attempt := 0; attempt < 3; attempt++ {
+		withSafety, withThinking, withSchema := true, true, true
+		for attempt := 0; attempt < 4; attempt++ {
 			config := &genai.GenerateContentConfig{
 				SystemInstruction: &genai.Content{
 					Parts: []*genai.Part{genai.NewPartFromText(translatorRole + "\n" + systemInstruction)},
@@ -208,6 +76,12 @@ func TranslateWithGemini(ctx context.Context, texts []string, targetLang, source
 			if withSafety {
 				config.SafetySettings = geminiSafetySettings()
 			}
+			userMsg := numberedMsg
+			if withSchema {
+				config.ResponseMIMEType = "application/json"
+				config.ResponseSchema = linesSchema(len(texts))
+				userMsg = jsonMsg
+			}
 
 			resp, cerr := client.Models.GenerateContent(ctx, model, genai.Text(userMsg), config)
 			if cerr != nil {
@@ -216,6 +90,9 @@ func TranslateWithGemini(ctx context.Context, texts []string, targetLang, source
 				switch {
 				case code == http.StatusBadRequest && withThinking:
 					withThinking = false
+					continue
+				case code == http.StatusBadRequest && withSchema:
+					withSchema = false
 					continue
 				case code == http.StatusBadRequest && withSafety:
 					withSafety = false
@@ -230,16 +107,55 @@ func TranslateWithGemini(ctx context.Context, texts []string, targetLang, source
 				break
 			}
 
-			res, perr := parseNumberedLines(stripMarkdownBold(thinkTagRe.ReplaceAllString(outText, "")), len(texts))
+			var res []string
+			var perr error
+			if withSchema {
+				res, perr = parseJSONLines(outText, len(texts))
+			} else {
+				res, perr = parseNumberedLines(stripMarkdownBold(thinkTagRe.ReplaceAllString(outText, "")), len(texts))
+			}
 			if perr == nil {
 				return res, model, nil
 			}
-			lastErr = perr
+			lastErr = fmt.Errorf("gemini (%s): %w", model, perr)
 			break
 		}
 	}
 
 	return nil, "", lastErr
+}
+
+// linesSchema constrains Gemini output to exactly n translated strings.
+func linesSchema(n int) *genai.Schema {
+	count := int64(n)
+	return &genai.Schema{
+		Type:     genai.TypeArray,
+		Items:    &genai.Schema{Type: genai.TypeString},
+		MinItems: &count,
+		MaxItems: &count,
+	}
+}
+
+// parseJSONLines decodes a JSON array of translated lines; the count must match and no line may be empty.
+func parseJSONLines(raw string, expectedCount int) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(strings.TrimPrefix(raw, "```json"), "```")
+	raw = strings.TrimSpace(strings.TrimSuffix(raw, "```"))
+	var lines []string
+	if err := json.Unmarshal([]byte(raw), &lines); err != nil {
+		return nil, fmt.Errorf("invalid JSON lines: %w", err)
+	}
+	if len(lines) != expectedCount {
+		return nil, fmt.Errorf("translated line count mismatch: expected %d, got %d", expectedCount, len(lines))
+	}
+	for i, l := range lines {
+		l = SanitizeTypography(strings.TrimSpace(l))
+		if l == "" {
+			return nil, fmt.Errorf("translated line %d is empty", i+1)
+		}
+		lines[i] = l
+	}
+	return lines, nil
 }
 
 // geminiSafetySettings disables blocking across every harm category.
@@ -311,7 +227,7 @@ func firstModels(models []([]string), def []string) []string {
 
 // translateOpenAICompatible walks an OpenAI-compatible model chain until one produces parseable output.
 func translateOpenAICompatible(ctx context.Context, provider, baseURL, apiKey string, models []string, texts []string, targetLang, sourceLang, systemInstruction, videoTitle string, timeout time.Duration, onAttempt func(string)) ([]string, string, error) {
-	userMsg := buildTranslateUserMsg(texts, targetLang, sourceLang, videoTitle)
+	userMsg := buildTranslateUserMsg(texts, targetLang, sourceLang, videoTitle, outputNumbered)
 
 	cfg := openai.DefaultConfig(apiKey)
 	cfg.BaseURL = baseURL
@@ -503,7 +419,16 @@ func langDisplayName(code string) string {
 	return code
 }
 
-func buildTranslateUserMsg(texts []string, targetLang, sourceLang, videoTitle string) string {
+// outputFormat selects how the model must return translated lines.
+type outputFormat int
+
+const (
+	outputNumbered outputFormat = iota // "N. text" lines, for OpenAI-compatible providers
+	outputJSON                         // JSON array of strings, enforced by Gemini's response schema
+)
+
+// buildTranslateUserMsg carries the lines and the output-format rules; style rules come from the editable system prompt.
+func buildTranslateUserMsg(texts []string, targetLang, sourceLang, videoTitle string, format outputFormat) string {
 	var context string
 	if l := strings.TrimSpace(sourceLang); l != "" {
 		context += fmt.Sprintf("\nSource language: %s (%s)", langDisplayName(l), l)
@@ -511,11 +436,19 @@ func buildTranslateUserMsg(texts []string, targetLang, sourceLang, videoTitle st
 	if t := strings.TrimSpace(videoTitle); t != "" {
 		context += fmt.Sprintf("\nVideo context / Title: %q", t)
 	}
+	var output string
+	switch format {
+	case outputJSON:
+		output = fmt.Sprintf("Return a JSON array of exactly %d strings: the translation of each input line, in the same order, without line numbers. No line may be empty.", len(texts))
+	default:
+		output = fmt.Sprintf("Return exactly %d numbered lines in the same order, keeping the line numbers (\"1. Translated text\"). Every line must be translated and non-empty. No preamble, explanations, markdown or code blocks.", len(texts))
+	}
 	return fmt.Sprintf(
-		"Translate the following subtitle lines into %s (BCP-47 code %q). These lines are a contiguous excerpt from one video, translate them consistently with each other.%s\nCopy every emoji and symbol (♪, ~, ★) from the input line into the output unchanged and in place; never replace an emoji with a word, a description or a bracket note. Output plain UTF-8 text; never use \\uXXXX escapes.\nReturn EXACTLY the same number of numbered lines as provided, keeping line numbers (\"1. Translated text\"). Do not add preamble or explanations.\n\nInput lines:\n%s",
+		"Translate the following subtitle lines into %s (BCP-47 code %q). These lines are a contiguous excerpt from one video, translate them consistently with each other.%s\nOutput plain UTF-8 text; never use \\uXXXX escapes.\n%s\n\nInput lines:\n%s",
 		langDisplayName(targetLang),
 		targetLang,
 		context,
+		output,
 		buildNumberedLines(texts),
 	)
 }
@@ -542,15 +475,14 @@ func parseNumberedLines(raw string, expectedCount int) ([]string, error) {
 		}
 	}
 
-	if foundCount >= expectedCount/2 && foundCount > 0 {
-		for i, r := range result {
-			if r == "" {
-				result[i] = ""
-			}
+	if foundCount > 0 {
+		if missing := missingLines(result); len(missing) > 0 {
+			return nil, fmt.Errorf("translated lines missing or empty: %v of %d", missing, expectedCount)
 		}
 		return result, nil
 	}
 
+	// No numbering at all: accept plain lines only when the count matches exactly.
 	var nonNumbered []string
 	for _, l := range lines {
 		if strings.TrimSpace(l) != "" {
@@ -562,6 +494,17 @@ func parseNumberedLines(raw string, expectedCount int) ([]string, error) {
 	}
 
 	return nil, fmt.Errorf("translated line count mismatch: expected %d, got %d numbered lines", expectedCount, foundCount)
+}
+
+// missingLines lists the 1-based numbers of lines the model left out or returned empty.
+func missingLines(result []string) []int {
+	var missing []int
+	for i, r := range result {
+		if r == "" {
+			missing = append(missing, i+1)
+		}
+	}
+	return missing
 }
 
 // Complete walks the fallback chain for a free-form chat completion.
