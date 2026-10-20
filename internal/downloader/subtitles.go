@@ -511,11 +511,15 @@ func (s *Service) translateVTTFile(ctx context.Context, vttPath, targetLang, sou
 	}
 
 	cfg := translate.ResolveConfig(ctx, settings.New(s.configs))
-	translated, provider, err := translate.Chain(ctx, texts, targetLang, sourceLang, cfg, videoTitle, s.logger, onAttempt)
+	provider := "gemini/" + cfg.Model
+	if onAttempt != nil {
+		onAttempt(provider)
+	}
+	translated, err := translate.Translate(ctx, cfg, texts, targetLang, sourceLang, videoTitle)
 	if err != nil {
 		return "", err
 	}
-	s.logger.Info("subtitles translated", zap.String("provider", provider), zap.Int("lines", len(texts)), zap.String("target", targetLang))
+	s.logger.Info("subtitles translated", zap.String("model", cfg.Model), zap.Int("lines", len(texts)), zap.String("target", targetLang))
 
 	var b strings.Builder
 	b.WriteString("WEBVTT\nKind: captions\nLanguage: " + targetLang + "\n\n")

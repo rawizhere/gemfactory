@@ -55,22 +55,14 @@ const SECTIONS = [
   { id: 'system', title: 'System Info', extra: 'system' },
 ];
 
-const PROVIDERS = [
-  { id: 'gemini', label: 'Google Gemini', keyPlaceholder: 'AIzaSy... or AQ.Ab8...' },
-  { id: 'nvidia', label: 'NVIDIA NIM', keyPlaceholder: 'nvapi-...' },
-  { id: 'groq', label: 'Groq', keyPlaceholder: 'gsk_...' },
-  { id: 'opencode', label: 'OpenCode Zen', keyPlaceholder: 'sk-...' },
-  { id: 'openrouter', label: 'OpenRouter', keyPlaceholder: 'sk-or-v1-...' },
-];
-
 const state = {
   entries: new Map(), // key -> {value, source, masked, default}
   edited: new Map(),  // key -> raw editor string, only while unsaved
   system: [],
   advancedRows: [],
   active: 'downloads',
-  selectedProvider: 'gemini',
-  brokenKeys: {},
+  keyRejected: false,
+  models: null, // Gemini catalog, loaded on demand
 };
 
 function entryOf(key) {
@@ -247,65 +239,6 @@ function renderStorageCard(root) {
   loadStorageUsage();
 }
 
-function collectProviderOverrides() {
-  const overrides = {
-    fallback_order: effectiveValue('TRANSLATION_FALLBACK_ORDER'),
-  };
-  PROVIDERS.forEach((p) => {
-    const k = p.id.toUpperCase();
-    if (state.edited.has(k + '_API_KEY')) overrides[`${p.id}_api_key`] = state.edited.get(k + '_API_KEY');
-    if (state.edited.has(k + '_MODELS')) overrides[`${p.id}_models`] = state.edited.get(k + '_MODELS');
-  });
-  if (state.edited.has('TRANSLATION_PROMPT')) overrides.prompt = state.edited.get('TRANSLATION_PROMPT');
-  return overrides;
-}
-
-function getProvider(id) {
-  return PROVIDERS.find((p) => p.id === id) || { id, label: id, keyPlaceholder: 'API key' };
-}
-
-function getEffectiveFallbackChain() {
-  const raw = effectiveValue('TRANSLATION_FALLBACK_ORDER');
-  const items = (raw || '')
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  if (items.length > 0) return items;
-  return ['openrouter', 'opencode', 'nvidia', 'groq'];
-}
-
-function setEffectiveFallbackChain(chain) {
-  const val = chain.join(',');
-  state.edited.set('TRANSLATION_FALLBACK_ORDER', val);
-  updateSaveBar();
-}
-
-function getProviderModelIds(providerId) {
-  const key = providerId.toUpperCase() + '_MODELS';
-  const val = effectiveValue(key);
-  if (val !== undefined && val !== null && String(val).trim() !== '') {
-    return String(val).split(',').map((s) => s.trim()).filter(Boolean);
-  }
-  const def = entryOf(key).default;
-  if (def) {
-    return String(def).split(',').map((s) => s.trim()).filter(Boolean);
-  }
-  return [];
-}
-
-function setProviderModelIds(providerId, models) {
-  const key = providerId.toUpperCase() + '_MODELS';
-  state.edited.set(key, models.join(','));
-  updateSaveBar();
-}
-
-function getProviderStatus(providerId) {
-  const key = effectiveValue(providerId.toUpperCase() + '_API_KEY');
-  if (!key) return 'none';
-  if (state.brokenKeys && state.brokenKeys[providerId]) return 'broken';
-  return 'ok';
-}
-
 function fmtContext(n) {
   const v = typeof n === 'string' ? parseInt(n, 10) : n;
   if (typeof v !== 'number' || !isFinite(v) || v <= 0) return '—';
@@ -317,663 +250,181 @@ function fmtContext(n) {
 function availabilityInfo(avail) {
   switch ((avail || '').toLowerCase()) {
     case 'ok': return { cls: 'ok', label: 'ok' };
-    case 'rate_limited':
-    case 'quota': return { cls: 'warn', label: (avail || 'limited').replace(/_/g, ' ') };
+    case 'rate_limited': return { cls: 'warn', label: 'rate limited' };
     case 'slow': return { cls: 'warn', label: 'slow' };
-    case 'dead':
-    case 'not_chat': return { cls: 'dead', label: (avail || 'down').replace(/_/g, ' ') };
+    case 'dead': return { cls: 'dead', label: 'unavailable' };
     default: return { cls: 'unknown', label: (avail || 'unknown').replace(/_/g, ' ') };
   }
 }
 
-function getDragAfter(container, selector, y) {
-  const els = [...container.querySelectorAll(selector + ':not(.dragging)')];
-  let closest = { offset: -Infinity, element: null };
-  for (const child of els) {
-    const box = child.getBoundingClientRect();
-    const offset = y - box.top - box.height / 2;
-    if (offset < 0 && offset > closest.offset) closest = { offset, element: child };
-  }
-  return closest.element;
+function keyStatus() {
+  if (!effectiveValue('GEMINI_API_KEY')) return { dot: 'none', badge: el('span', { class: 'badge' }, 'No Key') };
+  if (state.keyRejected) return { dot: 'broken', badge: el('span', { class: 'badge expired' }, 'Key Rejected') };
+  return { dot: 'ok', badge: el('span', { class: 'badge on' }, 'Configured') };
 }
 
-function showAddProviderDialog(onAdded) {
-  const chain = getEffectiveFallbackChain();
-  const available = PROVIDERS.filter((p) => !chain.includes(p.id));
-  const options = available.length ? available : PROVIDERS;
-
-  const dlg = el('dialog', { class: 'add-provider-dialog' });
-  const title = el('h3', { style: 'margin:0 0 0.85rem; font-size:1rem; font-weight:600;' }, 'Add Provider to Chain');
-  const form = el('form', { class: 'add-provider-form', method: 'dialog' });
-
-  const provLabel = el('label', null, 'Provider');
-  const provSelect = el('select', { style: 'width:100%' });
-  options.forEach((p) => {
-    provSelect.appendChild(el('option', { value: p.id }, p.label));
-  });
-  provLabel.appendChild(provSelect);
-
-  const keyLabel = el('label', null, 'API Key (optional)');
-  const keyInput = el('input', {
-    type: 'text',
-    placeholder: getProvider(provSelect.value).keyPlaceholder,
-    style: 'width:100%; font-family:monospace;',
-  });
-  keyLabel.appendChild(keyInput);
-
-  provSelect.addEventListener('change', () => {
-    keyInput.placeholder = getProvider(provSelect.value).keyPlaceholder;
-  });
-
-  const actions = el('div', { class: 'add-provider-actions' });
-  const cancelBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Cancel');
-  const addBtn = el('button', { class: 'btn btn-primary btn-sm', type: 'submit' }, 'Add Provider');
-
-  cancelBtn.addEventListener('click', () => dlg.close());
-  form.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const pid = provSelect.value;
-    const keyVal = keyInput.value.trim();
-    if (keyVal) {
-      state.edited.set(pid.toUpperCase() + '_API_KEY', keyVal);
-    }
-    const curChain = getEffectiveFallbackChain();
-    if (!curChain.includes(pid)) {
-      curChain.push(pid);
-      setEffectiveFallbackChain(curChain);
-    }
-    state.selectedProvider = pid;
-    dlg.close();
-    toast(`Added ${getProvider(pid).label} to fallback chain`, 'success');
-    if (onAdded) onAdded();
-  });
-
-  actions.appendChild(cancelBtn);
-  actions.appendChild(addBtn);
-  form.appendChild(provLabel);
-  form.appendChild(keyLabel);
-  form.appendChild(actions);
-
-  dlg.appendChild(title);
-  dlg.appendChild(form);
-  dlg.addEventListener('close', () => dlg.remove());
-  document.body.appendChild(dlg);
-  dlg.showModal();
-}
-
-async function runChainTest(text, timeline, btn) {
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = 'Testing...';
-  }
-  timeline.textContent = '';
-
-  const sample = text.trim() || '리브 미모 난리도 아니야';
-  const startTime = performance.now();
-  const stepMap = new Map();
-
-  const createStepElement = (item, index) => {
-    const stepEl = el('div', { class: 'timeline-step pending' });
-    const head = el('div', { class: 'timeline-step-head' });
-    const provLabel = getProvider(item.provider)?.label || item.provider;
-    const modelLabel = item.model && item.model !== 'web' ? `${provLabel} / ${item.model}` : provLabel;
-
-    const dotEl = el('span', { class: 'status-dot none' });
-    const title = el('span', { class: 'timeline-step-title' }, [
-      dotEl,
-      el('strong', null, `#${index + 1}`),
-      el('span', null, modelLabel),
-    ]);
-
-    const latencyEl = el('span', { class: 'timeline-latency' }, '');
-    const badgeEl = el('span', { class: 'timeline-status-badge pending' }, 'Testing...');
-
-    const meta = el('span', { class: 'timeline-step-meta' }, [
-      latencyEl,
-      badgeEl,
-    ]);
-
-    head.appendChild(title);
-    head.appendChild(meta);
-    stepEl.appendChild(head);
-
-    const bodyEl = el('div', { class: 'timeline-step-body' }, 'Waiting for response...');
-    stepEl.appendChild(bodyEl);
-
-    return { stepEl, badgeEl, latencyEl, bodyEl, dotEl };
-  };
-
-  try {
-    const res = await fetch('/api/translation/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: sample,
-        target_lang: 'ru',
-        ...collectProviderOverrides(),
-      }),
-    });
-    if (!res.ok) throw new Error((await res.text()) || res.statusText);
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let idx;
-      while ((idx = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, idx).trim();
-        buffer = buffer.slice(idx + 1);
-        if (!line) continue;
-        const event = JSON.parse(line);
-
-        if (event.type === 'init' && Array.isArray(event.items)) {
-          timeline.textContent = '';
-          stepMap.clear();
-          event.items.forEach((item, index) => {
-            const entry = createStepElement(item, index);
-            stepMap.set(`${item.provider}:${item.model}`, entry);
-            timeline.appendChild(entry.stepEl);
-          });
-        } else if (event.type === 'result') {
-          const key = `${event.provider}:${event.model}`;
-          let entry = stepMap.get(key);
-          if (!entry) {
-            entry = createStepElement(event, stepMap.size);
-            stepMap.set(key, entry);
-            timeline.appendChild(entry.stepEl);
-          }
-
-          entry.stepEl.className = `timeline-step ${event.ok ? 'ok' : 'err'}`;
-          if (entry.dotEl) {
-            entry.dotEl.className = `status-dot ${event.ok ? 'ok' : 'broken'}`;
-          }
-          entry.badgeEl.className = `timeline-status-badge ${event.ok ? 'ok' : 'err'}`;
-          entry.badgeEl.textContent = event.ok ? 'OK' : 'FAIL';
-
-          const latency = event.latency_ms !== undefined ? event.latency_ms : Math.round(performance.now() - startTime);
-          entry.latencyEl.textContent = `${latency}ms`;
-
-          entry.bodyEl.textContent = event.ok
-            ? (event.result || 'Empty result')
-            : (event.error || 'Unknown error') + (event.result ? ` (Raw: ${event.result})` : '');
-        } else if (event.type === 'done' && !event.success && !timeline.hasChildNodes()) {
-          const emptyStep = el('div', { class: 'timeline-step err' }, [
-            el('div', { class: 'timeline-step-head' }, [
-              el('span', { class: 'timeline-step-title' }, 'Pipeline execution completed'),
-              el('span', { class: 'timeline-status-badge err' }, 'FAIL'),
-            ]),
-            el('div', { class: 'timeline-step-body' }, 'No provider in the fallback chain succeeded.'),
-          ]);
-          timeline.appendChild(emptyStep);
-        }
-      }
-    }
-  } catch (err) {
-    if (!timeline.hasChildNodes()) {
-      const errStep = el('div', { class: 'timeline-step err' }, [
-        el('div', { class: 'timeline-step-head' }, [
-          el('span', { class: 'timeline-step-title' }, 'Test Error'),
-          el('span', { class: 'timeline-status-badge err' }, 'FAIL'),
-        ]),
-        el('div', { class: 'timeline-step-body' }, err.message),
-      ]);
-      timeline.appendChild(errStep);
-    } else {
-      toast(`Chain test error: ${err.message}`, 'error');
-    }
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'Test Chain';
-    }
-  }
-}
-
-function renderPipelineMaster(masterContainer, refresh) {
-  masterContainer.textContent = '';
-
-  const chain = getEffectiveFallbackChain();
-
-  const card = el('div', { class: 'pipeline-card' });
-  const head = el('div', { class: 'pipeline-card-header' });
-  head.appendChild(el('h3', null, 'Provider Fallback Chain'));
-
-  const addBtn = el('button', { class: 'btn btn-primary btn-sm', type: 'button' }, '+ Add Provider');
-  addBtn.addEventListener('click', () => showAddProviderDialog(refresh));
-  head.appendChild(addBtn);
-  card.appendChild(head);
-
-  const list = el('div', { class: 'pipeline-prov-list' });
-
-  list.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    const dragging = list.querySelector('.pipeline-prov-item.dragging');
-    if (!dragging) return;
-    const after = getDragAfter(list, '.pipeline-prov-item', e.clientY);
-    if (after == null) list.appendChild(dragging);
-    else list.insertBefore(dragging, after);
-  });
-
-  list.addEventListener('drop', (e) => {
-    e.preventDefault();
-    const ids = [...list.querySelectorAll('.pipeline-prov-item')].map((node) => node.dataset.provider);
-    setEffectiveFallbackChain(ids);
-    refresh();
-  });
-
-  chain.forEach((pId, i) => {
-    const p = getProvider(pId);
-    const status = getProviderStatus(pId);
-    const modelCount = getProviderModelIds(pId).length;
-
-    const item = el('div', {
-      class: `pipeline-prov-item${pId === state.selectedProvider ? ' active' : ''}`,
-      'data-provider': pId,
-      draggable: 'true',
-    });
-
-    const handle = el('span', { class: 'drag-handle', title: 'Drag to reorder' }, '⠿');
-    const dot = el('span', { class: `status-dot ${status}`, title: status === 'ok' ? 'Configured' : (status === 'broken' ? 'Key rejected' : 'No API key') });
-    const name = el('span', { class: 'pipeline-prov-name' }, p.label);
-    const badge = el('span', { class: 'pipeline-prov-badge' }, `${modelCount} model${modelCount === 1 ? '' : 's'}`);
-
-    const orderBtns = el('div', { class: 'pipeline-order-btns' });
-    const btnUp = el('button', { class: 'btn-icon', type: 'button', title: 'Move up' }, '↑');
-    const btnDown = el('button', { class: 'btn-icon', type: 'button', title: 'Move down' }, '↓');
-
-    if (i === 0) btnUp.disabled = true;
-    if (i === chain.length - 1) btnDown.disabled = true;
-
-    btnUp.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (i > 0) {
-        const next = [...chain];
-        [next[i - 1], next[i]] = [next[i], next[i - 1]];
-        setEffectiveFallbackChain(next);
-        refresh();
-      }
-    });
-
-    btnDown.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (i < chain.length - 1) {
-        const next = [...chain];
-        [next[i], next[i + 1]] = [next[i + 1], next[i]];
-        setEffectiveFallbackChain(next);
-        refresh();
-      }
-    });
-
-    item.addEventListener('dragstart', (e) => {
-      if (e.target.closest('.btn-icon')) { e.preventDefault(); return; }
-      item.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-      try { e.dataTransfer.setData('text/plain', pId); } catch (_) {}
-    });
-
-    item.addEventListener('dragend', () => {
-      item.classList.remove('dragging');
-      const ids = [...list.querySelectorAll('.pipeline-prov-item')].map((node) => node.dataset.provider);
-      setEffectiveFallbackChain(ids);
-      refresh();
-    });
-
-    item.addEventListener('click', () => {
-      state.selectedProvider = pId;
-      refresh();
-    });
-
-    orderBtns.appendChild(btnUp);
-    orderBtns.appendChild(btnDown);
-
-    item.appendChild(handle);
-    item.appendChild(dot);
-    item.appendChild(name);
-    item.appendChild(badge);
-    item.appendChild(orderBtns);
-
-    list.appendChild(item);
-  });
-
-  card.appendChild(list);
-  masterContainer.appendChild(card);
-}
-
-const catalogCache = new Map();
-
-function renderPipelineDetail(detailContainer, refresh) {
-  detailContainer.textContent = '';
-
-  const chain = getEffectiveFallbackChain();
-  const pid = state.selectedProvider;
-  if (!pid || !chain.includes(pid)) {
-    if (chain.length > 0) {
-      state.selectedProvider = chain[0];
-      return renderPipelineDetail(detailContainer, refresh);
-    }
-    const emptyCard = el('div', { class: 'pipeline-detail-card' }, [
-      el('p', { class: 'empty' }, 'No providers in the fallback chain. Click "+ Add Provider" on the left to add one.')
-    ]);
-    detailContainer.appendChild(emptyCard);
-    return;
-  }
-
-  const p = getProvider(pid);
-  const status = getProviderStatus(pid);
-
+function renderGeminiCard(root) {
   const card = el('div', { class: 'pipeline-detail-card' });
 
+  const status = keyStatus();
   const head = el('div', { class: 'pipeline-detail-head' });
   const titleWrap = el('div', { class: 'pipeline-detail-title-wrap' });
-  titleWrap.appendChild(el('h3', { class: 'pipeline-detail-title' }, p.label));
-
-  let statusBadge;
-  if (status === 'ok') {
-    statusBadge = el('span', { class: 'badge on' }, 'Configured');
-  } else if (status === 'broken') {
-    statusBadge = el('span', { class: 'badge expired' }, 'Key Broken');
-  } else {
-    statusBadge = el('span', { class: 'badge' }, 'No Key');
-  }
-  titleWrap.appendChild(statusBadge);
+  titleWrap.appendChild(el('span', { class: `status-dot ${status.dot}` }));
+  titleWrap.appendChild(el('h3', { class: 'pipeline-detail-title' }, 'Google Gemini'));
+  titleWrap.appendChild(status.badge);
   head.appendChild(titleWrap);
-
-  const removeBtn = el('button', { class: 'btn btn-danger btn-sm', type: 'button' }, 'Remove from Chain');
-  removeBtn.addEventListener('click', () => {
-    const next = chain.filter((x) => x !== pid);
-    setEffectiveFallbackChain(next);
-    state.selectedProvider = next[0] || null;
-    toast(`Removed ${p.label} from fallback chain`, 'info');
-    refresh();
-  });
-  head.appendChild(removeBtn);
   card.appendChild(head);
 
+  // API key
   const keySection = el('div', { class: 'pipeline-key-section' });
   keySection.appendChild(el('div', { class: 'pipeline-section-title' }, 'API Key'));
-  keySection.appendChild(el('div', { class: 'pipeline-section-desc' }, `Secret authentication key for ${p.label}`));
-
+  keySection.appendChild(el('div', { class: 'pipeline-section-desc' }, 'Google AI Studio key. "Check Key" verifies the saved key.'));
   const keyRow = el('div', { class: 'pipeline-key-row' });
   const keyInput = el('input', {
     type: 'password',
-    placeholder: p.keyPlaceholder,
-    value: effectiveValue(pid.toUpperCase() + '_API_KEY'),
+    placeholder: 'AIzaSy... or AQ.Ab8...',
+    value: effectiveValue('GEMINI_API_KEY'),
     autocomplete: 'off',
   });
-
+  keyInput.addEventListener('input', () => {
+    state.edited.set('GEMINI_API_KEY', keyInput.value);
+    state.keyRejected = false;
+    updateSaveBar();
+  });
   const showBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Show');
   showBtn.addEventListener('click', () => {
     const isPass = keyInput.type === 'password';
     keyInput.type = isPass ? 'text' : 'password';
     showBtn.textContent = isPass ? 'Hide' : 'Show';
   });
-
-  const checkBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Check Key');
-  checkBtn.addEventListener('click', async () => {
-    checkBtn.disabled = true;
-    checkBtn.textContent = 'Checking...';
+  const checkKeyBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Check Key');
+  checkKeyBtn.addEventListener('click', async () => {
+    checkKeyBtn.disabled = true;
+    checkKeyBtn.textContent = 'Checking...';
     try {
-      await api('GET', `/api/translation/models?provider=${encodeURIComponent(pid)}&refresh=true`);
-      state.brokenKeys[pid] = false;
-      toast(`API key for ${p.label} is valid`, 'success');
+      const res = await api('GET', '/api/translation');
+      state.keyRejected = !!res.key_rejected;
+      toast(state.keyRejected ? 'Gemini rejected the saved key' : 'Saved key is accepted', state.keyRejected ? 'error' : 'success');
     } catch (err) {
-      state.brokenKeys[pid] = true;
       toast(`Key check failed: ${err.message}`, 'error');
     } finally {
-      checkBtn.disabled = false;
-      checkBtn.textContent = 'Check Key';
-      refresh();
+      renderTranslationSection($('#settings-body'));
     }
   });
-
-  keyInput.addEventListener('input', () => {
-    state.edited.set(pid.toUpperCase() + '_API_KEY', keyInput.value);
-    delete state.brokenKeys[pid];
-    updateSaveBar();
-  });
-
   keyRow.appendChild(keyInput);
   keyRow.appendChild(showBtn);
-  keyRow.appendChild(checkBtn);
+  keyRow.appendChild(checkKeyBtn);
   keySection.appendChild(keyRow);
   card.appendChild(keySection);
 
-  const modelsSection = el('div', { class: 'pipeline-models-section' });
-  const modelsHead = el('div', { class: 'model-chain-header' });
-  const modelsTitleWrap = el('div');
-  modelsTitleWrap.appendChild(el('div', { class: 'pipeline-section-title' }, 'Active Models Chain'));
-  modelsTitleWrap.appendChild(el('div', { class: 'pipeline-section-desc', style: 'margin:0' }, 'Models are attempted sequentially until one succeeds'));
-  modelsHead.appendChild(modelsTitleWrap);
+  // Model
+  const modelSection = el('div', { class: 'pipeline-key-section' });
+  const modelHead = el('div', { style: 'display:flex; align-items:center; gap:0.5rem;' });
+  modelHead.appendChild(el('div', { class: 'pipeline-section-title' }, 'Model'));
+  modelHead.appendChild(srcBadge('GEMINI_MODEL'));
+  modelSection.appendChild(modelHead);
+  modelSection.appendChild(el('div', { class: 'pipeline-section-desc' }, `Used for subtitles and @grok. Empty = ${entryOf('GEMINI_MODEL').default || 'default'}.`));
 
-  const popoverWrap = el('div', { class: 'model-chain-popover-wrap' });
-  const addModelBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, '+ Add Model');
-  popoverWrap.appendChild(addModelBtn);
-
-  const popover = el('div', { class: 'model-search-popover', hidden: true });
-  const searchInput = el('input', {
+  const modelRow = el('div', { class: 'pipeline-key-row' });
+  const modelInput = el('input', {
     type: 'text',
-    class: 'model-search-input',
-    placeholder: 'Search models...',
+    list: 'gemini-models',
+    placeholder: entryOf('GEMINI_MODEL').default || '',
+    value: effectiveValue('GEMINI_MODEL'),
     autocomplete: 'off',
   });
-  const filterRow = el('div', { class: 'model-filter-row' });
-  const freeLabel = el('label', { style: 'display:flex; align-items:center; gap:0.35rem; cursor:pointer;' });
-  const freeCb = el('input', { type: 'checkbox' });
-  freeLabel.appendChild(freeCb);
-  freeLabel.appendChild(document.createTextNode('Free only'));
-  const statusLabel = el('span', null, 'Loading...');
-  filterRow.appendChild(freeLabel);
-  filterRow.appendChild(statusLabel);
+  const datalist = el('datalist', { id: 'gemini-models' });
+  const modelInfo = el('span', { class: 'status-badge status-unknown' }, 'unknown');
 
-  const catalogList = el('ul', { class: 'model-catalog-list' });
-  popover.appendChild(searchInput);
-  popover.appendChild(filterRow);
-  popover.appendChild(catalogList);
-  popoverWrap.appendChild(popover);
-
-  const updatePopoverList = (catalog) => {
-    catalogList.textContent = '';
-    const q = searchInput.value.trim().toLowerCase();
-    const freeOnly = freeCb.checked;
-    const activeIds = getProviderModelIds(pid);
-
-    const filtered = catalog.filter((m) => {
-      if (freeOnly && !m.free) return false;
-      if (q && !m.id.toLowerCase().includes(q)) return false;
-      return true;
-    });
-
-    statusLabel.textContent = `${filtered.length} model${filtered.length === 1 ? '' : 's'}`;
-
-    if (!filtered.length) {
-      catalogList.appendChild(el('li', { class: 'empty', style: 'padding:1rem 0; font-size:0.8rem;' }, 'No models match filter'));
-      return;
-    }
-
-    filtered.forEach((m) => {
-      const inChain = activeIds.includes(m.id);
-      const row = el('li', { class: 'model-catalog-item' });
-      const main = el('div', { class: 'model-catalog-item-main' });
-      main.appendChild(el('span', { class: 'model-catalog-item-id' }, m.id));
-
-      const meta = el('div', { class: 'model-catalog-item-meta' });
-      if (m.free) meta.appendChild(el('span', { class: 'free-badge' }, 'Free'));
-      if (m.context_length) meta.appendChild(el('span', { style: 'color:var(--muted)' }, fmtContext(m.context_length)));
-      const info = availabilityInfo(m.status);
-      meta.appendChild(el('span', { class: `status-badge status-${info.cls}` }, info.label));
-      main.appendChild(meta);
-      row.appendChild(main);
-
-      if (inChain) {
-        row.appendChild(el('span', { class: 'badge on', style: 'font-size:0.68rem;' }, 'Added'));
-      } else {
-        const add = el('button', { class: 'btn btn-ghost btn-sm', type: 'button', style: 'padding:0.1rem 0.4rem; font-size:0.75rem;' }, '+ Add');
-        add.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const current = getProviderModelIds(pid);
-          if (!current.includes(m.id)) {
-            current.push(m.id);
-            setProviderModelIds(pid, current);
-            toast(`Added ${m.id} to ${p.label} chain`, 'success');
-            refresh();
-          }
-        });
-        row.appendChild(add);
-      }
-
-      row.addEventListener('click', () => {
-        const current = getProviderModelIds(pid);
-        if (!current.includes(m.id)) {
-          current.push(m.id);
-          setProviderModelIds(pid, current);
-          toast(`Added ${m.id} to ${p.label} chain`, 'success');
-          refresh();
-        }
-      });
-
-      catalogList.appendChild(row);
-    });
+  const currentModel = () => modelInput.value.trim() || entryOf('GEMINI_MODEL').default || '';
+  const showModelInfo = (status) => {
+    const info = availabilityInfo(status);
+    modelInfo.className = `status-badge status-${info.cls}`;
+    modelInfo.textContent = info.label;
   };
-
-  const loadCatalog = async () => {
-    statusLabel.textContent = 'Loading models...';
+  const fillCatalog = () => {
+    datalist.textContent = '';
+    (state.models || []).forEach((m) => {
+      datalist.appendChild(el('option', { value: m.id }, `${m.name || m.id} · ${fmtContext(m.context_length)}`));
+    });
+    const m = (state.models || []).find((x) => x.id === currentModel());
+    showModelInfo(m && m.status);
+  };
+  const loadCatalog = async (refresh) => {
     try {
-      let catalog = catalogCache.get(pid);
-      if (!catalog) {
-        const data = await api('GET', `/api/translation/models?provider=${encodeURIComponent(pid)}`);
-        catalog = Array.isArray(data) ? data : (data && data.models) ? data.models : [];
-        catalogCache.set(pid, catalog);
-      }
-      updatePopoverList(catalog);
+      const data = await api('GET', `/api/translation/models${refresh ? '?refresh=true' : ''}`);
+      state.models = data.models || [];
+      fillCatalog();
     } catch (err) {
-      catalogList.textContent = '';
-      catalogList.appendChild(el('li', { class: 'empty', style: 'padding:1rem 0; font-size:0.8rem;' }, `Error loading models: ${err.message}`));
-      statusLabel.textContent = 'Error';
+      toast(`Failed to load Gemini models: ${err.message}`, 'error');
     }
   };
 
-  addModelBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const open = popover.hidden;
-    popover.hidden = !open;
-    if (open) {
-      searchInput.value = '';
-      freeCb.checked = false;
-      searchInput.focus();
-      loadCatalog();
+  modelInput.addEventListener('input', () => {
+    state.edited.set('GEMINI_MODEL', modelInput.value.trim());
+    updateSaveBar();
+    fillCatalog();
+  });
+  modelInput.addEventListener('focus', () => { if (!state.models) loadCatalog(false); });
+
+  const checkModelBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Check Model');
+  checkModelBtn.addEventListener('click', async () => {
+    checkModelBtn.disabled = true;
+    checkModelBtn.textContent = 'Checking...';
+    try {
+      const [res] = await api('POST', '/api/translation/models/check', { models: [currentModel()] });
+      showModelInfo(res && res.status);
+    } catch (err) {
+      toast(`Model check failed: ${err.message}`, 'error');
+    } finally {
+      checkModelBtn.disabled = false;
+      checkModelBtn.textContent = 'Check Model';
     }
   });
+  const reloadBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button', title: 'Reload the model list from Gemini' }, 'Reload List');
+  reloadBtn.addEventListener('click', () => loadCatalog(true));
 
-  searchInput.addEventListener('input', () => {
-    const catalog = catalogCache.get(pid) || [];
-    updatePopoverList(catalog);
-  });
+  modelRow.appendChild(modelInput);
+  modelRow.appendChild(modelInfo);
+  modelRow.appendChild(checkModelBtn);
+  modelRow.appendChild(reloadBtn);
+  modelSection.appendChild(modelRow);
+  modelSection.appendChild(datalist);
+  card.appendChild(modelSection);
+  if (state.models) fillCatalog();
 
-  freeCb.addEventListener('change', () => {
-    const catalog = catalogCache.get(pid) || [];
-    updatePopoverList(catalog);
-  });
+  root.appendChild(card);
+}
 
-  document.addEventListener('click', (e) => {
-    if (!popover.hidden && !popoverWrap.contains(e.target)) {
-      popover.hidden = true;
-    }
-  });
+async function runTranslationTest(text, resultEl, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Testing...';
+  resultEl.textContent = '';
 
-  modelsHead.appendChild(popoverWrap);
-  modelsSection.appendChild(modelsHead);
+  const body = { text, target_lang: 'ru' };
+  if (state.edited.has('GEMINI_API_KEY')) body.api_key = state.edited.get('GEMINI_API_KEY');
+  if (state.edited.has('GEMINI_MODEL')) body.model = state.edited.get('GEMINI_MODEL');
+  if (state.edited.has('TRANSLATION_PROMPT')) body.prompt = state.edited.get('TRANSLATION_PROMPT');
 
-  const ul = el('ul', { class: 'model-chain' });
-  const modelIds = getProviderModelIds(pid);
-
-  if (!modelIds.length) {
-    ul.appendChild(el('li', { class: 'model-chain-empty' }, 'No active models in chain. Click "+ Add Model" above.'));
-  } else {
-    modelIds.forEach((mId, idx) => {
-      const li = el('li', { class: 'model-chain-item', draggable: 'true', 'data-model': mId });
-      li.appendChild(el('span', { class: 'drag-handle', title: 'Drag to reorder' }, '⠿'));
-      li.appendChild(el('span', { class: 'model-id' }, mId));
-
-      const btns = el('div', { class: 'pipeline-order-btns' });
-      const btnUp = el('button', { class: 'btn-icon', type: 'button', title: 'Move up' }, '↑');
-      const btnDown = el('button', { class: 'btn-icon', type: 'button', title: 'Move down' }, '↓');
-      const btnRm = el('button', { class: 'btn-icon btn-remove', type: 'button', title: 'Remove model' }, '×');
-
-      if (idx === 0) btnUp.disabled = true;
-      if (idx === modelIds.length - 1) btnDown.disabled = true;
-
-      btnUp.addEventListener('click', () => {
-        if (idx > 0) {
-          const next = [...modelIds];
-          [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
-          setProviderModelIds(pid, next);
-          refresh();
-        }
-      });
-
-      btnDown.addEventListener('click', () => {
-        if (idx < modelIds.length - 1) {
-          const next = [...modelIds];
-          [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
-          setProviderModelIds(pid, next);
-          refresh();
-        }
-      });
-
-      btnRm.addEventListener('click', () => {
-        const next = modelIds.filter((x) => x !== mId);
-        setProviderModelIds(pid, next);
-        toast(`Removed ${mId}`, 'info');
-        refresh();
-      });
-
-      btns.appendChild(btnUp);
-      btns.appendChild(btnDown);
-      btns.appendChild(btnRm);
-      li.appendChild(btns);
-
-      li.addEventListener('dragstart', (e) => {
-        if (e.target.closest('.btn-icon')) { e.preventDefault(); return; }
-        li.classList.add('dragging');
-        e.dataTransfer.effectAllowed = 'move';
-        try { e.dataTransfer.setData('text/plain', mId); } catch (_) {}
-      });
-
-      li.addEventListener('dragend', () => {
-        li.classList.remove('dragging');
-        const ids = [...ul.querySelectorAll('.model-chain-item')].map((node) => node.dataset.model);
-        setProviderModelIds(pid, ids);
-        refresh();
-      });
-
-      ul.appendChild(li);
-    });
-
-    ul.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      const dragging = ul.querySelector('.model-chain-item.dragging');
-      if (!dragging) return;
-      const after = getDragAfter(ul, '.model-chain-item', e.clientY);
-      if (after == null) ul.appendChild(dragging);
-      else ul.insertBefore(dragging, after);
-    });
-
-    ul.addEventListener('drop', (e) => {
-      e.preventDefault();
-      const ids = [...ul.querySelectorAll('.model-chain-item')].map((node) => node.dataset.model);
-      setProviderModelIds(pid, ids);
-      refresh();
-    });
+  let res;
+  try {
+    res = await api('POST', '/api/translation/test', body);
+  } catch (err) {
+    res = { ok: false, error: err.message };
   }
+  btn.disabled = false;
+  btn.textContent = 'Test';
 
-  modelsSection.appendChild(ul);
-  card.appendChild(modelsSection);
-
-  detailContainer.appendChild(card);
+  resultEl.appendChild(el('div', { class: `timeline-step ${res.ok ? 'ok' : 'err'}` }, [
+    el('div', { class: 'timeline-step-head' }, [
+      el('span', { class: 'timeline-step-title' }, res.model || 'Gemini'),
+      el('span', { class: 'timeline-step-meta' }, [
+        el('span', { class: 'timeline-latency' }, res.latency_ms !== undefined ? `${res.latency_ms}ms` : ''),
+        el('span', { class: `timeline-status-badge ${res.ok ? 'ok' : 'err'}` }, res.ok ? 'OK' : 'FAIL'),
+      ]),
+    ]),
+    el('div', { class: 'timeline-step-body' }, res.ok ? res.result : (res.error || 'Unknown error')),
+  ]));
 }
 
 function renderTranslationGeneralCard(root) {
@@ -991,7 +442,7 @@ function renderTranslationGeneralCard(root) {
   if (fRu.hint) colRu.appendChild(el('span', { class: 'fld-hint' }, fRu.hint));
   grid.appendChild(colRu);
 
-  const fTimeout = FIELD('TRANSLATION_TIMEOUT', 'LLM Timeout', 'number', { min: 10, max: 600, unit: 'sec', hint: 'Per-provider timeout' });
+  const fTimeout = FIELD('TRANSLATION_TIMEOUT', 'Request Timeout', 'number', { min: 10, max: 600, unit: 'sec', hint: 'Per Gemini request' });
   const colTimeout = el('div', { class: 'trans-col' });
   const headTimeout = el('div', { class: 'trans-col-head' });
   headTimeout.appendChild(el('span', null, fTimeout.label));
@@ -1002,7 +453,7 @@ function renderTranslationGeneralCard(root) {
   if (fTimeout.hint) colTimeout.appendChild(el('span', { class: 'fld-hint' }, fTimeout.hint));
   grid.appendChild(colTimeout);
 
-  const fYouTube = FIELD('SUBS_YOUTUBE_ONLY', 'YouTube Auto-translate Only', 'bool', { hint: 'Skip LLMs' });
+  const fYouTube = FIELD('SUBS_YOUTUBE_ONLY', 'YouTube Auto-translate Only', 'bool', { hint: 'Skip Gemini' });
   const colYouTube = el('div', { class: 'trans-col' });
   const headYouTube = el('label', { class: 'trans-col-head trans-toggle' });
   const editYouTube = buildEditor(fYouTube);
@@ -1021,7 +472,7 @@ function renderTranslationPrompt(root) {
   const details = el('details', { class: 'pipeline-prompt-details' });
   const summary = el('summary', { class: 'pipeline-prompt-summary' }, 'AI Translation System Prompt');
   const body = el('div', { class: 'pipeline-prompt-body' });
-  const desc = el('div', { class: 'pipeline-section-desc' }, 'Instructions and guidelines passed to all LLM translation providers.');
+  const desc = el('div', { class: 'pipeline-section-desc' }, 'System prompt sent to Gemini with every subtitle translation.');
   const promptArea = el('textarea', {
     rows: 6,
     class: 'pipeline-prompt-textarea',
@@ -1040,65 +491,36 @@ function renderTranslationPrompt(root) {
 }
 
 function renderTranslationTestCard(root) {
-  const testCard = el('div', { class: 'pipeline-test-card' });
-  const testHead = el('div', { class: 'pipeline-card-header' });
-  testHead.appendChild(el('h3', null, 'Test Fallback Chain'));
-  testCard.appendChild(testHead);
+  const card = el('div', { class: 'pipeline-test-card' });
+  const head = el('div', { class: 'pipeline-card-header' });
+  head.appendChild(el('h3', null, 'Test Translation'));
+  card.appendChild(head);
 
-  const testForm = el('div', { class: 'pipeline-test-form' });
-  const testRow = el('div', { class: 'pipeline-test-row' });
-  const testInput = el('input', {
+  const form = el('div', { class: 'pipeline-test-form' });
+  const row = el('div', { class: 'pipeline-test-row' });
+  const input = el('input', {
     type: 'text',
     class: 'pipeline-test-input',
-    id: 'translation-test-input',
     placeholder: '리브 미모 난리도 아니야',
     value: '리브 미모 난리도 아니야',
   });
-  const testBtn = el('button', {
-    class: 'btn btn-primary btn-sm',
-    type: 'button',
-    id: 'translation-test-btn',
-  }, 'Test Chain');
+  const btn = el('button', { class: 'btn btn-primary btn-sm', type: 'button' }, 'Test');
+  row.appendChild(input);
+  row.appendChild(btn);
+  form.appendChild(row);
 
-  testRow.appendChild(testInput);
-  testRow.appendChild(testBtn);
-  testForm.appendChild(testRow);
+  const result = el('div');
+  form.appendChild(result);
+  card.appendChild(form);
+  btn.addEventListener('click', () => runTranslationTest(input.value, result, btn));
 
-  const timeline = el('div', { class: 'chain-timeline', id: 'translation-timeline' });
-  testForm.appendChild(timeline);
-  testCard.appendChild(testForm);
-
-  testBtn.addEventListener('click', () => runChainTest(testInput.value, timeline, testBtn));
-
-  root.appendChild(testCard);
+  root.appendChild(card);
 }
 
 function renderTranslationSection(root) {
   root.textContent = '';
-
   renderTranslationGeneralCard(root);
-
-  const chain = getEffectiveFallbackChain();
-  if (!state.selectedProvider || !chain.includes(state.selectedProvider)) {
-    state.selectedProvider = chain[0] || 'gemini';
-  }
-
-  const pipeline = el('div', { class: 'pipeline-layout' });
-  const master = el('div', { class: 'pipeline-master' });
-  const detail = el('div', { class: 'pipeline-detail' });
-
-  const refresh = () => {
-    renderPipelineMaster(master, refresh);
-    renderPipelineDetail(detail, refresh);
-  };
-
-  renderPipelineMaster(master, refresh);
-  renderPipelineDetail(detail, refresh);
-
-  pipeline.appendChild(master);
-  pipeline.appendChild(detail);
-  root.appendChild(pipeline);
-
+  renderGeminiCard(root);
   renderTranslationPrompt(root);
   renderTranslationTestCard(root);
 }
@@ -1300,9 +722,7 @@ export async function loadConfig() {
     state.entries = new Map(data.settings.map((e) => [e.key, e]));
     state.system = data.system || [];
     state.advancedRows = configRows.filter((c) => c.source === 'db');
-    if (transConfig && transConfig.broken_keys) {
-      state.brokenKeys = transConfig.broken_keys;
-    }
+    state.keyRejected = !!(transConfig && transConfig.key_rejected);
     if (state.active === 'providers' || !SECTIONS.some((s) => s.id === state.active)) {
       state.active = 'translation';
     }
@@ -1338,8 +758,5 @@ export function initSettings() {
     state.edited.clear();
     updateSaveBar();
     renderSectionBody(state.active);
-  });
-  window.addEventListener('mouseup', () => {
-    document.querySelectorAll('.pipeline-prov-item[draggable="true"], .model-chain-item[draggable="true"]').forEach((c) => { c.draggable = false; });
   });
 }

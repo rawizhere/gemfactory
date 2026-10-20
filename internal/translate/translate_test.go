@@ -6,49 +6,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuildFallbackChain(t *testing.T) {
-	tests := []struct {
-		cfg  Config
-		want []string
-	}{
-		{Config{}, []string{ProviderGemini, ProviderOpenRouter, ProviderOpencode, ProviderNvidia, ProviderGroq}},
-		{Config{FallbackOrder: []string{"nvidia", "gemini", "groq", "opencode"}}, []string{"nvidia", "gemini", "groq", "opencode"}},
-		{Config{FallbackOrder: []string{"groq", "gemini"}}, []string{"groq", "gemini"}},
-		{Config{FallbackOrder: []string{"openrouter", "gemini", "garbage", "groq"}}, []string{"openrouter", "gemini", "groq"}},
-		{Config{FallbackOrder: []string{"google", "groq"}}, []string{"groq"}},
-	}
-
-	for _, tt := range tests {
-		require.Equal(t, tt.want, BuildFallbackChain(tt.cfg), "BuildFallbackChain(%+v)", tt.cfg)
-	}
-}
-
-func TestParseNumberedLines(t *testing.T) {
-	raw := `1. Wow! Today's performance was legendary!
-2. So sweet! My heart skipped a beat.
-3. Unnie, you look absolutely gorgeous!`
-
-	res, err := parseNumberedLines(raw, 3)
-	require.NoError(t, err)
-	require.Len(t, res, 3)
-	require.Equal(t, "Wow! Today's performance was legendary!", res[0], "line 1 mismatch")
-	require.Equal(t, "So sweet! My heart skipped a beat.", res[1], "line 2 mismatch")
-	require.Equal(t, "Unnie, you look absolutely gorgeous!", res[2], "line 3 mismatch")
-}
-
-func TestParseNumberedLinesWithMarkdownAndParens(t *testing.T) {
-	raw := `**1.** Wow! Today's performance was legendary!
-2) So sweet!
-3. Unnie, you are beautiful!`
-
-	res, err := parseNumberedLines(raw, 3)
-	require.NoError(t, err)
-	require.Len(t, res, 3)
-	require.Equal(t, "Wow! Today's performance was legendary!", res[0], "line 1 mismatch")
-	require.Equal(t, "So sweet!", res[1], "line 2 mismatch")
-	require.Equal(t, "Unnie, you are beautiful!", res[2], "line 3 mismatch")
-}
-
 func TestPreserveSpeakerTags(t *testing.T) {
 	orig := []string{
 		"[SUI] Pop off pop off",
@@ -87,24 +44,6 @@ func TestSanitizeSubtitleTypography(t *testing.T) {
 	require.Equal(t, want, SanitizeTypography(in), "SanitizeTypography(%q)", in)
 }
 
-func TestMaxOutputTokens(t *testing.T) {
-	require.Equal(t, 1024, maxOutputTokens(10, "gemini-flash"), "small batch floor")
-	require.Equal(t, 400*60+256, maxOutputTokens(400, "gemini-flash"), "scaled budget")
-	require.Equal(t, 10*60+256+2048, maxOutputTokens(10, "openai/gpt-oss-120b"), "reasoning budget")
-}
-
-func TestIsReasoningModel(t *testing.T) {
-	for _, m := range []string{"openai/gpt-oss-120b", "big-pickle", "minimaxai/minimax-m3"} {
-		require.True(t, isReasoningModel(m), "isReasoningModel(%q) must be true", m)
-	}
-	require.False(t, isReasoningModel("gemini-3.7-flash"), "gemini must not be treated as a reasoning model")
-}
-
-func TestStripMarkdownBold(t *testing.T) {
-	require.Equal(t, "Да. - Ой!", stripMarkdownBold("**Да.** - Ой!"))
-	require.Equal(t, "a * b ** c", stripMarkdownBold("a * b ** c"), "lone asterisks must survive")
-}
-
 func TestSanitizeKeepsEmojiSequences(t *testing.T) {
 	in := "😂 👨‍👩‍👧 ✈️ ♪"
 	require.Equal(t, in, SanitizeTypography(in), "emoji sequences must stay unchanged")
@@ -134,13 +73,6 @@ func TestLinePassesTargetContextCues(t *testing.T) {
 	require.False(t, linePassesTarget("안녕하세요", "안녕하세요", "ru"), "regular untranslated line must fail")
 }
 
-func TestParseNumberedLinesRejectsMissing(t *testing.T) {
-	_, err := parseNumberedLines("1. Привет\n3. Пока", 3)
-	require.Error(t, err, "a dropped line must fail instead of falling back to the source")
-	_, err = parseNumberedLines("1. Привет\n2.\n3. Пока", 3)
-	require.Error(t, err, "an empty line must fail")
-}
-
 func TestParseJSONLines(t *testing.T) {
 	res, err := parseJSONLines(`["Привет", "Пока ♪"]`, 2)
 	require.NoError(t, err)
@@ -158,15 +90,6 @@ func TestParseJSONLines(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestBuildTranslateUserMsgFormats(t *testing.T) {
-	numbered := buildTranslateUserMsg([]string{"a", "b"}, "ru", "en", "", outputNumbered)
-	require.Contains(t, numbered, "exactly 2 numbered lines")
-	require.Contains(t, numbered, "1. a\n2. b")
-
-	js := buildTranslateUserMsg([]string{"a", "b"}, "ru", "en", "", outputJSON)
-	require.Contains(t, js, "JSON array of exactly 2 strings")
-}
-
 func TestLinePassesTargetDroppedAndNames(t *testing.T) {
 	require.False(t, linePassesTarget("Hello there", "", "ru"), "dropped line must fail")
 	require.True(t, linePassesTarget("트와이스!", "TWICE!", "ru"), "group name kept in Latin")
@@ -179,4 +102,11 @@ func TestTextLooksTarget(t *testing.T) {
 	require.True(t, TextLooksTarget([]string{"Привет", "Как дела?"}, "ru"))
 	require.False(t, TextLooksTarget([]string{"Hello", "How are you?"}, "ru"))
 	require.False(t, TextLooksTarget(nil, "ru"))
+}
+
+func TestCheckTarget(t *testing.T) {
+	require.NoError(t, checkTarget([]string{"Hello there", "Bye now"}, []string{"Привет", "Пока"}, "ru"))
+	src := []string{"Thank you so much", "See you tomorrow"}
+	require.ErrorContains(t, checkTarget(src, src, "ru"), "2 of 2 lines rejected")
+	require.Error(t, checkTarget(nil, nil, "ru"), "empty output must fail")
 }

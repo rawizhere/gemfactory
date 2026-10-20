@@ -13,7 +13,6 @@ require (
 	github.com/lrstanley/go-ytdlp v1.5.2
 	github.com/mymmrac/telego v1.12.1
 	github.com/prometheus/client_golang v1.24.1
-	github.com/sashabaranov/go-openai v1.42.1
 	github.com/stretchr/testify v1.12.1
 	github.com/uptrace/bun v1.2.18
 	github.com/uptrace/bun/dialect/pgdialect v1.2.18

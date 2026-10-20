@@ -9,7 +9,8 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestGetTranslationConfigBrokenKeys(t *testing.T) {
+func TestGetTranslationConfigKeyRejected(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "")
 	s := &Server{logger: zap.NewNop()}
 
 	recHealth := httptest.NewRecorder()
@@ -18,5 +19,5 @@ func TestGetTranslationConfigBrokenKeys(t *testing.T) {
 	require.Equal(t, 200, recHealth.Code)
 	var respHealth map[string]any
 	require.NoError(t, json.Unmarshal(recHealth.Body.Bytes(), &respHealth))
-	require.NotNil(t, respHealth["broken_keys"])
+	require.Equal(t, false, respHealth["key_rejected"])
 }

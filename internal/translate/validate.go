@@ -1,67 +1,22 @@
 package translate
 
 import (
-	"context"
 	"fmt"
 	"regexp"
 	"strings"
 	"unicode"
-
-	"go.uber.org/zap"
 )
 
-// Chain walks providers in configured order; first validated output wins.
-func Chain(ctx context.Context, texts []string, targetLang, sourceLang string, cfg Config, videoTitle string, log *zap.Logger, onAttempt func(string)) ([]string, string, error) {
-	if len(texts) == 0 {
-		return nil, "", nil
+// checkTarget fails when more than a quarter of the lines stayed out of targetLang (refusals, untranslated output).
+func checkTarget(src, res []string, targetLang string) error {
+	total, bad, samples := scoreValidation(src, res, targetLang)
+	if total > 0 && bad*4 <= total {
+		return nil
 	}
-	var lastErr error
-	for _, provider := range BuildFallbackChain(cfg) {
-		if cfg.Keys[provider] == "" {
-			continue
-		}
-		translated, model, err := Translate(ctx, provider, cfg, texts, targetLang, sourceLang, videoTitle, onAttempt)
-		if err == nil && TranslationLooksTarget(texts, translated, targetLang) {
-			return preserveSpeakerTags(texts, translated), provider + "/" + model, nil
-		}
-		logTranslateFailure(log, provider, model, err, texts, translated, targetLang)
-		lastErr = fmt.Errorf("%s (%s): %w", provider, modelOrEmpty(model), errIf(err))
-	}
-
-	if lastErr != nil {
-		return nil, "", lastErr
-	}
-	return nil, "", fmt.Errorf("all translation providers failed or unconfigured")
+	return fmt.Errorf("output failed %s language validation: %d of %d lines rejected: %s", targetLang, bad, total, strings.Join(samples, "; "))
 }
 
-// fireAttempt reports the provider/model about to be tried.
-func fireAttempt(onAttempt func(string), provider, model string) {
-	if onAttempt != nil && model != "" {
-		onAttempt(provider + "/" + model)
-	}
-}
-
-// logTranslateFailure logs a failed provider attempt; nil err means the output was rejected by validation.
-func logTranslateFailure(log *zap.Logger, provider, model string, err error, src, res []string, targetLang string) {
-	if err == nil {
-		total, bad, samples := scoreValidation(src, res, targetLang)
-		log.Debug("translation output rejected by language validation",
-			zap.String("provider", provider),
-			zap.String("model", modelOrEmpty(model)),
-			zap.String("target_lang", targetLang),
-			zap.Int("lines_total", total),
-			zap.Int("lines_bad", bad),
-			zap.Int("bad_threshold", total/4+1),
-			zap.Strings("rejected_samples", samples),
-			zap.String("full_output", truncate(strings.Join(res, "\n"), 8000)))
-	}
-	log.Warn("translation provider failed",
-		zap.String("provider", provider),
-		zap.String("model", modelOrEmpty(model)),
-		zap.Error(errIf(err)))
-}
-
-// scoreValidation counts lines failing language validation and samples bad pairs for debug logs.
+// scoreValidation counts lines failing language validation and samples bad pairs for the error message.
 func scoreValidation(src, res []string, targetLang string) (total, bad int, samples []string) {
 	const maxRejectedSamples = 5
 	for i, out := range res {
@@ -81,41 +36,9 @@ func scoreValidation(src, res []string, targetLang string) (total, bad int, samp
 	return len(res), bad, samples
 }
 
-func modelOrEmpty(m string) string {
-	if m == "" {
-		return "unknown"
-	}
-	return m
-}
-
-func errIf(err error) error {
-	if err != nil {
-		return err
-	}
-	return fmt.Errorf("output failed language validation")
-}
-
-// TranslationLooksTarget rejects responses that mostly stayed in the source language (refusals, leaked reasoning).
-func TranslationLooksTarget(src, res []string, targetLang string) bool {
-	if len(res) == 0 || len(src) == 0 {
-		return false
-	}
-	bad := 0
-	for i, line := range res {
-		srcLine := ""
-		if i < len(src) {
-			srcLine = src[i]
-		}
-		if !linePassesTarget(srcLine, line, targetLang) {
-			bad++
-		}
-	}
-	return bad*4 <= len(res)
-}
-
 // TextLooksTarget reports whether already-translated lines (e.g. YouTube auto-translate) are mostly in targetLang.
 func TextLooksTarget(lines []string, targetLang string) bool {
-	return TranslationLooksTarget(make([]string, len(lines)), lines, targetLang)
+	return checkTarget(make([]string, len(lines)), lines, targetLang) == nil
 }
 
 // linePassesTarget checks one cue against target-language rules: Cyrillic for ru, no passthrough of the source line, no dropped lines.

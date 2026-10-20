@@ -246,7 +246,7 @@ type ClipCallbacks struct {
 	OnStage            func(stage, detail string)
 	OnHashtags         func(tags []string)
 	OnTranslation      func(providerModel string)
-	OnTranslateAttempt func(providerModel string) // fired before each LLM provider/model attempt
+	OnTranslateAttempt func(providerModel string) // fired before the Gemini request
 	OnProgress         func(p ProgressUpdate)     // throttled
 	OnDone             func(path, caption string)
 	OnPostDone         func(media []PostMedia, caption string) // Instagram/X posts; falls back to OnDone with the first item

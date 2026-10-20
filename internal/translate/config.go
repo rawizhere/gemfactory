@@ -1,9 +1,8 @@
-// Package translate carries subtitle translation: provider clients, the fallback chain and output validation.
+// Package translate translates subtitles with Gemini and validates the output language.
 package translate
 
 import (
 	"context"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -11,66 +10,13 @@ import (
 	"gemfactory/internal/settings"
 )
 
-const (
-	ProviderGemini     = "gemini"
-	ProviderGroq       = "groq"
-	ProviderOpencode   = "opencode"
-	ProviderNvidia     = "nvidia"
-	ProviderOpenRouter = "openrouter"
-)
-
-// provider describes one translation backend; baseURL is empty for Gemini, which uses its own SDK.
-type provider struct {
-	baseURL  string
-	defaults []string
-}
-
-var providers = map[string]provider{
-	ProviderGemini:     {"", defaultGeminiModels},
-	ProviderGroq:       {"https://api.groq.com/openai/v1", defaultGroqModels},
-	ProviderOpencode:   {"https://opencode.ai/zen/v1", defaultOpencodeModels},
-	ProviderNvidia:     {"https://integrate.api.nvidia.com/v1", defaultNvidiaModels},
-	ProviderOpenRouter: {"https://openrouter.ai/api/v1", defaultOpenRouterModels},
-}
-
-// providerOrder is the default fallback chain.
-var providerOrder = []string{ProviderGemini, ProviderOpenRouter, ProviderOpencode, ProviderNvidia, ProviderGroq}
-
-// modelsFor returns the configured model chain for p, or its built-in default.
-func (c Config) modelsFor(p string) []string {
-	if m := c.Models[p]; len(m) > 0 {
-		return m
-	}
-	return providers[p].defaults
-}
-
-// defaultOpencodeModels is the free-model fallback chain on OpenCode Zen.
-var defaultOpencodeModels = []string{
-	"laguna-s-2.1-free",
-	"nemotron-3.5-lightning-free",
-	"hy3-free",
-}
-
-// defaultNvidiaModels is the free-model chain on NVIDIA NIM.
-var defaultNvidiaModels = []string{
-	"minimaxai/minimax-m3",
-	"openai/gpt-oss-120b",
-	"meta/muse-glimmer-30b",
-	"stepfun-ai/step-3.7-flash",
-}
-
-// defaultOpenRouterModels is the fallback model chain on OpenRouter.
-var defaultOpenRouterModels = []string{
-	"google/gemini-2.5-flash-lite",
-	"mistralai/mistral-small-24b-instruct-2501",
-	"meta-llama/llama-3.3-70b-instruct",
-	"minimax/minimax-m3:free",
-}
+// DefaultModel is the Gemini model used when GEMINI_MODEL is unset.
+const DefaultModel = "gemini-3.5-flash-lite"
 
 const translatorRole = "You are a professional video subtitle translator."
 
 // DefaultTranslationPrompt is the fallback when TRANSLATION_PROMPT is empty; the live prompt is edited in the web panel.
-// Output-format rules live in the per-provider user message, so editing the prompt cannot break parsing.
+// Output-format rules live in the user message, so editing the prompt cannot break parsing.
 const DefaultTranslationPrompt = `Target: Russian subtitles for K-pop variety shows, vlogs, livestreams and song lyrics.
 
 1. Lines and dialogue
@@ -143,27 +89,14 @@ const DefaultGrokOpinionPrompt = `Ты — Grok в Telegram. У тебя спр�
 // DefaultSourcePrefRU is the fallback source-language order for ru subtitles.
 const DefaultSourcePrefRU = "en,ko"
 
-// Config holds the provider fallback order, API keys, models, custom prompt and LLM request timeout.
+// Config holds the Gemini key and model, the translation prompt and the request timeout.
 type Config struct {
-	YouTubeOnly   bool                // use YouTube auto-translate, skip all LLM providers
-	Keys          map[string]string   // provider -> API key
-	Models        map[string][]string // provider -> model chain
-	FallbackOrder []string
-	Prompt        string
-	SourcePrefRU  []string // preferred source languages when translating into ru
-	Timeout       time.Duration
-}
-
-var defaultGeminiModels = []string{
-	"gemini-3.5-flash-lite",
-	"gemini-3.1-flash-lite",
-	"gemini-3.5-flash",
-	"gemini-2.5-flash",
-	"gemini-flash-latest",
-}
-
-var defaultGroqModels = []string{
-	"openai/gpt-oss-120b",
+	YouTubeOnly  bool // use YouTube auto-translate, skip Gemini
+	Key          string
+	Model        string
+	Prompt       string
+	SourcePrefRU []string // preferred source languages when translating into ru
+	Timeout      time.Duration
 }
 
 func ParseCSV(s string) []string {
@@ -180,21 +113,14 @@ func ParseCSV(s string) []string {
 
 // ResolveConfig reads the translation config with the DB -> env -> default precedence.
 func ResolveConfig(ctx context.Context, s settings.Provider) Config {
-	cfg := Config{
-		YouTubeOnly:   s.Bool(ctx, "SUBS_YOUTUBE_ONLY", false),
-		Keys:          map[string]string{},
-		Models:        map[string][]string{},
-		FallbackOrder: ParseCSV(s.Value(ctx, "TRANSLATION_FALLBACK_ORDER", "")),
-		Prompt:        s.Value(ctx, "TRANSLATION_PROMPT", DefaultTranslationPrompt),
-		SourcePrefRU:  ParseCSV(s.Value(ctx, "SUBS_SOURCE_PREF_RU", DefaultSourcePrefRU)),
-		Timeout:       parseTimeout(s.Value(ctx, "TRANSLATION_TIMEOUT", "")),
+	return Config{
+		YouTubeOnly:  s.Bool(ctx, "SUBS_YOUTUBE_ONLY", false),
+		Key:          s.Value(ctx, "GEMINI_API_KEY", ""),
+		Model:        s.Value(ctx, "GEMINI_MODEL", DefaultModel),
+		Prompt:       s.Value(ctx, "TRANSLATION_PROMPT", DefaultTranslationPrompt),
+		SourcePrefRU: ParseCSV(s.Value(ctx, "SUBS_SOURCE_PREF_RU", DefaultSourcePrefRU)),
+		Timeout:      parseTimeout(s.Value(ctx, "TRANSLATION_TIMEOUT", "")),
 	}
-	for _, p := range providerOrder {
-		env := strings.ToUpper(p)
-		cfg.Keys[p] = s.Value(ctx, env+"_API_KEY", "")
-		cfg.Models[p] = ParseCSV(s.Value(ctx, env+"_MODELS", strings.Join(providers[p].defaults, ",")))
-	}
-	return cfg
 }
 
 const defaultTimeout = 180 * time.Second
@@ -208,34 +134,4 @@ func parseTimeout(v string) time.Duration {
 		return d
 	}
 	return defaultTimeout
-}
-
-func BuildFallbackChain(cfg Config) []string {
-	var chain []string
-	for _, p := range cfg.FallbackOrder {
-		p = strings.ToLower(strings.TrimSpace(p))
-		if _, ok := providers[p]; ok {
-			chain = append(chain, p)
-		}
-	}
-	if len(chain) > 0 {
-		return chain
-	}
-	return AllProviders()
-}
-
-// AllProviders lists every provider in default fallback order.
-func AllProviders() []string {
-	return slices.Clone(providerOrder)
-}
-
-// DefaultModels returns the built-in model chain for provider p.
-func DefaultModels(p string) []string {
-	return providers[p].defaults
-}
-
-// IsProvider reports whether p names a known provider.
-func IsProvider(p string) bool {
-	_, ok := providers[p]
-	return ok
 }

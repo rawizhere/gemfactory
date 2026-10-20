@@ -50,18 +50,6 @@ func oneOf(allowed ...string) func(string) error {
 
 var boolSpec = oneOf("true", "false")
 
-func csvOf(allowed ...string) func(string) error {
-	return func(v string) error {
-		for _, part := range strings.Split(v, ",") {
-			p := strings.ToLower(strings.TrimSpace(part))
-			if p != "" && !slices.Contains(allowed, p) {
-				return fmt.Errorf("unknown value %q", part)
-			}
-		}
-		return nil
-	}
-}
-
 func normalizeBool(v string) string {
 	if strings.EqualFold(strings.TrimSpace(v), "true") {
 		return "true"
@@ -70,7 +58,7 @@ func normalizeBool(v string) string {
 }
 
 func settingRegistry() []settingSpec {
-	specs := []settingSpec{
+	return []settingSpec{
 		{key: "DOWNLOAD_CONCURRENCY", def: "4", validate: intRange(1, 20),
 			apply: func(s *Server, v string) {
 				if n, err := strconv.Atoi(v); err == nil && s.Downloads != nil {
@@ -92,10 +80,10 @@ func settingRegistry() []settingSpec {
 		{key: "CLIP_DELETE_STATUS", def: "false", validate: boolSpec},
 		{key: "TRANSLATION_TIMEOUT", def: "180", validate: intRange(10, 600)},
 		{key: "SUBS_YOUTUBE_ONLY", def: "false", validate: boolSpec},
-		{key: "TRANSLATION_FALLBACK_ORDER", def: strings.Join(translate.AllProviders(), ","),
-			validate: csvOf(translate.AllProviders()...)},
 		{key: "SUBS_SOURCE_PREF_RU", def: "en,ko"},
 		{key: "TRANSLATION_PROMPT", def: translate.DefaultTranslationPrompt},
+		{key: "GEMINI_API_KEY", masked: true},
+		{key: "GEMINI_MODEL", def: translate.DefaultModel},
 		{key: "GROK_ENABLED", def: "true", validate: boolSpec},
 		{key: "GROK_RATE_LIMIT", def: strconv.Itoa(translate.DefaultGrokRateLimit), validate: intRange(1, 1000)},
 		{key: "GROK_MAX_CHARS", def: strconv.Itoa(translate.DefaultGrokMaxChars), validate: intRange(100, 50000)},
@@ -106,13 +94,6 @@ func settingRegistry() []settingSpec {
 			validate: validateUserAgents,
 			apply:    applyScraperUserAgents},
 	}
-	for _, p := range translate.AllProviders() {
-		env := strings.ToUpper(p)
-		specs = append(specs,
-			settingSpec{key: env + "_API_KEY", masked: true},
-			settingSpec{key: env + "_MODELS", def: strings.Join(translate.DefaultModels(p), ",")})
-	}
-	return specs
 }
 
 // isRegisteredSetting reports whether key has a dedicated editor in the settings sections.

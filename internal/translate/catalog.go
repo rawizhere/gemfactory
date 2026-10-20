@@ -1,15 +1,13 @@
 package translate
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -17,417 +15,160 @@ import (
 	"google.golang.org/genai"
 )
 
-// Model availability / catalog statuses.
+// Model availability statuses.
 const (
 	StatusUnknown     = "unknown"
 	StatusOK          = "ok"
 	StatusDead        = "dead"
 	StatusRateLimited = "rate_limited"
-	StatusQuota       = "quota"
-	StatusNotChat     = "not_chat"
 	StatusSlow        = "slow"
 	StatusError       = "error"
 )
 
-// CatalogModel is one entry in a provider's model catalog.
+// CatalogModel is one Gemini model that supports generateContent.
 type CatalogModel struct {
-	Provider      string `json:"provider"`
 	ID            string `json:"id"`
-	Free          bool   `json:"free"`
+	Name          string `json:"name"`
 	ContextLength int    `json:"context_length"`
-	Reasoning     bool   `json:"reasoning"`
 	Status        string `json:"status"`
 }
 
 // ModelStatus is the availability result for one model.
 type ModelStatus struct {
-	Provider string `json:"provider"`
-	ID       string `json:"id"`
-	Status   string `json:"status"`
+	ID     string `json:"id"`
+	Status string `json:"status"`
 }
 
-const catalogTTL = 10 * time.Minute
-const pingTimeout = 20 * time.Second
+const (
+	catalogTTL      = 10 * time.Minute
+	pingTimeout     = 20 * time.Second
+	keyCheckTimeout = 4 * time.Second
+)
 
-type catalogCacheEntry struct {
-	models    []CatalogModel
-	fetchedAt time.Time
-}
-
-type statusCacheEntry struct {
+type statusEntry struct {
 	status    string
 	checkedAt time.Time
 }
 
 var (
-	catalogMu    sync.Mutex
-	catalogCache = map[string]catalogCacheEntry{}
-	statusCache  = map[string]map[string]statusCacheEntry{}
+	catalogMu        sync.Mutex
+	catalogModels    []CatalogModel
+	catalogFetchedAt time.Time
+	statusCache      = map[string]statusEntry{}
 )
 
-func httpGet(ctx context.Context, u, apiKey string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+// Models returns the cached (or, with refresh, freshly listed) Gemini models with their last known statuses.
+func Models(ctx context.Context, key string, refresh bool) ([]CatalogModel, error) {
+	catalogMu.Lock()
+	cached, fresh := catalogModels, time.Since(catalogFetchedAt) < catalogTTL
+	catalogMu.Unlock()
+
+	models := cached
+	if refresh || !fresh {
+		var err error
+		if models, err = listModels(ctx, key); err != nil {
+			return nil, err
+		}
+		catalogMu.Lock()
+		catalogModels, catalogFetchedAt = models, time.Now()
+		catalogMu.Unlock()
+	}
+
+	out := slices.Clone(models)
+	catalogMu.Lock()
+	defer catalogMu.Unlock()
+	for i := range out {
+		out[i].Status = StatusUnknown
+		if e, ok := statusCache[out[i].ID]; ok && time.Since(e.checkedAt) < catalogTTL {
+			out[i].Status = e.status
+		}
+	}
+	return out, nil
+}
+
+func listModels(ctx context.Context, key string) ([]CatalogModel, error) {
+	client, err := newClient(ctx, key, 0)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "gemfactory")
-	if apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("catalog request to %s returned %d", u, resp.StatusCode)
-	}
-	return body, nil
-}
-
-// openRouterModel is the raw OpenRouter model shape.
-type openRouterModel struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	ContextLength int    `json:"context_length"`
-	Reasoning     *struct {
-		DefaultEnabled bool `json:"default_enabled"`
-	} `json:"reasoning"`
-	Pricing struct {
-		Prompt     string `json:"prompt"`
-		Completion string `json:"completion"`
-	} `json:"pricing"`
-}
-
-// OpenRouterIsFree reports whether an OpenRouter model is free.
-func OpenRouterIsFree(m openRouterModel) bool {
-	return m.Pricing.Prompt == "0" && m.Pricing.Completion == "0"
-}
-
-// OpencodeIsFree reports whether an OpenCode model id denotes a free model.
-func OpencodeIsFree(id string) bool {
-	return strings.Contains(id, "-free")
-}
-
-// ParseOpenRouterModels parses the OpenRouter /models response.
-func ParseOpenRouterModels(body []byte) ([]CatalogModel, error) {
-	var resp struct {
-		Data []openRouterModel `json:"data"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("parse openrouter catalog: %w", err)
-	}
-	out := make([]CatalogModel, 0, len(resp.Data))
-	for _, m := range resp.Data {
-		reasoning := m.Reasoning != nil && m.Reasoning.DefaultEnabled
+	var out []CatalogModel
+	for m, err := range client.Models.All(ctx) {
+		if err != nil {
+			return nil, fmt.Errorf("gemini list: %w", err)
+		}
+		if !slices.Contains(m.SupportedActions, "generateContent") {
+			continue
+		}
 		out = append(out, CatalogModel{
-			Provider:      ProviderOpenRouter,
-			ID:            m.ID,
-			Free:          OpenRouterIsFree(m),
-			ContextLength: m.ContextLength,
-			Reasoning:     reasoning,
+			ID:            strings.TrimPrefix(m.Name, "models/"),
+			Name:          m.DisplayName,
+			ContextLength: int(m.InputTokenLimit),
 		})
 	}
 	return out, nil
 }
 
-// openAIModelID is the id field of an OpenAI-shaped model entry.
-type openAIModelID struct {
-	ID string `json:"id"`
-}
-
-// ParseOpenAIModelIDs parses an OpenAI-compatible /models response into ids.
-func ParseOpenAIModelIDs(body []byte) ([]string, error) {
-	var resp struct {
-		Data []openAIModelID `json:"data"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("parse openai catalog: %w", err)
-	}
-	ids := make([]string, 0, len(resp.Data))
-	for _, m := range resp.Data {
-		if m.ID != "" {
-			ids = append(ids, m.ID)
-		}
-	}
-	return ids, nil
-}
-
-func buildCatalog(provider string, ids []string, freeFn func(string) bool) []CatalogModel {
-	out := make([]CatalogModel, 0, len(ids))
-	for _, id := range ids {
-		free := false
-		if freeFn != nil {
-			free = freeFn(id)
-		}
-		out = append(out, CatalogModel{Provider: provider, ID: id, Free: free})
-	}
-	return out
-}
-
-func fetchGeminiModels(ctx context.Context, apiKey string) ([]CatalogModel, error) {
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:  apiKey,
-		Backend: genai.BackendGeminiAPI,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("gemini client: %w", err)
-	}
-	out := []CatalogModel{}
-	page, err := client.Models.List(ctx, &genai.ListModelsConfig{})
-	if err != nil {
-		return nil, fmt.Errorf("gemini list: %w", err)
-	}
-	for {
-		for _, m := range page.Items {
-			out = append(out, CatalogModel{
-				Provider:      ProviderGemini,
-				ID:            strings.TrimPrefix(m.Name, "models/"),
-				ContextLength: int(m.InputTokenLimit),
-				Reasoning:     false,
-			})
-		}
-		if page.NextPageToken == "" {
-			break
-		}
-		page, err = client.Models.List(ctx, &genai.ListModelsConfig{PageToken: page.NextPageToken})
-		if err != nil {
-			return nil, fmt.Errorf("gemini list: %w", err)
-		}
-	}
-	return out, nil
-}
-
-func fetchCatalog(ctx context.Context, provider, apiKey string) ([]CatalogModel, error) {
-	switch provider {
-	case ProviderOpenRouter:
-		body, err := httpGet(ctx, providers[provider].baseURL+"/models", "")
-		if err != nil {
-			return nil, err
-		}
-		return ParseOpenRouterModels(body)
-	case ProviderOpencode, ProviderNvidia, ProviderGroq:
-		// Only Groq's /models needs auth; sending a key elsewhere is unnecessary.
-		var key string
-		var free func(string) bool
-		switch provider {
-		case ProviderGroq:
-			if apiKey == "" {
-				return nil, fmt.Errorf("groq api key required")
-			}
-			key = apiKey
-		case ProviderOpencode:
-			free = OpencodeIsFree
-		}
-		body, err := httpGet(ctx, providers[provider].baseURL+"/models", key)
-		if err != nil {
-			return nil, err
-		}
-		ids, err := ParseOpenAIModelIDs(body)
-		if err != nil {
-			return nil, err
-		}
-		return buildCatalog(provider, ids, free), nil
-	case ProviderGemini:
-		if apiKey == "" {
-			return nil, fmt.Errorf("gemini api key required")
-		}
-		return fetchGeminiModels(ctx, apiKey)
-	}
-	return nil, fmt.Errorf("unsupported provider: %s", provider)
-}
-
-func cachedCatalog(provider string) ([]CatalogModel, bool) {
-	catalogMu.Lock()
-	defer catalogMu.Unlock()
-	entry, ok := catalogCache[provider]
-	if !ok || time.Since(entry.fetchedAt) > catalogTTL {
-		return nil, false
-	}
-	return entry.models, true
-}
-
-func storeCatalog(provider string, models []CatalogModel) {
-	catalogMu.Lock()
-	defer catalogMu.Unlock()
-	catalogCache[provider] = catalogCacheEntry{models: models, fetchedAt: time.Now()}
-}
-
-func cachedStatus(provider, id string) (string, bool) {
-	catalogMu.Lock()
-	defer catalogMu.Unlock()
-	pm, ok := statusCache[provider]
-	if !ok {
-		return "", false
-	}
-	entry, ok := pm[id]
-	if !ok || time.Since(entry.checkedAt) > catalogTTL {
-		return "", false
-	}
-	return entry.status, true
-}
-
-func storeStatus(provider, id, status string) {
-	catalogMu.Lock()
-	defer catalogMu.Unlock()
-	if statusCache[provider] == nil {
-		statusCache[provider] = map[string]statusCacheEntry{}
-	}
-	statusCache[provider][id] = statusCacheEntry{status: status, checkedAt: time.Now()}
-}
-
-func mergeStatuses(provider string, models []CatalogModel) []CatalogModel {
-	out := make([]CatalogModel, len(models))
-	for i, m := range models {
-		m.Status = StatusUnknown
-		if st, ok := cachedStatus(provider, m.ID); ok {
-			m.Status = st
-		}
-		out[i] = m
-	}
-	return out
-}
-
-// GetProviderCatalog returns the cached (or freshly fetched) model catalog for a provider.
-func GetProviderCatalog(ctx context.Context, provider, apiKey string, refresh bool) ([]CatalogModel, error) {
-	if !IsProvider(provider) {
-		return nil, fmt.Errorf("unsupported provider: %s", provider)
-	}
-	if !refresh {
-		if cached, ok := cachedCatalog(provider); ok {
-			return mergeStatuses(provider, cached), nil
-		}
-	}
-	models, err := fetchCatalog(ctx, provider, apiKey)
-	if err != nil {
-		return nil, err
-	}
-	storeCatalog(provider, models)
-	return mergeStatuses(provider, models), nil
-}
-
-// CheckModelsAvailability pings each model (concurrency 4) and returns per-model status.
-func CheckModelsAvailability(ctx context.Context, provider, apiKey string, modelIDs []string) ([]ModelStatus, error) {
-	if !IsProvider(provider) {
-		return nil, fmt.Errorf("unsupported provider: %s", provider)
-	}
-	results := make([]ModelStatus, len(modelIDs))
+// CheckModels pings each model (4 at a time) and caches the resulting statuses.
+func CheckModels(ctx context.Context, key string, ids []string) []ModelStatus {
+	results := make([]ModelStatus, len(ids))
 	sem := make(chan struct{}, 4)
 	var wg sync.WaitGroup
-	for i, id := range modelIDs {
-		wg.Add(1)
-		go func(i int, id string) {
-			defer wg.Done()
+	for i, id := range ids {
+		wg.Go(func() {
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			status := pingModel(ctx, provider, apiKey, id)
-			results[i] = ModelStatus{Provider: provider, ID: id, Status: status}
-			storeStatus(provider, id, status)
-		}(i, id)
+			status := pingModel(ctx, key, id)
+			results[i] = ModelStatus{ID: id, Status: status}
+			catalogMu.Lock()
+			statusCache[id] = statusEntry{status: status, checkedAt: time.Now()}
+			catalogMu.Unlock()
+		})
 	}
 	wg.Wait()
-	return results, nil
+	return results
 }
 
-func pingModel(ctx context.Context, provider, apiKey, id string) string {
-	if provider == ProviderGemini {
-		return pingGemini(ctx, apiKey, id)
-	}
-	p, ok := providers[provider]
-	if !ok {
-		return StatusError
-	}
-	return pingOpenAI(ctx, p.baseURL, apiKey, id)
-}
-
-func pingOpenAI(ctx context.Context, baseURL, apiKey, modelID string) string {
-	payload := map[string]any{
-		"model":      modelID,
-		"max_tokens": 1,
-		"messages":   []map[string]string{{"role": "user", "content": "ping"}},
-	}
-	body, err := json.Marshal(payload)
+func pingModel(ctx context.Context, key, id string) string {
+	client, err := newClient(ctx, key, pingTimeout)
 	if err != nil {
 		return StatusError
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return StatusError
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-	}
-	client := &http.Client{Timeout: pingTimeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		if isTimeout(err) {
-			return StatusSlow
-		}
-		return StatusError
-	}
-	defer func() { _ = resp.Body.Close() }()
-	respBody, _ := io.ReadAll(resp.Body)
-	return classifyOpenAIStatus(resp.StatusCode, string(respBody))
-}
-
-func classifyOpenAIStatus(code int, body string) string {
-	switch code {
-	case http.StatusOK:
-		return StatusOK
-	case http.StatusBadRequest, http.StatusNotFound:
-		return StatusDead
-	case http.StatusTooManyRequests:
-		if strings.Contains(strings.ToLower(body), "credits") {
-			return StatusQuota
-		}
-		return StatusRateLimited
-	case http.StatusForbidden, http.StatusBadGateway:
-		return StatusNotChat
-	default:
-		return StatusError
-	}
-}
-
-func pingGemini(ctx context.Context, apiKey, modelID string) string {
-	if apiKey == "" {
-		return StatusError
-	}
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:  apiKey,
-		Backend: genai.BackendGeminiAPI,
-	})
-	if err != nil {
-		return StatusError
-	}
-	cfg := &genai.GenerateContentConfig{MaxOutputTokens: 1}
-	_, err = client.Models.GenerateContent(ctx, modelID, genai.Text("ping"), cfg)
+	_, err = client.Models.GenerateContent(ctx, id, genai.Text("ping"), &genai.GenerateContentConfig{MaxOutputTokens: 1})
 	if err == nil {
 		return StatusOK
 	}
-	code, msg := geminiAPIErrorDetails(err)
-	switch code {
-	case http.StatusOK:
-		return StatusOK
-	case http.StatusBadRequest, http.StatusNotFound:
-		return StatusDead
-	case http.StatusTooManyRequests:
-		if strings.Contains(msg, "credits") {
-			return StatusQuota
+	var apiErr genai.APIError
+	if errors.As(err, &apiErr) {
+		if keyInvalid(apiErr) {
+			return StatusError
 		}
-		return StatusRateLimited
-	case http.StatusForbidden:
-		return StatusNotChat
-	default:
-		if isTimeout(err) {
-			return StatusSlow
+		switch apiErr.Code {
+		case http.StatusBadRequest, http.StatusNotFound:
+			return StatusDead
+		case http.StatusTooManyRequests:
+			return StatusRateLimited
 		}
-		return StatusError
 	}
+	if isTimeout(err) {
+		return StatusSlow
+	}
+	return StatusError
+}
+
+// KeyRejected reports whether Gemini refuses key; it is false for an empty key or when the check cannot run.
+func KeyRejected(ctx context.Context, key string) bool {
+	if key == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, keyCheckTimeout)
+	defer cancel()
+	client, err := newClient(ctx, key, keyCheckTimeout)
+	if err != nil {
+		return false
+	}
+	_, err = client.Models.Get(ctx, DefaultModel, nil)
+	var apiErr genai.APIError
+	return errors.As(err, &apiErr) && keyInvalid(apiErr)
 }
 
 func isTimeout(err error) bool {
@@ -439,8 +180,5 @@ func isTimeout(err error) bool {
 		return true
 	}
 	var urlErr *url.Error
-	if errors.As(err, &urlErr) && urlErr.Timeout() {
-		return true
-	}
-	return false
+	return errors.As(err, &urlErr) && urlErr.Timeout()
 }

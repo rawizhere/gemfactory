@@ -98,7 +98,7 @@ func (h *GrokHandlers) Run(ctx context.Context, message *telego.Message, mode Gr
 
 	cfg := translate.ResolveConfig(ctx, h.Services.Settings)
 
-	resp, _, err := translate.Complete(ctx, prompt, targetText, cfg)
+	resp, err := translate.Complete(ctx, cfg, prompt, targetText)
 	if err != nil {
 		h.Logger.Error("grok request failed", zap.Error(err), zap.String("mode", mode.promptKey))
 		return
