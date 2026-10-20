@@ -252,7 +252,7 @@ export function renderReleases() {
 
     // Actions
     const tdDel = el('td', { style: 'text-align:right' });
-    const delBtn = el('button', { class: 'btn btn-danger btn-sm', type: 'button' }, 'Delete');
+    const delBtn = el('button', { class: 'btn btn-row', type: 'button' }, 'Delete');
     delBtn.addEventListener('click', async () => {
       if (!(await confirmDialog(`Delete release "${r.title}" (${r.artist})?`))) return;
       try {

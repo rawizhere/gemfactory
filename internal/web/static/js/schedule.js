@@ -21,11 +21,11 @@ function getRelativeDateBadge(dateStr) {
 
   const diffDays = Math.round((targetDate - today) / (1000 * 60 * 60 * 24));
 
-  if (diffDays === 0) return el('span', { class: 'badge on' }, 'today');
-  if (diffDays === 1) return el('span', { class: 'badge expiring' }, 'tomorrow');
-  if (diffDays === -1) return el('span', { class: 'badge' }, 'yesterday');
-  if (diffDays > 1) return el('span', { class: 'badge' }, `in ${diffDays}d`);
-  return el('span', { class: 'badge' }, `${Math.abs(diffDays)}d ago`);
+  if (diffDays === 0) return el('span', { class: 'rel-date today' }, 'today');
+  if (diffDays === 1) return el('span', { class: 'rel-date soon' }, 'tomorrow');
+  if (diffDays === -1) return el('span', { class: 'rel-date' }, 'yesterday');
+  if (diffDays > 1) return el('span', { class: 'rel-date' }, `in ${diffDays}d`);
+  return el('span', { class: 'rel-date' }, `${Math.abs(diffDays)}d ago`);
 }
 
 function getDayOfWeek(dateStr) {
@@ -98,7 +98,7 @@ export function renderSchedule() {
 
     // 1. Date + Relative tag
     const tdDate = el('td', { class: 'date', style: 'white-space:nowrap' });
-    tdDate.appendChild(document.createTextNode(r.date + ' '));
+    tdDate.appendChild(document.createTextNode(r.date));
     tdDate.appendChild(getRelativeDateBadge(r.date));
     tr.appendChild(tdDate);
 
@@ -106,14 +106,13 @@ export function renderSchedule() {
     const tdDay = el('td', { style: 'color:var(--muted);white-space:nowrap' }, getDayOfWeek(r.date));
     tr.appendChild(tdDay);
 
-    // 3. Artist name (bold, prominent, with gender badge)
+    // 3. Artist name with gender badge
     const tdArtist = el('td');
-    const artistBold = el('strong', { style: 'color:#ffffff;letter-spacing:-0.01em' }, r.artist);
-    tdArtist.appendChild(artistBold);
+    tdArtist.appendChild(el('span', { class: 'artist-name' }, r.artist));
 
     const artObj = artistMap.get((r.artist || '').toLowerCase());
     if (artObj?.gender) {
-      const gBadge = el('span', { class: `badge ${artObj.gender}`, style: 'margin-left:0.4rem;font-size:0.7rem' }, artObj.gender);
+      const gBadge = el('span', { class: `badge ${artObj.gender}`, style: 'margin-left:0.45rem' }, artObj.gender);
       tdArtist.appendChild(gBadge);
     }
     tr.appendChild(tdArtist);

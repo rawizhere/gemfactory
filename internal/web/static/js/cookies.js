@@ -69,7 +69,7 @@ export async function loadCookies() {
       // Actions
       const tdAct = el('td', { style: 'text-align:right; white-space:nowrap;' });
 
-      const delBtn = el('button', { class: 'btn btn-danger btn-sm', type: 'button' }, 'Delete');
+      const delBtn = el('button', { class: 'btn btn-row', type: 'button' }, 'Delete');
       delBtn.addEventListener('click', async () => {
         if (!(await confirmDialog(`Delete cookies for "${c.domain}"?`))) return;
         try {

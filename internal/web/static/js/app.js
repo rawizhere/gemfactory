@@ -140,9 +140,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   initCookies();
   initSettings();
 
-  await loadReleases();
+  // Schedule needs artists for gender badges and the gender filter.
+  await Promise.all([loadReleases(), loadArtists()]);
   renderSchedule();
-  loadArtists();
   await checkGeminiKey();
   updateStats();
 });

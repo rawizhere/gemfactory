@@ -122,7 +122,7 @@ export function renderArtists() {
     tr.appendChild(tdChk);
 
     // Name + Inline Rename
-    const tdName = el('td', { class: 'title-cell' });
+    const tdName = el('td', { class: 'artist-name' });
     // Plain text: a link here would switch tabs on the first click of a double-click rename.
     tdName.appendChild(el('span', { title: 'Double-click to rename' }, a.name));
 
@@ -221,7 +221,7 @@ export function renderArtists() {
 
     // Delete
     const tdDel = el('td', { style: 'text-align:right' });
-    const delBtn = el('button', { class: 'btn btn-danger btn-sm', type: 'button' }, 'Delete');
+    const delBtn = el('button', { class: 'btn btn-row', type: 'button' }, 'Delete');
     delBtn.addEventListener('click', async () => {
       if (!(await confirmDialog(`Delete artist "${a.name}"? Their releases will also be deleted.`))) return;
       try {
