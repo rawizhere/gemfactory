@@ -69,16 +69,6 @@ export async function loadCookies() {
       // Actions
       const tdAct = el('td', { style: 'text-align:right; white-space:nowrap;' });
 
-      const replaceBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Replace');
-      replaceBtn.addEventListener('click', () => {
-        const textarea = $('#cookie-add textarea[name=content]');
-        textarea.value = '';
-        textarea.placeholder = `# Paste new cookies for ${c.domain}...`;
-        textarea.focus();
-      });
-      tdAct.appendChild(replaceBtn);
-      tdAct.appendChild(document.createTextNode(' '));
-
       const delBtn = el('button', { class: 'btn btn-danger btn-sm', type: 'button' }, 'Delete');
       delBtn.addEventListener('click', async () => {
         if (!confirm(`Delete cookies for "${c.domain}"?`)) return;

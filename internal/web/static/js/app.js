@@ -19,8 +19,9 @@ export function switchTab(tabName) {
   if (tabName === 'cookies') loadCookies();
   if (tabName === 'settings') loadConfig();
   if (tabName === 'artists') loadArtists();
+  // loadReleases refreshes stats through its loaded callback.
   if (tabName === 'releases') loadReleases();
-  updateStats();
+  else updateStats();
 }
 
 async function updateStats() {

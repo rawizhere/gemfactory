@@ -103,11 +103,13 @@ export function exportToCSV(filename, rows, headers) {
     ),
   ].join('\n');
 
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  // BOM so Excel reads UTF-8 (Korean names) correctly.
+  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
   a.click();
-  URL.revokeObjectURL(url);
+  // Revoking synchronously can abort the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
