@@ -27,7 +27,7 @@ const SECTIONS = [
     id: 'scraper',
     title: 'Scraper',
     fields: [
-      FIELD('SCRAPER_USER_AGENTS', 'User-Agents', 'textarea', { rows: 4, hint: 'One per line; on 403 an agent is skipped for 1h and the next is tried. Empty value falls back to the built-in default' }),
+      FIELD('SCRAPER_USER_AGENTS', 'User-Agents', 'textarea', { mono: true, hint: 'One per line; on 403 an agent is skipped for 1h and the next is tried. Empty value falls back to the built-in default' }),
     ],
   },
   {
@@ -116,16 +116,12 @@ function buildEditor(f) {
       node.appendChild(el('option', { value: val }, label));
     });
     node.value = current;
-  } else if (f.type === 'textarea') {
-    node = el('textarea', { rows: f.rows || 5, style: 'width:100%; font-family:monospace; font-size:0.8rem; line-height:1.4; resize:vertical; padding:0.5rem;' });
-    node.value = current;
   } else {
     node = el('input', { type: f.type });
     if (f.min !== undefined) node.min = f.min;
     if (f.max !== undefined) node.max = f.max;
     if (f.placeholder) node.placeholder = f.placeholder;
     if (f.mono) node.style.cssText = 'font-family:monospace; font-size:0.8rem;';
-    if (f.unit) node.style.width = '9rem';
     node.value = current;
   }
 
@@ -189,8 +185,17 @@ function fieldsTable(rows) {
   return el('div', { style: 'overflow-x:auto' }, table);
 }
 
+// renderSectionFields puts short fields in a table card and long text fields in full-width editors below it.
 function renderSectionFields(section, root) {
-  root.appendChild(fieldsTable(section.fields.map((f) => fieldRow(f))));
+  const short = section.fields.filter((f) => f.type !== 'textarea');
+  if (short.length) {
+    const card = el('div', { class: 'settings-card' });
+    card.appendChild(fieldsTable(short.map((f) => fieldRow(f))));
+    root.appendChild(card);
+  }
+  section.fields
+    .filter((f) => f.type === 'textarea')
+    .forEach((f) => renderTextEditor(root, { key: f.key, title: f.label, desc: f.hint, mono: f.mono }));
 }
 
 // ---------------------------------------------------------------------------
@@ -478,27 +483,6 @@ function renderTranslationGeneralCard(root) {
   root.appendChild(card);
 }
 
-function renderTranslationPrompt(root) {
-  const details = el('details', { class: 'pipeline-prompt-details' });
-  const summary = el('summary', { class: 'pipeline-prompt-summary' }, 'AI Translation System Prompt');
-  const body = el('div', { class: 'pipeline-prompt-body' });
-  const desc = el('div', { class: 'pipeline-section-desc' }, 'System prompt sent to Gemini with every subtitle translation.');
-  const promptArea = el('textarea', {
-    rows: 6,
-    class: 'pipeline-prompt-textarea',
-    placeholder: 'Enter translation system prompt...',
-  });
-  promptArea.value = effectiveValue('TRANSLATION_PROMPT');
-  promptArea.addEventListener('input', () => {
-    state.edited.set('TRANSLATION_PROMPT', promptArea.value);
-    updateSaveBar();
-  });
-  body.appendChild(desc);
-  body.appendChild(promptArea);
-  details.appendChild(summary);
-  details.appendChild(body);
-  root.appendChild(details);
-}
 
 function renderTranslationTestCard(root) {
   const card = el('div', { class: 'pipeline-test-card' });
@@ -531,7 +515,12 @@ function renderTranslationSection(root) {
   root.textContent = '';
   renderTranslationGeneralCard(root);
   renderGeminiCard(root);
-  renderTranslationPrompt(root);
+  renderTextEditor(root, {
+    key: 'TRANSLATION_PROMPT',
+    title: 'Translation Prompt',
+    desc: 'System prompt sent to Gemini with every subtitle translation.',
+    collapsed: true,
+  });
   renderTranslationTestCard(root);
 }
 
@@ -632,39 +621,50 @@ function renderSystemSection(root) {
 // Page assembly, load and save
 // ---------------------------------------------------------------------------
 
-function renderPromptEditor(root, key, title, desc) {
+// renderTextEditor edits a long setting (prompt, user agent list) at full width. The field grows with its
+// content up to 70% of the viewport; mono keeps one item per line without wrapping.
+function renderTextEditor(root, { key, title, desc, mono = false, collapsed = false }) {
   const details = el('details', { class: 'pipeline-prompt-details' });
-  const summary = el('summary', { class: 'pipeline-prompt-summary' }, title);
-  const body = el('div', { class: 'pipeline-prompt-body' });
-  const descEl = el('div', { class: 'pipeline-section-desc' }, desc);
-  const promptArea = el('textarea', {
-    rows: 6,
-    class: 'pipeline-prompt-textarea',
-    placeholder: `Enter ${title} (leave empty for default)...`,
-  });
-  promptArea.value = effectiveValue(key);
-  promptArea.addEventListener('input', () => {
-    state.edited.set(key, promptArea.value);
-    updateSaveBar();
-  });
+  details.open = !collapsed;
+  const summary = el('summary', { class: 'pipeline-prompt-summary' });
+  summary.appendChild(el('span', null, title));
+  summary.appendChild(srcBadge(key));
 
-  const actions = el('div', { style: 'display:flex; justify-content:flex-end; margin-top:0.5rem;' });
+  const area = el('textarea', {
+    class: `text-editor${mono ? ' mono' : ''}`,
+    spellcheck: 'false',
+    placeholder: 'Empty = built-in default',
+  });
+  if (mono) area.wrap = 'off';
+  area.value = effectiveValue(key);
+  const fit = () => {
+    if (!area.offsetParent) return;
+    area.style.height = 'auto';
+    area.style.height = `${Math.min(area.scrollHeight + 2, window.innerHeight * 0.7)}px`;
+  };
+  area.addEventListener('input', () => {
+    state.edited.set(key, area.value);
+    updateSaveBar();
+    fit();
+  });
+  details.addEventListener('toggle', fit);
+
   const resetBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Reset to Default');
   resetBtn.addEventListener('click', () => {
-    const def = entryOf(key).default || '';
-    promptArea.value = def;
-    state.edited.set(key, def);
+    area.value = entryOf(key).default || '';
+    state.edited.set(key, area.value);
     updateSaveBar();
-    toast('Prompt reset to default', 'info');
+    fit();
   });
-  actions.appendChild(resetBtn);
 
-  body.appendChild(descEl);
-  body.appendChild(promptArea);
-  body.appendChild(actions);
+  const body = el('div', { class: 'pipeline-prompt-body' });
+  if (desc) body.appendChild(el('div', { class: 'pipeline-section-desc' }, desc));
+  body.appendChild(area);
+  body.appendChild(el('div', { class: 'text-editor-actions' }, resetBtn));
   details.appendChild(summary);
   details.appendChild(body);
   root.appendChild(details);
+  requestAnimationFrame(fit);
 }
 
 function renderSectionBody(sectionId) {
@@ -678,15 +678,13 @@ function renderSectionBody(sectionId) {
   switch (section.extra) {
     case 'storage':
       renderStorageCard(body);
-      renderSectionFields(section, card);
-      body.appendChild(card);
+      renderSectionFields(section, body);
       break;
     case 'grok':
-      renderSectionFields(section, card);
-      body.appendChild(card);
-      renderPromptEditor(body, 'GROK_PROMPT', 'Grok Factcheck Prompt', 'Instructions passed to Grok on "@grok это правда".');
-      renderPromptEditor(body, 'GROK_RETELL_PROMPT', 'Grok Retell Prompt', 'Instructions passed to Grok on "@grok перескажи".');
-      renderPromptEditor(body, 'GROK_OPINION_PROMPT', 'Grok Opinion Prompt', 'Instructions passed to Grok on "@grok мнение".');
+      renderSectionFields(section, body);
+      renderTextEditor(body, { key: 'GROK_PROMPT', title: 'Factcheck Prompt', desc: 'Instructions for "@grok это правда".', collapsed: true });
+      renderTextEditor(body, { key: 'GROK_RETELL_PROMPT', title: 'Retell Prompt', desc: 'Instructions for "@grok перескажи".', collapsed: true });
+      renderTextEditor(body, { key: 'GROK_OPINION_PROMPT', title: 'Opinion Prompt', desc: 'Instructions for "@grok мнение".', collapsed: true });
       break;
     case 'translation':
       renderTranslationSection(body);
@@ -699,8 +697,7 @@ function renderSectionBody(sectionId) {
       body.appendChild(card);
       break;
     default:
-      renderSectionFields(section, card);
-      body.appendChild(card);
+      renderSectionFields(section, body);
   }
 }
 

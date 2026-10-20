@@ -94,7 +94,7 @@ export function renderSchedule() {
 
   monthReleases.forEach((r) => {
     const isToday = r.date === todayStr;
-    const tr = el('tr', { class: isToday ? 'is-today' : '' });
+    const tr = el('tr', { class: isToday ? 'is-today' : r.date < todayStr ? 'is-past' : '' });
 
     // 1. Date + Relative tag
     const tdDate = el('td', { class: 'date', style: 'white-space:nowrap' });
@@ -152,7 +152,20 @@ export function renderSchedule() {
   });
 
   table.appendChild(tbody);
-  box.appendChild(tableWrap(table));
+  const wrap = tableWrap(table);
+  box.appendChild(wrap);
+  scrollToToday(wrap);
+}
+
+// scrollToToday scrolls the table so today's (or the next upcoming) release sits near the top,
+// keeping one earlier row in view for context.
+function scrollToToday(wrap) {
+  const rows = [...wrap.querySelectorAll('tbody tr')];
+  const idx = rows.findIndex((tr) => !tr.classList.contains('is-past'));
+  if (idx <= 0) return;
+  const anchor = rows[idx - 1];
+  const headHeight = wrap.querySelector('thead')?.offsetHeight || 0;
+  wrap.scrollTop += anchor.getBoundingClientRect().top - wrap.getBoundingClientRect().top - headHeight;
 }
 
 export function initSchedule() {
