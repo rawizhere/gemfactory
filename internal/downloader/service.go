@@ -184,7 +184,8 @@ func (s *Service) SubmitWithCallbacks(ctx context.Context, req ClipRequest, cbs 
 			// Failed run: drop it so this submit starts a fresh attempt.
 			delete(s.jobs, job.ID)
 		case StatusDone:
-			if existing.OutputDir != "" {
+			// Posts carry several files; rerunning hits the post manifest and delivers all of them.
+			if existing.OutputDir != "" && !isPostJob(existing.Request) {
 				if _, err := os.Stat(existing.OutputDir); err == nil {
 					// Already produced & file exists on disk: serve instantly through callbacks.
 					existing.callbacks = cbs

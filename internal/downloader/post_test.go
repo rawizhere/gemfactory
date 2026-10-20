@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -94,4 +95,33 @@ func TestIsPostJob(t *testing.T) {
 	require.False(t, isPostJob(ClipRequest{URL: url, AudioOnly: true}), "/mp3 keeps the yt-dlp path")
 	require.False(t, isPostJob(ClipRequest{URL: url, Start: "0:01", End: "0:05"}), "intervals keep the yt-dlp path")
 	require.False(t, isPostJob(ClipRequest{URL: "https://vm.tiktok.com/x"}))
+}
+
+func TestResubmitDonePostDeliversWholeAlbum(t *testing.T) {
+	s := newTestService(t)
+	req := ClipRequest{URL: "https://www.instagram.com/p/ABC123/", Shorts: true}
+
+	dir := s.workbenchDir("ig_ABC123")
+	var media []PostMedia
+	for _, name := range []string{"ig_ABC123_1.jpg", "ig_ABC123_2.jpg"} {
+		p := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(p, []byte("img"), 0644))
+		media = append(media, PostMedia{Path: p})
+	}
+	writePostManifest(filepath.Join(dir, "ig_ABC123_post.json"), "title", nil, "caption", media)
+
+	s.jobs["ig_ABC123_full"] = &Job{ID: "ig_ABC123_full", VideoID: "ig_ABC123", Request: req, Status: StatusDone, OutputDir: media[0].Path}
+
+	got := make(chan []PostMedia, 1)
+	_, err := s.SubmitWithCallbacks(context.Background(), req, &ClipCallbacks{
+		OnPostDone: func(m []PostMedia, _ string) { got <- m },
+		OnDone:     func(string, string) { t.Error("OnDone must not be used for posts") },
+	})
+	require.NoError(t, err)
+	select {
+	case m := <-got:
+		require.Equal(t, media, m)
+	case <-time.After(5 * time.Second):
+		t.Fatal("album was not delivered")
+	}
 }
