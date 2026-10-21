@@ -320,7 +320,9 @@ td.title-cell { color: var(--ink); }
 td.date .rel-date { margin-left: 0.5rem; font-size: 0.76rem; color: var(--muted); }
 td.date .rel-date.today { color: var(--accent); font-weight: 600; }
 td.date .rel-date.soon { color: var(--warning); }
-td input[type="checkbox"] { display: block; margin: 0 0 0 auto; }
+/* Row-selection checkboxes live in a narrow first column. */
+tbody td:first-child:has(> input[type="checkbox"]) { width: 1%; }
+tbody td:first-child > input[type="checkbox"] { display: block; margin: 0 auto; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 a.clickable-link { cursor: pointer; }
@@ -812,9 +814,22 @@ footer {
     grid-template-columns: 1fr;
   }
   nav[role="tablist"] {
-    gap: 0.8rem;
+    gap: 0;
   }
+  nav[role="tablist"] button {
+    padding-left: 0.4rem;
+    padding-right: 0.4rem;
+  }
+  /* Settings rows stack: label, field, description. */
+  .fields-table thead { display: none; }
+  .fields-table, .fields-table tbody, .fields-table tr, .fields-table td { display: block; }
+  .fields-table td { border: none; padding: 0.15rem 0; }
+  .fields-table tr { padding: 0.65rem 0; border-bottom: 1px solid var(--line); }
+  .fields-table tr:last-child { border-bottom: none; }
+  .fields-table tbody tr:hover { background: none; }
 }
+/* One gap between the blocks of a settings section. */
+#settings-body > * { margin: 0 0 1rem; }
 .trans-col {
   display: flex;
   flex-direction: column;

@@ -172,7 +172,7 @@ function fieldRow(f, opts = {}) {
 }
 
 function fieldsTable(rows) {
-  const table = el('table');
+  const table = el('table', { class: 'fields-table' });
   const headRow = el('tr');
   ['Setting', 'Value', 'Description'].forEach((t) => headRow.appendChild(el('th', null, t)));
   const thead = el('thead');

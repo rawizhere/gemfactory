@@ -39,7 +39,7 @@ export async function loadCookies() {
     const thead = el('thead');
     const headRow = el('tr');
     ['Domain', 'Count', 'Status', 'Updated', ''].forEach((title) => {
-      headRow.appendChild(el('th', null, title));
+      headRow.appendChild(el('th', { class: title === 'Count' ? 'num' : null }, title));
     });
     thead.appendChild(headRow);
     table.appendChild(thead);
