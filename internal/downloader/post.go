@@ -212,7 +212,13 @@ func (s *Service) fetchPostSource(ctx context.Context, rawURL, cookieFile string
 var tweetAPI = "https://cdn.syndication.twimg.com/tweet-result"
 
 type tweetResult struct {
-	Text     string `json:"text"`
+	TypeName  string `json:"__typename"`
+	Text      string `json:"text"`
+	Tombstone struct {
+		Text struct {
+			Text string `json:"text"`
+		} `json:"text"`
+	} `json:"tombstone"`
 	Entities struct {
 		URLs []struct {
 			URL         string `json:"url"`
@@ -245,6 +251,11 @@ func fetchTweet(ctx context.Context, id string, limitBytes float64) (*postSource
 	var tw tweetResult
 	if err := json.Unmarshal(body, &tw); err != nil {
 		return nil, fmt.Errorf("parse tweet: %w", err)
+	}
+	if tw.TypeName == "TweetTombstone" {
+		// X answers with a tombstone for deleted, suspended and age-restricted (18+) posts alike.
+		reason := strings.TrimSuffix(strings.TrimSpace(tw.Tombstone.Text.Text), "Learn more")
+		return nil, fmt.Errorf("post is not available for download (deleted, suspended or sensitive/18+): %s", strings.TrimSpace(reason))
 	}
 
 	text := tw.Text

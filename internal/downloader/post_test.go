@@ -65,6 +65,21 @@ func TestFetchTweetParsesMediaAndText(t *testing.T) {
 	require.Equal(t, "https://v/540.mp4", src.items[1].url)
 }
 
+func TestFetchTweetTombstone(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"__typename":"TweetTombstone","tombstone":{"text":{"text":"This Post was deleted by the Post author. Learn more"}}}`))
+	}))
+	defer srv.Close()
+	old := tweetAPI
+	tweetAPI = srv.URL
+	defer func() { tweetAPI = old }()
+
+	_, err := fetchTweet(context.Background(), "42", 49<<20)
+	require.ErrorContains(t, err, "not available for download")
+	require.ErrorContains(t, err, "sensitive/18+")
+	require.ErrorContains(t, err, "This Post was deleted by the Post author")
+}
+
 func TestTextHashtags(t *testing.T) {
 	require.Equal(t, []string{"KiiiKiii", "키키", "LEESOL"},
 		textHashtags("Sunset\n\n#KiiiKiii #키키\n#LEESOL #leesol"))
