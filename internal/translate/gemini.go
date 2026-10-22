@@ -55,7 +55,7 @@ func safetyOff() []*genai.SafetySetting {
 }
 
 // generate sends one request. A 400 drops the next optional setting the model may reject
-// (thinking off, response schema, search, safety); a rate limit or server error is retried once.
+// (thinking off, response schema, safety); a rate limit or server error is retried once.
 func generate(ctx context.Context, client *genai.Client, model string, cfg *genai.GenerateContentConfig, user string) (string, error) {
 	retried := false
 	for {
@@ -96,8 +96,6 @@ func dropOption(cfg *genai.GenerateContentConfig) bool {
 		cfg.ThinkingConfig = nil
 	case cfg.ResponseSchema != nil:
 		cfg.ResponseSchema, cfg.ResponseMIMEType = nil, ""
-	case cfg.Tools != nil:
-		cfg.Tools = nil
 	case cfg.SafetySettings != nil:
 		cfg.SafetySettings = nil
 	default:
