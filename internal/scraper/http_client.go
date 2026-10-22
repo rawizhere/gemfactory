@@ -2,8 +2,10 @@ package scraper
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -35,7 +37,7 @@ func NewHTTPClient(userAgents []string, logger *zap.Logger) *HTTPClient {
 
 	client := &http.Client{
 		Transport: transport,
-		Timeout:   30 * time.Second,
+		Timeout:   60 * time.Second,
 	}
 
 	if len(userAgents) == 0 {
@@ -108,6 +110,7 @@ func (c *HTTPClient) wait(ctx context.Context) error {
 }
 
 // doRequest sends the request, failing over to the next user agent on 403.
+// A timeout is retried once: cold year windows generate slowly, the retry usually hits the warm cache.
 func (c *HTTPClient) doRequest(ctx context.Context, apiURL string) (*http.Response, error) {
 	c.mu.Lock()
 	attempts := len(c.userAgents)
@@ -116,6 +119,21 @@ func (c *HTTPClient) doRequest(ctx context.Context, apiURL string) (*http.Respon
 		return nil, fmt.Errorf("user agent pool is empty")
 	}
 
+	resp, err := c.doRequestOnce(ctx, apiURL, attempts)
+	if err != nil && timeoutErr(err) {
+		c.logger.Warn("REST request timed out, retrying once", zap.String("url", apiURL))
+		resp, err = c.doRequestOnce(ctx, apiURL, attempts)
+	}
+	return resp, err
+}
+
+// timeoutErr reports client timeout, request timeout and context deadline errors.
+func timeoutErr(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout() || errors.Is(err, context.DeadlineExceeded)
+}
+
+func (c *HTTPClient) doRequestOnce(ctx context.Context, apiURL string, attempts int) (*http.Response, error) {
 	for attempt := 0; attempt < attempts; attempt++ {
 		if err := c.wait(ctx); err != nil {
 			return nil, err
