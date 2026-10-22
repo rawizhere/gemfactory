@@ -21,13 +21,12 @@ type GrokMode struct {
 	inputLabel  string
 	quoteLabel  string
 	temperature float32
-	search      bool // ground the answer in Google Search while GROK_SEARCH is on
 }
 
 var (
-	GrokFactCheck = GrokMode{"GROK_PROMPT", translate.DefaultGrokPrompt, "Текст для проверки", "Проверяемая цитата", 0.3, true}
-	GrokRetell    = GrokMode{"GROK_RETELL_PROMPT", translate.DefaultGrokRetellPrompt, "Текст для пересказа", "Пересказываемая цитата", 0.5, false}
-	GrokOpinion   = GrokMode{"GROK_OPINION_PROMPT", translate.DefaultGrokOpinionPrompt, "Текст для оценки", "Цитата для оценки", 0.7, false}
+	GrokFactCheck = GrokMode{"GROK_PROMPT", translate.DefaultGrokPrompt, "Текст для проверки", "Проверяемая цитата", 0.3}
+	GrokRetell    = GrokMode{"GROK_RETELL_PROMPT", translate.DefaultGrokRetellPrompt, "Текст для пересказа", "Пересказываемая цитата", 0.5}
+	GrokOpinion   = GrokMode{"GROK_OPINION_PROMPT", translate.DefaultGrokOpinionPrompt, "Текст для оценки", "Цитата для оценки", 0.7}
 )
 
 // grokFailReplies answer a failed model call in the prompts' dry, emoji-free voice.
@@ -109,9 +108,7 @@ func (h *GrokHandlers) Run(ctx context.Context, message *telego.Message, mode Gr
 
 	h.TG.SendTyping(ctx, message.Chat.ID, message.MessageThreadID)
 
-	search := mode.search && h.Services.Settings.Bool(ctx, "GROK_SEARCH", true)
-
-	resp, err := translate.Complete(ctx, cfg, prompt, targetText, mode.temperature, search)
+	resp, err := translate.Complete(ctx, cfg, prompt, targetText, mode.temperature)
 	if err != nil {
 		h.Logger.Error("grok request failed", zap.Error(err), zap.String("mode", mode.promptKey))
 		// The handler timeout may have fired; the apology still goes out.

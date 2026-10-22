@@ -185,17 +185,13 @@ func Translate(ctx context.Context, cfg Config, texts []string, targetLang, sour
 	return preserveSpeakerTags(texts, res), nil
 }
 
-// Complete runs a free-form completion (Grok replies) with the configured model;
-// search grounds the answer in Google Search.
-func Complete(ctx context.Context, cfg Config, systemPrompt, userMsg string, temperature float32, search bool) (string, error) {
+// Complete runs a free-form completion (Grok replies) with the configured model.
+func Complete(ctx context.Context, cfg Config, systemPrompt, userMsg string, temperature float32) (string, error) {
 	client, err := newClient(ctx, cfg.Key, cfg.Timeout)
 	if err != nil {
 		return "", err
 	}
 	gc := baseConfig(systemPrompt, temperature)
-	if search {
-		gc.Tools = []*genai.Tool{{GoogleSearch: &genai.GoogleSearch{}}}
-	}
 	out, err := generate(ctx, client, cfg.Model, gc, userMsg)
 	if err != nil {
 		return "", fmt.Errorf("gemini (%s): %w", cfg.Model, err)
