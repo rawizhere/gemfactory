@@ -45,6 +45,7 @@ const SECTIONS = [
     title: 'Grok',
     fields: [
       FIELD('GROK_ENABLED', 'Enable @grok commands', 'bool', { hint: 'Enable @grok это правда / перескажи / мнение in replies' }),
+      FIELD('GROK_SEARCH', 'Google Search for factcheck', 'bool', { hint: '"@grok это правда" checks claims with Google Search; uses the Gemini grounding quota' }),
       FIELD('GROK_RATE_LIMIT', 'Rate Limit (requests per min)', 'number', { min: 1, max: 1000, unit: 'req/min', hint: 'Maximum allowed Grok calls per minute, shared across all @grok commands' }),
       FIELD('GROK_MAX_CHARS', 'Max Target Text Length (chars)', 'number', { min: 100, max: 50000, unit: 'chars', hint: 'Max input character length passed to Grok' }),
     ],

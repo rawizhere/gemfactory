@@ -23,6 +23,7 @@ func TestDetectGrokMode(t *testing.T) {
 		name     string
 		msg      *telego.Message
 		expected *handlers.GrokMode
+		question string
 	}{
 		{
 			name:     "nil message",
@@ -221,12 +222,39 @@ func TestDetectGrokMode(t *testing.T) {
 			expected: nil,
 		},
 		{
-			name: "just mention",
+			name: "just mention is a factcheck",
 			msg: &telego.Message{
 				ReplyToMessage: replyMsg,
 				Text:           "@grok",
 			},
-			expected: nil,
+			expected: &factcheck,
+		},
+		{
+			name: "factcheck keeps the user's question with punctuation",
+			msg: &telego.Message{
+				ReplyToMessage: replyMsg,
+				Text:           "@grok, это правда, что Вонён ушла из IVE?",
+			},
+			expected: &factcheck,
+			question: "что Вонён ушла из IVE?",
+		},
+		{
+			name: "en factcheck question",
+			msg: &telego.Message{
+				ReplyToMessage: replyMsg,
+				Text:           "@grok is this true: Did they win?",
+			},
+			expected: &factcheck,
+			question: "Did they win?",
+		},
+		{
+			name: "opinion with topic",
+			msg: &telego.Message{
+				ReplyToMessage: replyMsg,
+				Text:           "@GROK мнение о вокале",
+			},
+			expected: &opinion,
+			question: "о вокале",
 		},
 		{
 			name: "near-miss retell word",
@@ -240,13 +268,16 @@ func TestDetectGrokMode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mode, ok := detectGrokMode(tt.msg)
+			mode, question, ok := detectGrokMode(tt.msg)
 			if tt.expected == nil {
 				assert.False(t, ok)
 				return
 			}
 			assert.True(t, ok)
 			assert.Equal(t, *tt.expected, mode)
+			if tt.question != "" {
+				assert.Equal(t, tt.question, question)
+			}
 		})
 	}
 }

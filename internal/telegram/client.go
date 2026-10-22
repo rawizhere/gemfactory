@@ -141,6 +141,18 @@ func (c *Client) SendMessageRaw(ctx context.Context, chatID int64, text string, 
 	return c.bot.SendMessage(ctx, params)
 }
 
+// SendTyping shows the "typing…" status; failures are only logged.
+func (c *Client) SendTyping(ctx context.Context, chatID int64, threadID int) {
+	err := c.bot.SendChatAction(ctx, &telego.SendChatActionParams{
+		ChatID:          telegoutil.ID(chatID),
+		MessageThreadID: threadID,
+		Action:          telego.ChatActionTyping,
+	})
+	if err != nil {
+		c.logger.Debug("Failed to send typing action", zap.Int64("chat_id", chatID), zap.Error(err))
+	}
+}
+
 func (c *Client) EditMessageText(ctx context.Context, chatID int64, messageID int, text string) error {
 	params := &telego.EditMessageTextParams{
 		ChatID:    telegoutil.ID(chatID),

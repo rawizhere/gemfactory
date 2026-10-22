@@ -55,7 +55,7 @@ func safetyOff() []*genai.SafetySetting {
 }
 
 // generate sends one request. A 400 drops the next optional setting the model may reject
-// (thinking off, response schema, safety); a rate limit or server error is retried once.
+// (thinking off, response schema, search, safety); a rate limit or server error is retried once.
 func generate(ctx context.Context, client *genai.Client, model string, cfg *genai.GenerateContentConfig, user string) (string, error) {
 	retried := false
 	for {
@@ -96,6 +96,8 @@ func dropOption(cfg *genai.GenerateContentConfig) bool {
 		cfg.ThinkingConfig = nil
 	case cfg.ResponseSchema != nil:
 		cfg.ResponseSchema, cfg.ResponseMIMEType = nil, ""
+	case cfg.Tools != nil:
+		cfg.Tools = nil
 	case cfg.SafetySettings != nil:
 		cfg.SafetySettings = nil
 	default:
@@ -183,13 +185,18 @@ func Translate(ctx context.Context, cfg Config, texts []string, targetLang, sour
 	return preserveSpeakerTags(texts, res), nil
 }
 
-// Complete runs a free-form completion (Grok replies) with the configured model.
-func Complete(ctx context.Context, cfg Config, systemPrompt, userMsg string) (string, error) {
+// Complete runs a free-form completion (Grok replies) with the configured model;
+// search grounds the answer in Google Search.
+func Complete(ctx context.Context, cfg Config, systemPrompt, userMsg string, temperature float32, search bool) (string, error) {
 	client, err := newClient(ctx, cfg.Key, cfg.Timeout)
 	if err != nil {
 		return "", err
 	}
-	out, err := generate(ctx, client, cfg.Model, baseConfig(systemPrompt, 0.7), userMsg)
+	gc := baseConfig(systemPrompt, temperature)
+	if search {
+		gc.Tools = []*genai.Tool{{GoogleSearch: &genai.GoogleSearch{}}}
+	}
+	out, err := generate(ctx, client, cfg.Model, gc, userMsg)
 	if err != nil {
 		return "", fmt.Errorf("gemini (%s): %w", cfg.Model, err)
 	}

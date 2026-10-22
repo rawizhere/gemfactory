@@ -87,6 +87,7 @@ func settingRegistry() []settingSpec {
 		{key: "GEMINI_API_KEY", masked: true},
 		{key: "GEMINI_MODEL", def: translate.DefaultModel},
 		{key: "GROK_ENABLED", def: "true", validate: boolSpec},
+		{key: "GROK_SEARCH", def: "true", validate: boolSpec},
 		{key: "GROK_RATE_LIMIT", def: strconv.Itoa(translate.DefaultGrokRateLimit), validate: intRange(1, 1000)},
 		{key: "GROK_MAX_CHARS", def: strconv.Itoa(translate.DefaultGrokMaxChars), validate: intRange(100, 50000)},
 		{key: "GROK_PROMPT", def: translate.DefaultGrokPrompt},
@@ -218,7 +219,7 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if v != "" && (spec.key == "CLIP_DELETE_STATUS" || spec.key == "SUBS_YOUTUBE_ONLY" || spec.key == "GROK_ENABLED") {
+		if v != "" && (spec.key == "CLIP_DELETE_STATUS" || spec.key == "SUBS_YOUTUBE_ONLY" || spec.key == "GROK_ENABLED" || spec.key == "GROK_SEARCH") {
 			v = normalizeBool(v)
 		}
 		updates = append(updates, pending{spec: spec, val: v})

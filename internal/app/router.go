@@ -5,6 +5,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
@@ -76,8 +77,8 @@ func (r *Router) RegisterRoutes(bh *th.BotHandler) {
 	}, th.CommandEqual("help"))
 
 	bh.HandleMessage(func(ctx *th.Context, m telego.Message) error {
-		if mode, ok := detectGrokMode(&m); ok {
-			r.handlers.Grok.Run(ctx, &m, mode)
+		if mode, question, ok := detectGrokMode(&m); ok {
+			r.handlers.Grok.Run(ctx, &m, mode, question)
 		}
 		return nil
 	}, grokPredicate())
@@ -153,41 +154,64 @@ func clipHandler(h *handlers.Handlers, command string) th.MessageHandler {
 
 func grokPredicate() th.Predicate {
 	return func(_ context.Context, update telego.Update) bool {
-		_, ok := detectGrokMode(update.Message)
+		_, _, ok := detectGrokMode(update.Message)
 		return ok
 	}
 }
 
-// detectGrokMode matches an @grok reply against the known commands; factcheck is tested first.
-func detectGrokMode(m *telego.Message) (handlers.GrokMode, bool) {
-	if m == nil || m.ReplyToMessage == nil || m.Text == "" {
-		return handlers.GrokMode{}, false
-	}
-	replacer := strings.NewReplacer(",", " ", ":", " ", "?", " ", "!", " ", ";", " ")
-	words := strings.Fields(replacer.Replace(strings.ToLower(m.Text)))
-	if len(words) < 2 || words[0] != "@grok" {
-		return handlers.GrokMode{}, false
-	}
+// grokPunct separates words in an @grok command; each byte maps to one space, so offsets are kept.
+var grokPunct = strings.NewReplacer(",", " ", ":", " ", "?", " ", "!", " ", ";", " ")
 
-	if len(words) >= 3 {
-		if words[1] == "это" && words[2] == "правда" {
-			return handlers.GrokFactCheck, true
-		}
-		if words[1] == "is" && words[2] == "this" && len(words) >= 4 && words[3] == "true" {
-			return handlers.GrokFactCheck, true
-		}
+// detectGrokMode matches an @grok reply against the known commands; factcheck is tested first.
+// A bare "@grok" is a factcheck. question is the user's text after the command.
+func detectGrokMode(m *telego.Message) (mode handlers.GrokMode, question string, ok bool) {
+	if m == nil || m.ReplyToMessage == nil || m.Text == "" {
+		return handlers.GrokMode{}, "", false
+	}
+	words, ends := splitWords(grokPunct.Replace(m.Text), 4)
+	if len(words) == 0 || words[0] != "@grok" {
+		return handlers.GrokMode{}, "", false
+	}
+	rest := func(n int) string {
+		return strings.TrimSpace(strings.TrimLeft(m.Text[ends[n-1]:], " ,:;?!"))
 	}
 
 	switch {
+	case len(words) == 1:
+		return handlers.GrokFactCheck, "", true
+	case len(words) >= 3 && words[1] == "это" && words[2] == "правда":
+		return handlers.GrokFactCheck, rest(3), true
+	case len(words) >= 4 && words[1] == "is" && words[2] == "this" && words[3] == "true":
+		return handlers.GrokFactCheck, rest(4), true
 	case strings.HasPrefix(words[1], "переска"),
 		words[1] == "retell", words[1] == "summarize", words[1] == "summary", words[1] == "tldr":
-		return handlers.GrokRetell, true
+		return handlers.GrokRetell, rest(2), true
 	case strings.HasPrefix(words[1], "мнен"),
 		words[1] == "opinion", words[1] == "thoughts", words[1] == "think", words[1] == "take":
-		return handlers.GrokOpinion, true
+		return handlers.GrokOpinion, rest(2), true
 	}
 
-	return handlers.GrokMode{}, false
+	return handlers.GrokMode{}, "", false
+}
+
+// splitWords returns up to limit lowercased whitespace-separated words of s and the byte offset after each.
+func splitWords(s string, limit int) (words []string, ends []int) {
+	off := 0
+	for len(words) < limit {
+		trimmed := strings.TrimLeftFunc(s[off:], unicode.IsSpace)
+		off = len(s) - len(trimmed)
+		if trimmed == "" {
+			break
+		}
+		n := strings.IndexFunc(trimmed, unicode.IsSpace)
+		if n < 0 {
+			n = len(trimmed)
+		}
+		words = append(words, strings.ToLower(trimmed[:n]))
+		off += n
+		ends = append(ends, off)
+	}
+	return words, ends
 }
 
 // messageWithURL matches non-command text messages carrying a downloadable URL.
