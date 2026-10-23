@@ -217,7 +217,13 @@ func (f *Fetcher) parseEventPageFromDoc(doc *goquery.Document, url string) ([]*R
 		if idx := strings.Index(id, "?"); idx != -1 {
 			id = id[:idx]
 		}
-		yt = "https://www.youtube.com/watch?v=" + id
+		if id == "videoseries" {
+			_, list, _ := strings.Cut(yt, "list=")
+			list, _, _ = strings.Cut(list, "&")
+			yt = "https://www.youtube.com/playlist?list=" + list
+		} else {
+			yt = "https://www.youtube.com/watch?v=" + id
+		}
 	}
 
 	sp, _ := doc.Find("a[href*='open.spotify.com']").Attr("href")

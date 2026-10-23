@@ -118,5 +118,6 @@ func yearWindow(year string) (time.Time, time.Time, error) {
 
 	start := time.Date(y, time.January, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(y, time.December, 31, 23, 59, 59, 0, time.UTC)
-	return start.AddDate(0, 0, -30), end.AddDate(0, 0, 60), nil
+	// posts appear up to two months before release, so January releases need a long lookback
+	return start.AddDate(0, 0, -90), end.AddDate(0, 0, 60), nil
 }
