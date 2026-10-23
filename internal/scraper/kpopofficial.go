@@ -103,7 +103,7 @@ func (f *Fetcher) parseEventPageFromDoc(doc *goquery.Document, url string) ([]*R
 	metaAlbum = defaultAlbum
 
 	// GreenShift layout pairs a gspb_text key with a gspb_meta_value in a sibling container.
-	var gspbDate string
+	var gspbDate, gspbPre string
 	doc.Find("div.gspb_text").Each(func(i int, s *goquery.Selection) {
 		key := strings.Join(strings.Fields(s.Text()), " ")
 		lowKey := strings.ToLower(key)
@@ -122,7 +122,15 @@ func (f *Fetcher) parseEventPageFromDoc(doc *goquery.Document, url string) ([]*R
 			}
 		case "title track", "title":
 			if val != "" {
-				metaTrack = strings.Trim(val, " “\"”'[]")
+				metaTrack = trackName(val)
+			}
+		case "tracklist":
+			// value is "Title" or "Pre-release", a dash, then the quoted song name
+			kind, name, _ := strings.Cut(val, "–")
+			if strings.HasPrefix(strings.ToLower(kind), "pre-release") {
+				gspbPre = trackName(name)
+			} else {
+				metaTrack = trackName(name)
 			}
 		default:
 			if len(val) <= 80 && (strings.Contains(lowKey, "release") || strings.Contains(lowKey, "date")) {
@@ -183,7 +191,7 @@ func (f *Fetcher) parseEventPageFromDoc(doc *goquery.Document, url string) ([]*R
 		case "album":
 			metaAlbum = strings.Trim(val, " “\"”'[]")
 		case "title track", "title":
-			metaTrack = strings.Trim(val, " “\"”'[]")
+			metaTrack = trackName(val)
 		default:
 			if strings.Contains(lowKey, "buy") || strings.Contains(lowKey, "source") ||
 				strings.Contains(lowKey, "tracklist") || lowKey == "price" {
@@ -204,7 +212,11 @@ func (f *Fetcher) parseEventPageFromDoc(doc *goquery.Document, url string) ([]*R
 	})
 
 	if len(events) == 0 && gspbDate != "" {
-		events = append(events, eventRaw{Name: "", Date: gspbDate, IsMain: true})
+		ev := eventRaw{Date: gspbDate, IsMain: true}
+		if gspbPre != "" {
+			ev = eventRaw{Name: "Pre-release “" + gspbPre + "”", Date: gspbDate}
+		}
+		events = append(events, ev)
 	}
 
 	if isTBA(metaTrack) {
@@ -356,6 +368,18 @@ func cleanCellText(s string) string {
 func isTBA(s string) bool {
 	low := strings.ToLower(strings.TrimSpace(s))
 	return low == "tba" || strings.HasPrefix(low, "to be announced")
+}
+
+// trackName splits titles on curly quotes, so “A”, “B” becomes "A / B".
+func trackName(s string) string {
+	var names []string
+	for _, part := range strings.FieldsFunc(s, func(r rune) bool { return r == '“' || r == '”' }) {
+		part = strings.Trim(part, " \"'[]")
+		if strings.Trim(part, ",/&") != "" {
+			names = append(names, part)
+		}
+	}
+	return strings.Join(names, " / ")
 }
 
 var titleDashSplit = regexp.MustCompile(`\s+[–—-]\s+`)

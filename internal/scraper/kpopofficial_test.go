@@ -156,6 +156,10 @@ func TestParseEventPageFromDocGreenShift(t *testing.T) {
 <div class="gspb_container inner-c"><div class="gspb_text">Album</div></div>
 <div class="gspb_container val-c"><span class="gspb_meta_value">1st Studio Album – Chain Reaction</span></div>
 </div>
+<div class="gspb_container outer-d">
+<div class="gspb_container inner-d"><div class="gspb_text">Tracklist</div></div>
+<div class="gspb_container val-d"><span class="gspb_meta_value">Title – “Chain Reaction”</span></div>
+</div>
 </div></body></html>`
 
 	f := &Fetcher{logger: zap.NewNop()}
@@ -169,6 +173,45 @@ func TestParseEventPageFromDocGreenShift(t *testing.T) {
 	require.Equal(t, "1st Studio Album – Chain Reaction", rels[0].AlbumName)
 	require.Equal(t, "1st Studio Album – Chain Reaction", rels[0].Title)
 	require.Equal(t, time.Date(2026, time.October, 6, 0, 0, 0, 0, time.UTC), rels[0].Date)
+	require.Equal(t, "Chain Reaction", rels[0].TitleTrack)
+}
+
+func TestParseEventPageFromDocGreenShiftPreRelease(t *testing.T) {
+	html := `<html><body>
+<h1 class="entry-title">ATEEZ Pre-release – Drip (2026)</h1>
+<div class="entry-content">
+<div class="gspb_container outer-a">
+<div class="gspb_container inner-a"><div class="gspb_text">Release Date</div></div>
+<div class="gspb_container val-a"><span class="gspb_meta_value">October 23, 2026 · Friday · 1 PM KST</span></div>
+</div>
+<div class="gspb_container outer-b">
+<div class="gspb_container inner-b"><div class="gspb_text">Album</div></div>
+<div class="gspb_container val-b"><span class="gspb_meta_value">15th Mini Album – GOLDEN HOUR : Part.6</span></div>
+</div>
+<div class="gspb_container outer-c">
+<div class="gspb_container inner-c"><div class="gspb_text">Tracklist</div></div>
+<div class="gspb_container val-c"><span class="gspb_meta_value">Pre-release – “Drip”</span></div>
+</div>
+<iframe src="https://www.youtube.com/embed/videoseries?si=abc&list=OLAK5uy_x"></iframe>
+</div></body></html>`
+
+	f := &Fetcher{logger: zap.NewNop()}
+	doc, err := newTestDoc(html)
+	require.NoError(t, err, "failed to parse html")
+
+	rels, _, err := f.parseEventPageFromDoc(doc, "https://kpopofficial.com/album/ateez-drip")
+	require.NoError(t, err)
+	require.Len(t, rels, 1, "rels = %+v", rels)
+	require.Equal(t, "Pre-release “Drip”", rels[0].Title)
+	require.Equal(t, "15th Mini Album – GOLDEN HOUR : Part.6", rels[0].AlbumName)
+	require.Empty(t, rels[0].TitleTrack)
+	require.Equal(t, "https://www.youtube.com/playlist?list=OLAK5uy_x", rels[0].MV)
+}
+
+func TestTrackName(t *testing.T) {
+	require.Equal(t, "Human Extinction / NA NA NA", trackName("“Human Extinction”, “NA NA NA”"))
+	require.Equal(t, "PASS / Thereafter", trackName("“PASS”“Thereafter”"))
+	require.Equal(t, "MUAH!", trackName("MUAH!"))
 }
 
 func TestParseEventPageFromDocTBATrack(t *testing.T) {

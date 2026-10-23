@@ -49,6 +49,7 @@ func TestCleanReleaseString(t *testing.T) {
 		{"“Title”", "Title"},
 		{"\"Title\"", "Title"},
 		{"1st Single – Song", "Song"},
+		{"Pre-release “Drip”", "Pre-release “Drip”"},
 		{"N/A", ""},
 		{"", ""},
 	}

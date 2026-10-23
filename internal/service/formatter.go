@@ -100,7 +100,7 @@ func cleanReleaseString(s string) string {
 	low := strings.ToLower(s)
 	if strings.HasPrefix(low, "pre-release") {
 		sub := strings.TrimSpace(s[len("pre-release"):])
-		sub = strings.Trim(sub, " -–—:\"“")
+		sub = strings.Trim(sub, " -–—:\"“”‘’")
 		if sub != "" {
 			return "Pre-release “" + sub + "”"
 		}
