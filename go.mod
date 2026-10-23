@@ -4,7 +4,6 @@ go 1.27
 
 require (
 	github.com/PuerkitoBio/goquery v1.13.0
-	github.com/agnivade/levenshtein v1.2.1
 	github.com/caarlos0/env/v11 v11.4.1
 	github.com/dustin/go-humanize v1.0.1
 	github.com/golang-migrate/migrate/v4 v4.20.1

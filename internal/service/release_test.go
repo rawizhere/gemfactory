@@ -57,6 +57,9 @@ func TestFindArtist(t *testing.T) {
 	omg := &model.Artist{ArtistID: 11, Name: ("OH MY GIRL")}
 	irene := &model.Artist{ArtistID: 12, Name: ("IRENE")}
 	redvelvet := &model.Artist{ArtistID: 13, Name: ("Red Velvet")}
+	kave := &model.Artist{ArtistID: 14, Name: ("KAVE")}
+	wooah := &model.Artist{ArtistID: 15, Name: ("WOOAH")}
+	ichillin := &model.Artist{ArtistID: 16, Name: ("ICHILLIN'")}
 
 	artists := map[string]*model.Artist{
 		"aespa":      aespa,
@@ -72,6 +75,9 @@ func TestFindArtist(t *testing.T) {
 		"oh my girl": omg,
 		"irene":      irene,
 		"red velvet": redvelvet,
+		"kave":       kave,
+		"wooah":      wooah,
+		"ichillin'":  ichillin,
 	}
 
 	tests := []struct {
@@ -95,7 +101,11 @@ func TestFindArtist(t *testing.T) {
 		{"YERIN (GFRIEND)", gfriend},
 		{"Hyojung/MIMI (OH MY GIRL)", omg},
 		{"IRENE (Red Velvet)", irene},
+		{"ICHILLIN J", ichillin},
 		{"Unknown Artist", nil},
+		{"PLAVE", nil},
+		{"WOODZ", nil},
+		{"SORAN", nil},
 	}
 	for _, tc := range tests {
 		got := (&ReleaseService{}).findArtist(tc.in, artists)

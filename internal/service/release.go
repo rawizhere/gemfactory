@@ -14,7 +14,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/agnivade/levenshtein"
 	"github.com/uptrace/bun"
 	"go.uber.org/zap"
 )
@@ -432,6 +431,7 @@ func (s *ReleaseService) GetByArtist(ctx context.Context, artistName string) (st
 
 var staticAliases = map[string]string{
 	"tomorrow x together": "txt",
+	"ichillin j":          "ichillin'",
 }
 
 var collabSplitter = regexp.MustCompile(`(?i)\s+(?:x|feat\.?|ft\.?|with|&)\s+|[,/]`)
@@ -495,28 +495,6 @@ func (s *ReleaseService) findArtist(scrapedName string, artistMap map[string]*mo
 		}
 	}
 
-	return fuzzyLookup(normMap, normalizeName(raw))
-}
-
-// maxFuzzyEditDistance bounds the Levenshtein fallback so short names don't match wildly.
-const maxFuzzyEditDistance = 2
-
-// fuzzyLookup is the last-resort exact-prefix or typo match within edit distance.
-func fuzzyLookup(normMap map[string]*model.Artist, name string) *model.Artist {
-	if len(name) < 5 {
-		return nil
-	}
-	for known, artist := range normMap {
-		if len(known) < 4 {
-			continue
-		}
-		switch {
-		case strings.HasPrefix(name, known), strings.HasPrefix(known, name):
-			return artist
-		case levenshtein.ComputeDistance(name, known) <= maxFuzzyEditDistance:
-			return artist
-		}
-	}
 	return nil
 }
 
