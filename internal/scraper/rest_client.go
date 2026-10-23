@@ -31,6 +31,8 @@ const albumsPerPage = 100
 
 func (c *HTTPClient) FetchAlbumsWindow(ctx context.Context, after, before time.Time) ([]AlbumPost, error) {
 	var all []AlbumPost
+	// WordPress.com edge cache answers a repeated URL with a stale copy, a per-run param forces a fresh one
+	bust := strconv.FormatInt(time.Now().Unix(), 10)
 
 	for page := 1; ; page++ {
 		q := url.Values{}
@@ -43,6 +45,7 @@ func (c *HTTPClient) FetchAlbumsWindow(ctx context.Context, after, before time.T
 			q.Set("before", before.Format(time.RFC3339))
 		}
 		q.Set("_fields", "link,title,content")
+		q.Set("_", bust)
 		apiURL := "https://kpopofficial.com/wp-json/wp/v2/album?" + q.Encode()
 
 		resp, err := c.doRequest(ctx, apiURL)
