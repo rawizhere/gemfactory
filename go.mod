@@ -5,18 +5,18 @@ go 1.27
 require (
 	github.com/PuerkitoBio/goquery v1.13.0
 	github.com/caarlos0/env/v11 v11.4.1
-	github.com/dustin/go-humanize v1.0.1
+	github.com/dustin/go-humanize v1.1.0
 	github.com/golang-migrate/migrate/v4 v4.20.1
-	github.com/lrstanley/go-ytdlp v1.5.2
+	github.com/lrstanley/go-ytdlp v1.5.4
 	github.com/mymmrac/telego v1.12.1
 	github.com/stretchr/testify v1.12.1
-	github.com/uptrace/bun v1.2.18
-	github.com/uptrace/bun/dialect/pgdialect v1.2.18
-	github.com/uptrace/bun/driver/pgdriver v1.2.18
-	github.com/uptrace/bun/extra/bundebug v1.2.18
+	github.com/uptrace/bun v1.3.0
+	github.com/uptrace/bun/dialect/pgdialect v1.3.0
+	github.com/uptrace/bun/driver/pgdriver v1.3.0
+	github.com/uptrace/bun/extra/bundebug v1.3.0
 	go.uber.org/zap v1.28.0
-	golang.org/x/text v0.42.0
-	google.golang.org/genai v1.71.0
+	golang.org/x/text v0.43.0
+	google.golang.org/genai v1.75.0
 )
 
 require (
