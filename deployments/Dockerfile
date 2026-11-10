@@ -39,11 +39,15 @@ RUN mkdir -p /etc/yt-dlp/plugins \
     && curl -fsSL -o /etc/yt-dlp/plugins/bgutil-ytdlp-pot-provider.zip \
       "https://github.com/Brainicism/bgutil-ytdlp-pot-provider/releases/download/${BGUTIL_POT_VERSION}/bgutil-ytdlp-pot-provider.zip"
 
-# yt-dlp standalone musl binary (latest, unpinned); owned by app so the daily --update-to nightly loop can overwrite it.
+# yt-dlp standalone musl binary (latest, unpinned) in an app-owned dir: the daily
+# --update-to nightly writes temp files next to the binary, so /usr/local/bin would fail.
 RUN case "$(uname -m)" in aarch64) asset=yt-dlp_musllinux_aarch64 ;; *) asset=yt-dlp_musllinux ;; esac \
-    && curl -fsSL -o /usr/local/bin/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/latest/download/${asset}" \
-    && chmod +x /usr/local/bin/yt-dlp \
-    && chown app:app /usr/local/bin/yt-dlp
+    && mkdir -p /app/bin \
+    && curl -fsSL -o /app/bin/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/latest/download/${asset}" \
+    && chmod +x /app/bin/yt-dlp \
+    && chown -R app:app /app/bin
+
+ENV PATH="/app/bin:${PATH}"
 
 WORKDIR /app
 

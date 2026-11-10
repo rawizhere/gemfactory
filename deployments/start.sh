@@ -10,7 +10,7 @@ until pg_isready -d "$DB_DSN"; do
   sleep 2
 done
 
-# Migrations are applied by the application itself (embedded goose) on startup.
+# Migrations are applied by the application itself (golang-migrate, embedded SQL) on startup.
 
 # Ensure app directories exist
 mkdir -p /app/data /app/logs
