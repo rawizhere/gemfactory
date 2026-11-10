@@ -19,9 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
+	"log/slog"
 
-	"gemfactory/internal/settings"
 	"gemfactory/internal/translate"
 )
 
@@ -45,7 +44,7 @@ func (s *Service) subtitlesForClip(
 	s.reportStage(job, StageSubtitles, requestedLang)
 	workbench := s.workbenchDir(videoID)
 
-	cfg := translate.ResolveConfig(ctx, settings.New(s.configs))
+	cfg := translate.ResolveConfig(ctx, s.cfg)
 	res, err := ResolveSubtitleTrack(meta, requestedLang, cfg.SourcePrefRU)
 	if err != nil {
 		return "", err
@@ -62,7 +61,7 @@ func (s *Service) subtitlesForClip(
 	}
 
 	trimmedPath := filepath.Join(workbench,
-		fileNameWithTimecodeVariant(videoID, startMs, endMs, variantSuffix(job.Request))+"_trimmed.vtt")
+		clipName(videoID, job.Request, startMs, endMs)+"_trimmed.vtt")
 	cues, err := TrimVTTFile(fullVTT, startMs, endMs, trimmedPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to process subtitles: %w", err)
@@ -89,7 +88,7 @@ func (s *Service) subtitlesForClip(
 			prov, terr = s.translateVTTFile(ctx, trimmedPath, res.TargetLang, res.SourceLang, videoTitle, onAttempt)
 			if terr != nil {
 				s.logger.Warn("llm translation failed, falling back to youtube auto-translate",
-					zap.String("video_id", videoID), zap.Error(terr))
+					slog.String("video_id", videoID), slog.Any("error", terr))
 				yprov, yerr := s.youtubeTranslatedVTT(ctx, job, res, cookieFile, startMs, endMs, trimmedPath)
 				if yerr == nil {
 					prov, terr = yprov+"-fallback", nil
@@ -106,9 +105,9 @@ func (s *Service) subtitlesForClip(
 		}
 		if terr != nil {
 			s.logger.Warn("vtt translation failed",
-				zap.String("target_lang", res.TargetLang),
-				zap.String("video_id", videoID),
-				zap.Error(terr))
+				slog.String("target_lang", res.TargetLang),
+				slog.String("video_id", videoID),
+				slog.Any("error", terr))
 			return "", fmt.Errorf("translation into %s failed (%w)", res.TargetLang, terr)
 		}
 	}
@@ -116,50 +115,61 @@ func (s *Service) subtitlesForClip(
 	return trimmedPath, nil
 }
 
+// PO token state: one visitorData session and the pot bound to it.
 var (
-	potMu        sync.Mutex
-	potCache     = map[string]string{}
-	visitorCache = map[string]string{}
+	potMu       sync.Mutex
+	visitorData string
+	poToken     string
 )
+
+// postJSON POSTs body as JSON within timeout and decodes a 200 response into out.
+func postJSON(ctx context.Context, url string, timeout time.Duration, body, out any) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
 
 // innertubeVisitorData fetches a session visitorData via an anonymous innertube player call.
 func innertubeVisitorData(ctx context.Context) string {
 	potMu.Lock()
-	vd, ok := visitorCache["current"]
+	vd := visitorData
 	potMu.Unlock()
-	if ok {
+	if vd != "" {
 		return vd
 	}
-	payload, _ := json.Marshal(map[string]any{
-		"context": map[string]any{"client": map[string]string{
-			"clientName":    "WEB",
-			"clientVersion": "2.20260918.00.00",
-			"hl":            "en",
-		}},
-	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
-		bytes.NewReader(payload))
-	if err != nil {
-		return ""
-	}
-	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return ""
-	}
-	defer func() { _ = resp.Body.Close() }()
 	var out struct {
 		ResponseContext struct {
 			VisitorData string `json:"visitorData"`
 		} `json:"responseContext"`
 	}
-	if json.NewDecoder(resp.Body).Decode(&out) != nil || out.ResponseContext.VisitorData == "" {
+	body := map[string]any{"context": map[string]any{"client": map[string]string{
+		"clientName":    "WEB",
+		"clientVersion": "2.20260918.00.00",
+		"hl":            "en",
+	}}}
+	if postJSON(ctx, "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
+		10*time.Second, body, &out) != nil || out.ResponseContext.VisitorData == "" {
 		return ""
 	}
 	potMu.Lock()
-	visitorCache["current"] = out.ResponseContext.VisitorData
+	visitorData = out.ResponseContext.VisitorData
 	potMu.Unlock()
 	return out.ResponseContext.VisitorData
 }
@@ -175,35 +185,21 @@ func bgutilPOToken(ctx context.Context) string {
 		return ""
 	}
 	potMu.Lock()
-	tok, ok := potCache[vd]
+	tok := poToken
 	potMu.Unlock()
-	if ok {
+	if tok != "" {
 		return tok
-	}
-
-	body, _ := json.Marshal(map[string]string{"content_binding": vd})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/get_pot", bytes.NewReader(body))
-	if err != nil {
-		return ""
-	}
-	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return ""
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return ""
 	}
 	var out struct {
 		PoToken string `json:"poToken"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || out.PoToken == "" {
+	if postJSON(ctx, base+"/get_pot", 10*time.Second, map[string]string{"content_binding": vd}, &out) != nil || out.PoToken == "" {
 		return ""
 	}
 	potMu.Lock()
-	potCache[vd] = out.PoToken
+	if visitorData == vd { // keep the pot only while its visitorData is still current
+		poToken = out.PoToken
+	}
 	potMu.Unlock()
 	return out.PoToken
 }
@@ -218,8 +214,8 @@ func (s *Service) fetchFullVTT(ctx context.Context, job *Job, videoID, trackURL,
 		}
 		// YouTube currently serves empty timedtext bodies intermittently, a repeat often works.
 		s.logger.Warn("direct subtitle download attempt failed",
-			zap.String("video_id", videoID), zap.Int("attempt", attempt),
-			zap.Int("of", subtitleDownloadAttempts), zap.Error(dlErr))
+			slog.String("video_id", videoID), slog.Int("attempt", attempt),
+			slog.Int("of", subtitleDownloadAttempts), slog.Any("error", dlErr))
 		if attempt < subtitleDownloadAttempts {
 			select {
 			case <-ctx.Done():
@@ -230,7 +226,7 @@ func (s *Service) fetchFullVTT(ctx context.Context, job *Job, videoID, trackURL,
 	}
 
 	s.logger.Warn("direct subtitle download failed, falling back to yt-dlp",
-		zap.String("video_id", videoID), zap.Error(dlErr))
+		slog.String("video_id", videoID), slog.Any("error", dlErr))
 	fbErr := s.downloadSubtitlesWithRetry(ctx, job, lang, cookieFile, fullVTT)
 	if fbErr == nil {
 		return nil
@@ -241,7 +237,7 @@ func (s *Service) fetchFullVTT(ctx context.Context, job *Job, videoID, trackURL,
 	}
 
 	s.logger.Warn("subtitle download with cookies failed, retrying without cookies",
-		zap.String("video_id", videoID))
+		slog.String("video_id", videoID))
 	if err := downloadSubtitlesDirect(ctx, trackURL, "", fullVTT); err == nil {
 		return nil
 	}
@@ -304,11 +300,7 @@ func json3ToVTT(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("json3 captions contain no events")
 	}
 
-	var b strings.Builder
-	for _, l := range vttHeaderLines {
-		b.WriteString(l)
-		b.WriteString("\n")
-	}
+	var cues []vttCue
 	for _, ev := range payload.Events {
 		var text strings.Builder
 		for _, seg := range ev.Segs {
@@ -318,14 +310,15 @@ func json3ToVTT(data []byte) ([]byte, error) {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		b.WriteString(FormatTimecode(ev.TStartMs) + " --> " + FormatTimecode(ev.TStartMs+ev.DDurationMs) + "\n")
-		b.WriteString(line + "\n\n")
+		cues = append(cues, vttCue{start: ev.TStartMs, end: ev.TStartMs + ev.DDurationMs, lines: []string{line}})
 	}
-	return []byte(b.String()), nil
+	return writeVTT(cues, "en"), nil
 }
 
 // fetchTimedtext GETs a timedtext URL and returns the raw body, failing on non-200 status.
 func fetchTimedtext(ctx context.Context, rawURL, cookieFile string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
@@ -340,8 +333,7 @@ func fetchTimedtext(ctx context.Context, rawURL, cookieFile string) ([]byte, err
 		}
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("http error: %w", err)
 	}
@@ -356,8 +348,7 @@ func fetchTimedtext(ctx context.Context, rawURL, cookieFile string) ([]byte, err
 // invalidatePOToken drops cached PO tokens and visitorData so the next call fetches fresh ones.
 func invalidatePOToken() {
 	potMu.Lock()
-	potCache = map[string]string{}
-	visitorCache = map[string]string{}
+	visitorData, poToken = "", ""
 	potMu.Unlock()
 }
 
@@ -445,16 +436,8 @@ func vttTextLines(path string) []string {
 		return nil
 	}
 	var out []string
-	inCue := false
-	for _, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
-		switch {
-		case strings.Contains(line, "-->"):
-			inCue = true
-		case strings.TrimSpace(line) == "":
-			inCue = false
-		case inCue:
-			out = append(out, line)
-		}
+	for _, c := range parseVTT(data) {
+		out = append(out, c.lines...)
 	}
 	return out
 }
@@ -464,53 +447,17 @@ func (s *Service) translateVTTFile(ctx context.Context, vttPath, targetLang, sou
 	if err != nil {
 		return "", err
 	}
-	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
-
-	type cue struct {
-		ts   string
-		text string
-	}
-	var cues []cue
-	var currentTs string
-	var currentText []string
-
-	for _, line := range lines {
-		if strings.Contains(line, "-->") {
-			if currentTs != "" && len(currentText) > 0 {
-				cues = append(cues, cue{ts: currentTs, text: strings.Join(currentText, "\n")})
-				currentText = nil
-			}
-			currentTs = line
-		} else if currentTs != "" {
-			if line == "" {
-				if len(currentText) > 0 {
-					cues = append(cues, cue{ts: currentTs, text: strings.Join(currentText, "\n")})
-					currentTs = ""
-					currentText = nil
-				}
-			} else {
-				currentText = append(currentText, line)
-			}
-		}
-	}
-	if currentTs != "" && len(currentText) > 0 {
-		cues = append(cues, cue{ts: currentTs, text: strings.Join(currentText, "\n")})
-	}
-
+	cues := parseVTT(data)
 	if len(cues) == 0 {
 		return "", nil
 	}
-
 	// Translate physical lines separately so multi-line cues keep their line breaks.
 	var texts []string
-	cueLineCounts := make([]int, len(cues))
-	for i, c := range cues {
-		ls := strings.Split(c.text, "\n")
-		texts = append(texts, ls...)
-		cueLineCounts[i] = len(ls)
+	for _, c := range cues {
+		texts = append(texts, c.lines...)
 	}
 
-	cfg := translate.ResolveConfig(ctx, settings.New(s.configs))
+	cfg := translate.ResolveConfig(ctx, s.cfg)
 	provider := "gemini/" + cfg.Model
 	if onAttempt != nil {
 		onAttempt(provider)
@@ -519,28 +466,26 @@ func (s *Service) translateVTTFile(ctx context.Context, vttPath, targetLang, sou
 	if err != nil {
 		return "", err
 	}
-	s.logger.Info("subtitles translated", zap.String("model", cfg.Model), zap.Int("lines", len(texts)), zap.String("target", targetLang))
+	s.logger.Info("subtitles translated", slog.String("model", cfg.Model), slog.Int("lines", len(texts)), slog.String("target", targetLang))
 
-	var b strings.Builder
-	b.WriteString("WEBVTT\nKind: captions\nLanguage: " + targetLang + "\n\n")
 	idx := 0
-	for i, c := range cues {
-		var outLines []string
-		for j := 0; j < cueLineCounts[i] && idx < len(translated); j++ {
+	for i := range cues {
+		c := &cues[i]
+		out := make([]string, 0, len(c.lines))
+		for j := 0; j < len(c.lines) && idx < len(translated); j++ {
 			t := translate.SanitizeTypography(strings.TrimSpace(translated[idx]))
 			idx++
 			if t == "" {
-				t = strings.Split(c.text, "\n")[j]
+				t = c.lines[j]
 			}
-			outLines = append(outLines, t)
+			out = append(out, t)
 		}
-		if outLines == nil {
-			outLines = []string{c.text}
+		if len(out) == 0 {
+			out = c.lines
 		}
-		b.WriteString(c.ts + "\n" + splitDialogueLines(strings.Join(outLines, "\n")) + "\n\n")
+		c.lines = strings.Split(splitDialogueLines(strings.Join(out, "\n")), "\n")
 	}
-
-	return provider, os.WriteFile(vttPath, []byte(b.String()), 0644)
+	return provider, os.WriteFile(vttPath, writeVTT(cues, targetLang), 0644)
 }
 
 // splitDialogueLines puts each speaker of an inline "- A. - B." exchange on its own line.
@@ -610,9 +555,9 @@ func (s *Service) downloadSubtitlesWithRetry(ctx context.Context, job *Job, lang
 		}
 		lastErr = fmt.Errorf("yt-dlp subtitle download failed: %w: %s", runErr, truncate(string(out), 2000))
 		s.logger.Warn("subtitle download attempt failed",
-			zap.String("video_id", job.VideoID), zap.String("lang", lang),
-			zap.Int("attempt", attempt), zap.Int("of", subtitleDownloadAttempts),
-			zap.String("error", truncate(string(out), 500)))
+			slog.String("video_id", job.VideoID), slog.String("lang", lang),
+			slog.Int("attempt", attempt), slog.Int("of", subtitleDownloadAttempts),
+			slog.String("error", truncate(string(out), 500)))
 
 		select {
 		case <-ctx.Done():
@@ -623,7 +568,94 @@ func (s *Service) downloadSubtitlesWithRetry(ctx context.Context, job *Job, lang
 	return lastErr
 }
 
-var vttHeaderLines = []string{"WEBVTT", "Kind: captions", "Language: en", ""}
+// vttCue is one subtitle cue: timing in ms plus its text lines.
+type vttCue struct {
+	start, end float64
+	lines      []string
+}
+
+// parseVTT reads WebVTT cues, tolerating YouTube quirks: CRLF, cue settings after the timing,
+// numeric cue ids, styling/inline word-timing tags and whitespace-only filler lines.
+// Cues with an unparsable timing or no text are dropped.
+func parseVTT(data []byte) []vttCue {
+	var cues []vttCue
+	var cur *vttCue
+	// A malformed timing line keeps its cue; the missing time is filled from the neighbours below.
+	var noStart, noEnd []bool
+	var curNoStart, curNoEnd bool
+	flush := func() {
+		if cur != nil && len(cur.lines) > 0 {
+			cues = append(cues, *cur)
+			noStart, noEnd = append(noStart, curNoStart), append(noEnd, curNoEnd)
+		}
+		cur = nil
+	}
+	for _, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
+		if l, r, ok := strings.Cut(line, "-->"); ok {
+			flush()
+			start, err1 := parseCueTime(l)
+			end, err2 := parseCueTime(r)
+			cur, curNoStart, curNoEnd = &vttCue{start: start, end: end}, err1 != nil, err2 != nil
+			continue
+		}
+		if cur == nil {
+			continue
+		}
+		if line == "" {
+			flush()
+			continue
+		}
+		line = translate.SanitizeTypography(inlineWordTimestampRe.ReplaceAllString(vttTagReplacer.Replace(line), ""))
+		// Drop whitespace-only filler lines and numeric cue ids that leaked into the text.
+		if strings.TrimSpace(line) == "" || len(cur.lines) == 0 && isNumericLine(line) {
+			continue
+		}
+		cur.lines = append(cur.lines, line)
+	}
+	flush()
+	// Missing start = previous cue's end; missing end = next cue's start, or start + defaultCueMs.
+	for i := range cues {
+		if noStart[i] {
+			cues[i].start = 0
+			if i > 0 {
+				cues[i].start = cues[i-1].end
+			}
+		}
+		if noEnd[i] {
+			cues[i].end = cues[i].start + defaultCueMs
+			if i+1 < len(cues) && !noStart[i+1] && cues[i+1].start > cues[i].start {
+				cues[i].end = cues[i+1].start
+			}
+		}
+		if (noStart[i] || noEnd[i]) && cues[i].end <= cues[i].start {
+			cues[i].end = cues[i].start + defaultCueMs
+		}
+	}
+	return cues
+}
+
+// defaultCueMs is the display time given to a cue whose end cannot be recovered.
+const defaultCueMs = 2000
+
+// parseCueTime reads the timestamp at the start of one side of a timing line ("00:00:01.000 align:start"), accepting SRT-style commas.
+func parseCueTime(s string) (float64, error) {
+	f := strings.Fields(s)
+	if len(f) == 0 {
+		return 0, fmt.Errorf("missing cue time")
+	}
+	return ParseTimecode(strings.ReplaceAll(f[0], ",", "."))
+}
+
+// writeVTT renders cues as a WebVTT document with the canonical header.
+func writeVTT(cues []vttCue, lang string) []byte {
+	var b strings.Builder
+	b.WriteString("WEBVTT\nKind: captions\nLanguage: " + lang + "\n\n")
+	for _, c := range cues {
+		b.WriteString(FormatTimecode(c.start) + " --> " + FormatTimecode(c.end) + "\n")
+		b.WriteString(strings.Join(c.lines, "\n") + "\n\n")
+	}
+	return []byte(b.String())
+}
 
 // TrimVTTFile keeps cues overlapping [startMs, endMs), shifts their timestamps relative to startMs and writes the result to outPath. Returns the number of cues kept.
 func TrimVTTFile(inPath string, startMs, endMs float64, outPath string) (int, error) {
@@ -631,111 +663,30 @@ func TrimVTTFile(inPath string, startMs, endMs float64, outPath string) (int, er
 	if err != nil {
 		return 0, fmt.Errorf("read subtitles: %w", err)
 	}
-	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
-
-	var cues []vttCue
-	var current vttCue
-	inCue := false
-
-trimLoop:
-	for _, line := range lines {
-		switch {
-		case strings.Contains(line, "-->"):
-			if inCue && len(current.lines) > 1 {
-				cues = append(cues, current)
-				current = vttCue{}
-			}
-			parts := strings.Split(line, " --> ")
-			if len(parts) != 2 {
-				continue
-			}
-			startStr := strings.Fields(parts[0])[0]
-			endStr := strings.Fields(parts[1])[0]
-			cs, err := ParseTimecode(startStr)
-			if err != nil {
-				inCue = false
-				current = vttCue{}
-				continue
-			}
-			ce, err := ParseTimecode(endStr)
-			if err != nil {
-				inCue = false
-				current = vttCue{}
-				continue
-			}
-			if cs >= endMs {
-				// Everything past the clip end can be skipped entirely.
-				break trimLoop
-			}
-			if ce <= startMs {
-				// Cue fully before the clip start: drop it and its text lines.
-				inCue = false
-				current = vttCue{}
-				continue
-			}
-			newStart := cs - startMs
-			if newStart < 0 {
-				newStart = 0
-			}
-			newEnd := ce - startMs
-			ts := FormatTimecode(newStart) + " --> " + FormatTimecode(newEnd)
-			current = vttCue{lines: []string{ts}}
-			inCue = true
-		case inCue:
-			if line == "" {
-				if len(current.lines) > 1 {
-					cues = append(cues, current)
-				}
-				current = vttCue{}
-				inCue = false
-				continue
-			}
-			line = translate.SanitizeTypography(inlineWordTimestampRe.ReplaceAllString(vttTagReplacer.Replace(line), ""))
-			if strings.TrimSpace(line) == "" {
-				// Drop whitespace-only filler lines (YouTube auto-subs).
-				continue
-			}
-			// Drop VTT block identifiers (numeric cue ids) that leaked through.
-			if len(current.lines) == 1 && isNumericLine(line) {
-				continue
-			}
-			current.lines = append(current.lines, line)
+	var kept []vttCue
+	for _, c := range parseVTT(data) {
+		if c.start >= endMs {
+			break
 		}
-	}
-	if inCue && len(current.lines) > 1 {
-		cues = append(cues, current)
-	}
-
-	cues = dedupeRollingCues(cues)
-
-	var b strings.Builder
-	for _, l := range vttHeaderLines {
-		b.WriteString(l)
-		b.WriteString("\n")
-	}
-	for _, c := range cues {
-		for _, l := range c.lines {
-			b.WriteString(l)
-			b.WriteString("\n")
+		if c.end <= startMs {
+			continue
 		}
-		b.WriteString("\n")
+		c.start, c.end = max(c.start-startMs, 0), c.end-startMs
+		kept = append(kept, c)
 	}
-
-	if err := os.WriteFile(outPath, []byte(b.String()), 0644); err != nil {
+	kept = dedupeRollingCues(kept)
+	if err := os.WriteFile(outPath, writeVTT(kept, "en"), 0644); err != nil {
 		return 0, fmt.Errorf("write trimmed subtitles: %w", err)
 	}
-	return len(cues), nil
+	return len(kept), nil
 }
-
-// vttCue holds a timing line plus its text lines.
-type vttCue struct{ lines []string }
 
 // dedupeRollingCues collapses the echo repeats YouTube auto-captions carry from cue to cue.
 func dedupeRollingCues(cues []vttCue) []vttCue {
 	var prevLower []string
 	out := make([]vttCue, 0, len(cues))
 	for _, c := range cues {
-		raw := strings.Join(c.lines[1:], " ")
+		raw := strings.Join(c.lines, " ")
 		words := strings.Fields(raw)
 		lower := make([]string, len(words))
 		for i, w := range words {
@@ -746,7 +697,8 @@ func dedupeRollingCues(cues []vttCue) []vttCue {
 			continue
 		}
 		prevLower = lower
-		out = append(out, vttCue{lines: []string{c.lines[0], strings.Join(words[skip:], " ")}})
+		c.lines = []string{strings.Join(words[skip:], " ")}
+		out = append(out, c)
 	}
 	return out
 }
@@ -888,7 +840,7 @@ func hashtags(meta *SourceMeta, limit int) []string {
 func (s *Service) ExtractMetadata(ctx context.Context, url, videoID, cookieFile string) (*SourceMeta, error) {
 	metaPath := filepath.Join(s.workbenchDir(videoID), videoID+".info.json")
 	if info, err := os.Stat(metaPath); err == nil && time.Since(info.ModTime()) < metadataCacheTTL {
-		s.logger.Info("metadata cache hit", zap.String("video_id", videoID))
+		s.logger.Info("metadata cache hit", slog.String("video_id", videoID))
 		return readSourceMeta(metaPath)
 	}
 
@@ -897,13 +849,13 @@ func (s *Service) ExtractMetadata(ctx context.Context, url, videoID, cookieFile 
 		return nil, err
 	}
 
-	s.logger.Info("metadata extraction starting", zap.String("url", url), zap.String("video_id", videoID))
+	s.logger.Info("metadata extraction starting", slog.String("url", url), slog.String("video_id", videoID))
 	start := time.Now()
 	defer func() {
 		s.logger.Info("metadata extraction finished",
-			zap.String("url", url),
-			zap.String("video_id", videoID),
-			zap.Duration("elapsed", time.Since(start)))
+			slog.String("url", url),
+			slog.String("video_id", videoID),
+			slog.Duration("elapsed", time.Since(start)))
 	}()
 
 	dir := filepath.Dir(metaPath)

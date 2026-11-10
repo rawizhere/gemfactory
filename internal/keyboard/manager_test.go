@@ -4,14 +4,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"log/slog"
 
 	"gemfactory/internal/config"
 )
 
 func TestKeyboardManager(t *testing.T) {
 	cfg := &config.Config{Timezone: "UTC"}
-	mgr := NewManager(nil, nil, cfg, zap.NewNop())
+	mgr := NewManager(nil, nil, cfg, slog.New(slog.DiscardHandler))
 
 	mainKb := mgr.GetMainKeyboard()
 	require.NotNil(t, mainKb)

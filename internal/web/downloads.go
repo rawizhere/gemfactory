@@ -1,10 +1,9 @@
 package web
 
 import (
-	"fmt"
 	"net/http"
 
-	"github.com/dustin/go-humanize"
+	"gemfactory/internal/format"
 )
 
 func (s *Server) getStorageUsage(w http.ResponseWriter, r *http.Request) {
@@ -41,10 +40,6 @@ func (s *Server) cleanStorage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// formatBytes renders byte counts in binary (1024-based) units.
 func formatBytes(b int64) string {
-	if b < 1024 {
-		return fmt.Sprintf("%d B", b)
-	}
-	return humanize.IBytes(uint64(b))
+	return format.Bytes(b)
 }

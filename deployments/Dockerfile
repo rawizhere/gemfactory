@@ -39,6 +39,12 @@ RUN mkdir -p /etc/yt-dlp/plugins \
     && curl -fsSL -o /etc/yt-dlp/plugins/bgutil-ytdlp-pot-provider.zip \
       "https://github.com/Brainicism/bgutil-ytdlp-pot-provider/releases/download/${BGUTIL_POT_VERSION}/bgutil-ytdlp-pot-provider.zip"
 
+# yt-dlp standalone musl binary (latest, unpinned); owned by app so the daily --update-to nightly loop can overwrite it.
+RUN case "$(uname -m)" in aarch64) asset=yt-dlp_musllinux_aarch64 ;; *) asset=yt-dlp_musllinux ;; esac \
+    && curl -fsSL -o /usr/local/bin/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/latest/download/${asset}" \
+    && chmod +x /usr/local/bin/yt-dlp \
+    && chown app:app /usr/local/bin/yt-dlp
+
 WORKDIR /app
 
 COPY --from=builder --chown=app:app /app/gemfactory ./

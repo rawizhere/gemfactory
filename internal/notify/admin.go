@@ -5,27 +5,24 @@ import (
 	"context"
 	"strconv"
 
-	"gemfactory/internal/model"
+	"gemfactory/internal/settings"
 	"gemfactory/internal/telegram"
 
-	"go.uber.org/zap"
+	"log/slog"
 )
-
-// AdminChatIDKey stores the admin chat id learned from admin messages.
-const AdminChatIDKey = "ADMIN_CHAT_ID"
 
 // AdminNotifier sends messages to the stored admin chat.
 type AdminNotifier struct {
-	configRepo model.ConfigRepository
-	tg         *telegram.Client
-	logger     *zap.Logger
+	settings *settings.Provider
+	tg       *telegram.Client
+	logger   *slog.Logger
 }
 
-func NewAdminNotifier(configRepo model.ConfigRepository, tg *telegram.Client, logger *zap.Logger) *AdminNotifier {
+func NewAdminNotifier(p *settings.Provider, tg *telegram.Client, logger *slog.Logger) *AdminNotifier {
 	return &AdminNotifier{
-		configRepo: configRepo,
-		tg:         tg,
-		logger:     logger,
+		settings: p,
+		tg:       tg,
+		logger:   logger,
 	}
 }
 
@@ -34,17 +31,17 @@ func (n *AdminNotifier) Send(ctx context.Context, text string) {
 	if n == nil || n.tg == nil {
 		return
 	}
-	c, err := n.configRepo.Get(ctx, AdminChatIDKey)
-	if err != nil || c == nil || c.Value == "" {
+	value := n.settings.Value(ctx, settings.AdminChatID)
+	if value == "" {
 		n.logger.Debug("Admin chat id unknown, notification skipped")
 		return
 	}
-	chatID, err := strconv.ParseInt(c.Value, 10, 64)
+	chatID, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
-		n.logger.Warn("Invalid stored admin chat id", zap.String("value", c.Value))
+		n.logger.Warn("Invalid stored admin chat id", slog.String("value", value))
 		return
 	}
 	if err := n.tg.SendMessage(ctx, chatID, text); err != nil {
-		n.logger.Warn("Failed to send admin notification", zap.Error(err))
+		n.logger.Warn("Failed to send admin notification", slog.Any("error", err))
 	}
 }

@@ -4,19 +4,16 @@ import (
 	"context"
 	"fmt"
 	"gemfactory/internal/model"
-	"gemfactory/internal/storage"
 	"slices"
 	"strings"
-
-	"github.com/uptrace/bun"
 )
 
 type ArtistService struct {
 	repo model.ArtistRepository
 }
 
-func NewArtistService(db *bun.DB) *ArtistService {
-	return &ArtistService{repo: storage.NewArtistRepository(db)}
+func NewArtistService(repo model.ArtistRepository) *ArtistService {
+	return &ArtistService{repo: repo}
 }
 
 func (s *ArtistService) Add(ctx context.Context, artists []string, isFemale bool) (int, error) {

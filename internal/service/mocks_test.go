@@ -11,8 +11,6 @@ type mockReleaseRepo struct {
 
 	byDateRange   []model.Release
 	byArtist      []model.Release
-	getBySource   *model.Release
-	getByTrack    *model.Release
 	created       []*model.Release
 	updated       []*model.Release
 	deleted       []int
@@ -25,14 +23,6 @@ func (m *mockReleaseRepo) GetByDateRange(ctx context.Context, start, end time.Ti
 
 func (m *mockReleaseRepo) GetByArtistID(ctx context.Context, artistID int) ([]model.Release, error) {
 	return m.byArtist, nil
-}
-
-func (m *mockReleaseRepo) GetByArtistDateAndSource(ctx context.Context, artistID int, date time.Time, sourceURL string) (*model.Release, error) {
-	return m.getBySource, nil
-}
-
-func (m *mockReleaseRepo) GetByArtistDateAndTrack(ctx context.Context, artistID int, date time.Time, titleTrack string) (*model.Release, error) {
-	return m.getByTrack, nil
 }
 
 func (m *mockReleaseRepo) Create(ctx context.Context, release *model.Release) error {

@@ -10,17 +10,17 @@ import (
 
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
-	"go.uber.org/zap"
+	"log/slog"
 )
 
 type Debouncer struct {
 	mu          sync.Mutex
 	lastProcess map[string]time.Time
 	interval    time.Duration
-	logger      *zap.Logger
+	logger      *slog.Logger
 }
 
-func NewDebouncer(interval time.Duration, logger *zap.Logger) *Debouncer {
+func NewDebouncer(interval time.Duration, logger *slog.Logger) *Debouncer {
 	return &Debouncer{
 		lastProcess: map[string]time.Time{},
 		interval:    interval,
@@ -44,7 +44,7 @@ func (d *Debouncer) ShouldProcess(userID int64, action string) bool {
 }
 
 // Debounce drops duplicate commands and repeated callback queries within the debounce interval.
-func Debounce(debouncer *Debouncer, logger *zap.Logger) th.Handler {
+func Debounce(debouncer *Debouncer, logger *slog.Logger) th.Handler {
 	return func(ctx *th.Context, update telego.Update) error {
 		switch {
 		case update.Message != nil && update.Message.From != nil:
@@ -64,9 +64,9 @@ func Debounce(debouncer *Debouncer, logger *zap.Logger) th.Handler {
 	}
 }
 
-func logDebounced(logger *zap.Logger, userID int64, key, action string) {
+func logDebounced(logger *slog.Logger, userID int64, key, action string) {
 	logger.Debug("Update debounced",
-		zap.Int64("user_id", userID),
-		zap.String("key", key),
-		zap.String("action", action))
+		slog.Int64("user_id", userID),
+		slog.String("key", key),
+		slog.String("action", action))
 }

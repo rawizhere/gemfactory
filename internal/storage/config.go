@@ -2,8 +2,6 @@ package storage
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"gemfactory/internal/model"
 
@@ -19,21 +17,7 @@ func NewConfigRepository(db *bun.DB) model.ConfigRepository {
 }
 
 func (r *ConfigRepository) Get(ctx context.Context, key string) (*model.Config, error) {
-	config := new(model.Config)
-
-	err := r.db.NewSelect().
-		Model(config).
-		Where("key = ?", key).
-		Scan(ctx)
-
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to scan config: %w", err)
-	}
-
-	return config, nil
+	return one(ctx, r.db.NewSelect().Where("key = ?", key), new(model.Config), "config")
 }
 
 func (r *ConfigRepository) GetAll(ctx context.Context) ([]model.Config, error) {

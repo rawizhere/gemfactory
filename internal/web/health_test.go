@@ -6,11 +6,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"log/slog"
 )
 
 func TestHealth(t *testing.T) {
-	s := &Server{logger: zap.NewNop()}
+	s := &Server{logger: slog.New(slog.DiscardHandler)}
 	rec := httptest.NewRecorder()
 	s.health(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
 	require.Equal(t, http.StatusOK, rec.Code)

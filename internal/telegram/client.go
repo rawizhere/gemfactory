@@ -8,35 +8,36 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/dustin/go-humanize"
 	"github.com/mymmrac/telego"
 	"github.com/mymmrac/telego/telegoapi"
 	th "github.com/mymmrac/telego/telegohandler"
 	"github.com/mymmrac/telego/telegoutil"
-	"go.uber.org/zap"
+	"log/slog"
+
+	"gemfactory/internal/format"
+	"gemfactory/internal/media"
 )
 
 const maxMessageLength = 4000
 
 type Client struct {
 	bot    *telego.Bot
-	logger *zap.Logger
+	logger *slog.Logger
 }
 
-// zapLogger routes telego internal logs into zap.
-type zapLogger struct{ l *zap.Logger }
+// slogLogger routes telego internal logs into slog.
+type slogLogger struct{ l *slog.Logger }
 
-func (z zapLogger) Debugf(format string, args ...any) { z.l.Sugar().Debugf(format, args...) }
-func (z zapLogger) Errorf(format string, args ...any) { z.l.Sugar().Errorf(format, args...) }
+func (z slogLogger) Debugf(format string, args ...any) { z.l.Debug(fmt.Sprintf(format, args...)) }
+func (z slogLogger) Errorf(format string, args ...any) { z.l.Error(fmt.Sprintf(format, args...)) }
 
 // retryCaller retries an API call once on transient failures (dead keep-alive conns, 5xx).
 type retryCaller struct {
 	next telegoapi.Caller
-	log  *zap.Logger
+	log  *slog.Logger
 }
 
 func (c retryCaller) Call(ctx context.Context, url string, data *telegoapi.RequestData) (*telegoapi.Response, error) {
@@ -44,14 +45,14 @@ func (c retryCaller) Call(ctx context.Context, url string, data *telegoapi.Reque
 	if err == nil || ctx.Err() != nil {
 		return res, err
 	}
-	c.log.Warn("telegram api call failed, retrying once", zap.Error(err))
+	c.log.Warn("telegram api call failed, retrying once", slog.Any("error", err))
 	return c.next.Call(ctx, url, data)
 }
 
-func NewClient(botToken string, logger *zap.Logger) (*Client, error) {
+func NewClient(botToken string, logger *slog.Logger) (*Client, error) {
 	bot, err := telego.NewBot(botToken,
 		telego.WithAPICaller(retryCaller{next: telegoapi.DefaultFastHTTPCaller, log: logger}),
-		telego.WithLogger(zapLogger{l: logger}),
+		telego.WithLogger(slogLogger{l: logger}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create bot API: %w", err)
@@ -69,12 +70,12 @@ func (c *Client) Start(ctx context.Context, commands []telego.BotCommand, regist
 	if err != nil {
 		return fmt.Errorf("failed to get bot info: %w", err)
 	}
-	c.logger.Info("Bot started", zap.String("username", me.Username))
+	c.logger.Info("Bot started", slog.String("username", me.Username))
 
 	_ = c.bot.DeleteWebhook(ctx, &telego.DeleteWebhookParams{DropPendingUpdates: true})
 
 	if err := c.SetBotCommands(ctx, commands); err != nil {
-		c.logger.Error("Failed to set bot commands", zap.Error(err))
+		c.logger.Error("Failed to set bot commands", slog.Any("error", err))
 	}
 
 	c.logger.Info("Starting to fetch updates")
@@ -109,7 +110,7 @@ func (c *Client) SendMessageWithMarkup(ctx context.Context, chatID int64, text s
 
 		_, err := c.bot.SendMessage(ctx, params)
 		if err != nil {
-			c.logger.Error("Failed to send message", zap.Int64("chat_id", chatID), zap.Error(err))
+			c.logger.Error("Failed to send message", slog.Int64("chat_id", chatID), slog.Any("error", err))
 			return err
 		}
 	}
@@ -125,7 +126,7 @@ func (c *Client) EditMessageReplyMarkup(ctx context.Context, chatID int64, messa
 
 	_, err := c.bot.EditMessageReplyMarkup(ctx, params)
 	if err != nil {
-		c.logger.Error("Failed to edit message reply markup", zap.Int64("chat_id", chatID), zap.Int("message_id", messageID), zap.Error(err))
+		c.logger.Error("Failed to edit message reply markup", slog.Int64("chat_id", chatID), slog.Int("message_id", messageID), slog.Any("error", err))
 	}
 	return err
 }
@@ -149,7 +150,7 @@ func (c *Client) SendTyping(ctx context.Context, chatID int64, threadID int) {
 		Action:          telego.ChatActionTyping,
 	})
 	if err != nil {
-		c.logger.Debug("Failed to send typing action", zap.Int64("chat_id", chatID), zap.Error(err))
+		c.logger.Debug("Failed to send typing action", slog.Int64("chat_id", chatID), slog.Any("error", err))
 	}
 }
 
@@ -166,57 +167,49 @@ func (c *Client) EditMessageText(ctx context.Context, chatID int64, messageID in
 		return nil
 	}
 	if err != nil {
-		c.logger.Warn("Failed to edit message", zap.Int64("chat_id", chatID), zap.Int("message_id", messageID), zap.Error(err))
+		c.logger.Warn("Failed to edit message", slog.Int64("chat_id", chatID), slog.Int("message_id", messageID), slog.Any("error", err))
 	}
 	return err
 }
 
-func probeVideoMeta(filePath string) (int, int, int) {
-	out, err := exec.Command("ffprobe", "-v", "error",
-		"-show_entries", "stream=width,height:format=duration",
-		"-of", "csv=s=x:p=0", filePath).Output()
+// probeDims returns width, height and rounded duration (seconds) of a video, or zeros when probing fails.
+func probeDims(path string) (w, h, dur int) {
+	info, err := media.Probe(path)
 	if err != nil {
 		return 0, 0, 0
 	}
-	fields := strings.Fields(strings.ReplaceAll(string(out), "x", " "))
-	var w, h, dur int
-	if len(fields) >= 2 {
-		w, _ = strconv.Atoi(fields[0])
-		h, _ = strconv.Atoi(fields[1])
-	}
-	if len(fields) >= 3 {
-		if d, derr := strconv.ParseFloat(fields[2], 64); derr == nil && d > 0 {
-			dur = int(d + 0.5)
-		}
-	}
-	return w, h, dur
+	return info.Width, info.Height, int(info.FormatDuration + 0.5)
 }
 
 func generateVideoThumbnail(filePath string) string {
 	thumbPath := strings.TrimSuffix(filePath, filepath.Ext(filePath)) + "_thumb.jpg"
-	cmd := exec.Command("ffmpeg", "-y", "-nostdin",
-		"-ss", "00:00:00.500",
-		"-i", filePath,
-		"-vframes", "1",
-		"-q:v", "2",
-		"-vf", "scale=320:-2",
-		thumbPath)
-	if err := cmd.Run(); err != nil {
-		cmd0 := exec.Command("ffmpeg", "-y", "-nostdin",
-			"-ss", "00:00:00.000",
-			"-i", filePath,
-			"-vframes", "1",
-			"-q:v", "2",
-			"-vf", "scale=320:-2",
-			thumbPath)
-		if err0 := cmd0.Run(); err0 != nil {
-			return ""
+	// Try 0.5s in first, then the very first frame for clips shorter than that.
+	for _, offset := range []string{"00:00:00.500", "00:00:00.000"} {
+		err := exec.Command("ffmpeg", "-y", "-nostdin", "-ss", offset, "-i", filePath,
+			"-vframes", "1", "-q:v", "2", "-vf", "scale=320:-2", thumbPath).Run()
+		if err != nil {
+			continue
 		}
-	}
-	if info, err := os.Stat(thumbPath); err == nil && info.Size() > 0 {
-		return thumbPath
+		if info, err := os.Stat(thumbPath); err == nil && info.Size() > 0 {
+			return thumbPath
+		}
+		return ""
 	}
 	return ""
+}
+
+// replyTo builds ReplyParameters for a message id, or nil when there is nothing to reply to.
+func replyTo(id int) *telego.ReplyParameters {
+	if id <= 0 {
+		return nil
+	}
+	return &telego.ReplyParameters{MessageID: id, AllowSendingWithoutReply: true}
+}
+
+// sendErr logs a failed send and wraps it.
+func (c *Client) sendErr(kind string, chatID int64, file string, err error) error {
+	c.logger.Error("Failed to send "+kind, slog.Int64("chat_id", chatID), slog.String("file", file), slog.Any("error", err))
+	return fmt.Errorf("send %s: %w", kind, err)
 }
 
 type UploadProgressCallback func(pct int, speed, sizeStr string)
@@ -257,7 +250,7 @@ func (p *progressFileReader) Read(b []byte) (int, error) {
 					speedBps := float64(bytesDiff) / elapsed.Seconds()
 					speedStr = formatSpeed(speedBps)
 				}
-				sizeStr := fmt.Sprintf("%.1f / %.1f MB", float64(p.read)/(1024*1024), float64(p.total)/(1024*1024))
+				sizeStr := format.Bytes(p.read) + " / " + format.Bytes(p.total)
 				p.lastEmitAt = now
 				p.lastRead = p.read
 				p.onProgress(pct, speedStr, sizeStr)
@@ -272,7 +265,7 @@ func (p *progressFileReader) Name() string {
 }
 
 func formatSpeed(bytesPerSec float64) string {
-	return humanize.Bytes(uint64(bytesPerSec)) + "/s"
+	return format.Bytes(int64(bytesPerSec)) + "/s"
 }
 
 // openUpload opens filePath for upload, wrapping it to report progress when onProgress is set.
@@ -299,13 +292,8 @@ func (c *Client) SendVideoFile(ctx context.Context, chatID int64, filePath, capt
 		video = video.WithCaption(caption).WithParseMode(telego.ModeHTML)
 	}
 	video = video.WithSupportsStreaming()
-	if replyToMsgID > 0 {
-		video.ReplyParameters = &telego.ReplyParameters{
-			MessageID:                replyToMsgID,
-			AllowSendingWithoutReply: true,
-		}
-	}
-	if w, h, dur := probeVideoMeta(filePath); w > 0 && h > 0 {
+	video.ReplyParameters = replyTo(replyToMsgID)
+	if w, h, dur := probeDims(filePath); w > 0 && h > 0 {
 		video = video.WithWidth(w).WithHeight(h)
 		if dur > 0 {
 			video = video.WithDuration(dur)
@@ -322,8 +310,7 @@ func (c *Client) SendVideoFile(ctx context.Context, chatID int64, filePath, capt
 	}
 
 	if _, err := c.bot.SendVideo(ctx, video); err != nil {
-		c.logger.Error("Failed to send video", zap.Int64("chat_id", chatID), zap.String("file", filePath), zap.Error(err))
-		return fmt.Errorf("send video: %w", err)
+		return c.sendErr("video", chatID, filePath, err)
 	}
 	return nil
 }
@@ -396,7 +383,7 @@ func (c *Client) sendAlbumChunk(ctx context.Context, chatID int64, chunk []Album
 		}
 		if it.Video {
 			v := telegoutil.MediaVideo(telegoutil.File(f)).WithSupportsStreaming()
-			if w, h, dur := probeVideoMeta(it.Path); w > 0 && h > 0 {
+			if w, h, dur := probeDims(it.Path); w > 0 && h > 0 {
 				v = v.WithWidth(w).WithHeight(h).WithDuration(dur)
 			}
 			if itemCaption != "" {
@@ -413,12 +400,9 @@ func (c *Client) sendAlbumChunk(ctx context.Context, chatID int64, chunk []Album
 	}
 
 	group := telegoutil.MediaGroup(telegoutil.ID(chatID), media...)
-	if replyToMsgID > 0 {
-		group.ReplyParameters = &telego.ReplyParameters{MessageID: replyToMsgID, AllowSendingWithoutReply: true}
-	}
+	group.ReplyParameters = replyTo(replyToMsgID)
 	if _, err := c.bot.SendMediaGroup(ctx, group); err != nil {
-		c.logger.Error("Failed to send media group", zap.Int64("chat_id", chatID), zap.Int("items", len(chunk)), zap.Error(err))
-		return fmt.Errorf("send media group: %w", err)
+		return c.sendErr("media group", chatID, fmt.Sprintf("%d items", len(chunk)), err)
 	}
 	return nil
 }
@@ -434,12 +418,9 @@ func (c *Client) sendPhotoFile(ctx context.Context, chatID int64, filePath, capt
 	if caption != "" {
 		photo = photo.WithCaption(caption).WithParseMode(telego.ModeHTML)
 	}
-	if replyToMsgID > 0 {
-		photo.ReplyParameters = &telego.ReplyParameters{MessageID: replyToMsgID, AllowSendingWithoutReply: true}
-	}
+	photo.ReplyParameters = replyTo(replyToMsgID)
 	if _, err := c.bot.SendPhoto(ctx, photo); err != nil {
-		c.logger.Error("Failed to send photo", zap.Int64("chat_id", chatID), zap.String("file", filePath), zap.Error(err))
-		return fmt.Errorf("send photo: %w", err)
+		return c.sendErr("photo", chatID, filePath, err)
 	}
 	return nil
 }
@@ -455,16 +436,10 @@ func (c *Client) SendAudioFile(ctx context.Context, chatID int64, filePath, capt
 	if caption != "" {
 		audio = audio.WithCaption(caption).WithParseMode(telego.ModeHTML)
 	}
-	if replyToMsgID > 0 {
-		audio.ReplyParameters = &telego.ReplyParameters{
-			MessageID:                replyToMsgID,
-			AllowSendingWithoutReply: true,
-		}
-	}
+	audio.ReplyParameters = replyTo(replyToMsgID)
 
 	if _, err := c.bot.SendAudio(ctx, audio); err != nil {
-		c.logger.Error("Failed to send audio", zap.Int64("chat_id", chatID), zap.String("file", filePath), zap.Error(err))
-		return fmt.Errorf("send audio: %w", err)
+		return c.sendErr("audio", chatID, filePath, err)
 	}
 	return nil
 }
@@ -479,7 +454,7 @@ func (c *Client) DeleteMessage(ctx context.Context, chatID int64, messageID int)
 func (c *Client) SetBotCommands(ctx context.Context, commands []telego.BotCommand) error {
 	err := c.bot.SetMyCommands(ctx, &telego.SetMyCommandsParams{Commands: commands})
 	if err != nil {
-		c.logger.Error("Failed to set bot commands", zap.Error(err))
+		c.logger.Error("Failed to set bot commands", slog.Any("error", err))
 	}
 	return err
 }

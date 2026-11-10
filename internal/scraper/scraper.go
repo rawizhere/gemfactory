@@ -3,16 +3,16 @@ package scraper
 import (
 	"strings"
 
-	"go.uber.org/zap"
+	"log/slog"
 )
 
 // Fetcher parses release calendars from kpopofficial.com.
 type Fetcher struct {
-	logger     *zap.Logger
+	logger     *slog.Logger
 	httpClient *HTTPClient
 }
 
-func NewFetcher(userAgents []string, logger *zap.Logger) *Fetcher {
+func NewFetcher(userAgents []string, logger *slog.Logger) *Fetcher {
 	return &Fetcher{
 		logger:     logger,
 		httpClient: NewHTTPClient(userAgents, logger),

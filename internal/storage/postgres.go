@@ -9,15 +9,14 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
-	"github.com/uptrace/bun/extra/bundebug"
-	"go.uber.org/zap"
+	"log/slog"
 )
 
 type Postgres struct {
 	db *bun.DB
 }
 
-func NewPostgres(ctx context.Context, databaseURL string, logger *zap.Logger) (*Postgres, error) {
+func NewPostgres(ctx context.Context, databaseURL string, logger *slog.Logger) (*Postgres, error) {
 	const maxRetries = 10
 
 	var db *bun.DB
@@ -46,14 +45,11 @@ func NewPostgres(ctx context.Context, databaseURL string, logger *zap.Logger) (*
 		_, err = candidate.ExecContext(initCtx, "SET search_path TO gemfactory, public")
 		initCancel()
 		if err != nil {
-			logger.Warn("Failed to set search_path", zap.Error(err))
+			logger.Warn("Failed to set search_path", slog.Any("error", err))
 		}
 
-		if logger.Core().Enabled(zap.DebugLevel) {
-			candidate.AddQueryHook(bundebug.NewQueryHook(
-				bundebug.WithVerbose(true),
-				bundebug.FromEnv("BUNDEBUG"),
-			))
+		if logger.Enabled(context.Background(), slog.LevelDebug) {
+			candidate.AddQueryHook(debugQueryHook{logger: logger})
 		}
 
 		pingCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
@@ -63,7 +59,7 @@ func NewPostgres(ctx context.Context, databaseURL string, logger *zap.Logger) (*
 		if pingErr != nil {
 			_ = candidate.Close()
 			err = pingErr
-			logger.Warn("Failed to connect to database", zap.Int("attempt", attempt+1), zap.Error(err))
+			logger.Warn("Failed to connect to database", slog.Int("attempt", attempt+1), slog.Any("error", err))
 			continue
 		}
 
@@ -97,4 +93,21 @@ func (p *Postgres) Ping() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return p.db.PingContext(ctx)
+}
+
+// debugQueryHook logs every SQL statement at debug level.
+type debugQueryHook struct {
+	logger *slog.Logger
+}
+
+func (h debugQueryHook) BeforeQuery(ctx context.Context, _ *bun.QueryEvent) context.Context {
+	return ctx
+}
+
+func (h debugQueryHook) AfterQuery(_ context.Context, event *bun.QueryEvent) {
+	attrs := []any{slog.String("query", event.Query), slog.Duration("duration", time.Since(event.StartTime))}
+	if event.Err != nil {
+		attrs = append(attrs, slog.Any("error", event.Err))
+	}
+	h.logger.Debug("SQL", attrs...)
 }

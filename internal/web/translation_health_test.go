@@ -6,12 +6,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"log/slog"
 )
 
 func TestGetTranslationConfigKeyRejected(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "")
-	s := &Server{logger: zap.NewNop()}
+	s := &Server{logger: slog.New(slog.DiscardHandler)}
 
 	recHealth := httptest.NewRecorder()
 	reqHealth := httptest.NewRequest("GET", "/api/translation?health=1", nil)

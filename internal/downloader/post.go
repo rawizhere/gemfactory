@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
+	"log/slog"
 )
 
 // PostMedia is one downloaded photo or video of an Instagram/X post.
@@ -58,7 +58,7 @@ func (s *Service) runPost(ctx context.Context, job *Job) {
 	dir := s.workbenchDir(job.VideoID)
 	manifestPath := filepath.Join(dir, job.VideoID+"_post.json")
 	if m, media := readPostManifest(manifestPath); m != nil {
-		s.logger.Info("post cache hit", zap.String("job", job.ID))
+		s.logger.Info("post cache hit", slog.String("job", job.ID))
 		s.reportStage(job, StageMetadata, m.Title)
 		if cbs := s.callbacksOf(job); cbs != nil && cbs.OnHashtags != nil && len(m.Tags) > 0 {
 			cbs.OnHashtags(m.Tags)
@@ -134,16 +134,12 @@ func (s *Service) runPost(ctx context.Context, job *Job) {
 	caption := FormatCaption(title, CaptionHashtags(meta))
 	writePostManifest(manifestPath, title, AllHashtags(meta), caption, media)
 	s.finishPost(job, media, caption)
-	s.logger.Info("post ready", zap.String("job", job.ID), zap.Int("items", len(media)))
+	s.logger.Info("post ready", slog.String("job", job.ID), slog.Int("items", len(media)))
 }
 
 func (s *Service) finishPost(job *Job, media []PostMedia, caption string) {
-	s.mu.Lock()
-	job.Status = StatusDone
-	job.OutputDir = media[0].Path
-	job.Caption = caption
-	cbs := job.callbacks
-	s.mu.Unlock()
+	s.markDone(job, media[0].Path, caption)
+	cbs := s.callbacksOf(job)
 	s.reportStage(job, StageUpload, "")
 	switch {
 	case cbs == nil:
@@ -438,7 +434,9 @@ func (s *Service) downloadInfoJSON(ctx context.Context, info json.RawMessage, ba
 	return base + ".mp4", nil
 }
 
-var postHTTPClient = &http.Client{Timeout: 3 * time.Minute}
+// httpClient is shared by every downloader HTTP call; the 3-minute cap bounds media downloads,
+// shorter API calls set their own deadline on the context.
+var httpClient = &http.Client{Timeout: 3 * time.Minute}
 
 // fetch GETs rawURL with a browser User-Agent and fails on non-200 responses; the caller closes the body.
 func fetch(ctx context.Context, rawURL string) (*http.Response, error) {
@@ -447,7 +445,7 @@ func fetch(ctx context.Context, rawURL string) (*http.Response, error) {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36")
-	resp, err := postHTTPClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

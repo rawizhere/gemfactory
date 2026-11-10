@@ -7,14 +7,14 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"log/slog"
 
 	"gemfactory/internal/model"
 )
 
 func TestValidateRelease(t *testing.T) {
 	valid := &model.Release{ArtistID: 1, Title: ("X"), Date: time.Now()}
-	require.NoError(t, NewReleaseService(nil, nil, nil).validateRelease(valid), "expected valid release")
+	require.NoError(t, NewReleaseService(nil, nil, nil, nil).validateRelease(valid), "expected valid release")
 
 	cases := []*model.Release{
 		nil,
@@ -127,7 +127,7 @@ func TestGetReleasesForMonthDedupAndGenderFilter(t *testing.T) {
 	}
 
 	repo := &mockReleaseRepo{byDateRange: releases}
-	svc := &ReleaseService{repo: repo, logger: zap.NewNop()}
+	svc := &ReleaseService{repo: repo, logger: slog.New(slog.DiscardHandler)}
 
 	all, err := svc.GetReleasesForMonth(context.Background(), "may-2024", false, false)
 	require.NoError(t, err)
@@ -148,8 +148,52 @@ func TestGetReleasesForMonthDedupAndGenderFilter(t *testing.T) {
 	require.Contains(t, male, "Stray Kids", "male filter failed:\n%s", male)
 
 	repoEmpty := &mockReleaseRepo{}
-	emptySvc := &ReleaseService{repo: repoEmpty, logger: zap.NewNop()}
+	emptySvc := &ReleaseService{repo: repoEmpty, logger: slog.New(slog.DiscardHandler)}
 	out, err := emptySvc.GetReleasesForMonth(context.Background(), "may-2024", false, false)
 	require.NoError(t, err)
 	require.Contains(t, out, "No releases found", "expected empty message, got:\n%s", out)
+}
+
+func TestUpsertMatching(t *testing.T) {
+	day := time.Date(2024, time.May, 24, 0, 0, 0, 0, time.UTC)
+	newSvc := func(existing ...model.Release) (*ReleaseService, *mockReleaseRepo) {
+		repo := &mockReleaseRepo{byArtist: existing}
+		return &ReleaseService{repo: repo, logger: slog.New(slog.DiscardHandler)}, repo
+	}
+	base := model.Release{ReleaseID: 1, ArtistID: 1, Title: "Old", AlbumName: "Album One", Date: day, SourceURL: "https://x/1"}
+
+	t.Run("source match updates", func(t *testing.T) {
+		svc, repo := newSvc(base)
+		require.NoError(t, svc.Upsert(context.Background(), &model.Release{ArtistID: 1, Title: "New", AlbumName: "Other", Date: day, SourceURL: "https://x/1"}))
+		require.Empty(t, repo.created)
+		require.Len(t, repo.updated, 1)
+		require.Equal(t, "New", repo.updated[0].Title)
+	})
+	t.Run("track match updates", func(t *testing.T) {
+		b := base
+		b.SourceURL, b.TitleTrack = "", "Hit"
+		svc, repo := newSvc(b)
+		require.NoError(t, svc.Upsert(context.Background(), &model.Release{ArtistID: 1, Title: "T", AlbumName: "Zzz", TitleTrack: "Hit", Date: day}))
+		require.Empty(t, repo.created)
+		require.Len(t, repo.updated, 1)
+	})
+	t.Run("placeholder skipped", func(t *testing.T) {
+		svc, repo := newSvc(base)
+		require.NoError(t, svc.Upsert(context.Background(), &model.Release{ArtistID: 1, Title: "Pre", AlbumName: "Album", Date: day}))
+		require.Empty(t, repo.created)
+		require.Empty(t, repo.updated)
+	})
+	t.Run("different date creates", func(t *testing.T) {
+		svc, repo := newSvc(base)
+		require.NoError(t, svc.Upsert(context.Background(), &model.Release{ArtistID: 1, Title: "Next", AlbumName: "Album Two", Date: day.AddDate(0, 0, 7)}))
+		require.Len(t, repo.created, 1)
+		require.Empty(t, repo.updated)
+	})
+	t.Run("same-date duplicate dropped", func(t *testing.T) {
+		dup := model.Release{ReleaseID: 2, ArtistID: 1, Title: "Dup", AlbumName: "", MV: "https://youtu.be/a", Date: day}
+		svc, repo := newSvc(base, dup)
+		require.NoError(t, svc.Upsert(context.Background(), &model.Release{ArtistID: 1, Title: "New", AlbumName: "Album One", Date: day, SourceURL: "https://x/1"}))
+		require.Equal(t, []int{2}, repo.deleted)
+		require.Equal(t, "https://youtu.be/a", repo.updated[0].MV)
+	})
 }

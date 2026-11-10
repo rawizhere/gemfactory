@@ -8,9 +8,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"log/slog"
 
 	"gemfactory/internal/model"
+	"gemfactory/internal/settings"
 )
 
 type stubConfigs struct {
@@ -37,11 +38,9 @@ func (s *stubConfigs) Set(_ context.Context, key, value string) error {
 	return nil
 }
 
-func (s *stubConfigs) Reset(context.Context) error { return nil }
-
 func newConfigServer(values map[string]string) (*Server, *stubConfigs) {
 	cfg := &stubConfigs{values: values}
-	return &Server{logger: zap.NewNop(), Deps: Deps{Configs: cfg}}, cfg
+	return &Server{logger: slog.New(slog.DiscardHandler), Deps: Deps{Settings: settings.New(cfg)}}, cfg
 }
 
 func TestListConfigHidesRegisteredSettings(t *testing.T) {

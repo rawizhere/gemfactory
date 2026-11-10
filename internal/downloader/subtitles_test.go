@@ -413,3 +413,26 @@ func TestParseNetscapeCookies(t *testing.T) {
 	require.Equal(t, "EMPTY", cookies[1].Name)
 	require.True(t, cookies[1].Expires.IsZero())
 }
+
+func TestParseVTTMalformedTimingKeepsOwnCue(t *testing.T) {
+	data := []byte("WEBVTT\n\n" +
+		"00:00:01.000 --> 00:00:02.000\nFirst\n\n" +
+		"00:00:0x.000 --> 00:00:04.000\nBad start\n\n" +
+		"00:00:05.000 --> broken\nBad end\n\n" +
+		"00:00:07,000 --> 00:00:08,000\nComma\n")
+	cues := parseVTT(data)
+	require.Len(t, cues, 4)
+	for i, want := range []struct {
+		start, end float64
+		text       string
+	}{
+		{1000, 2000, "First"},
+		{2000, 4000, "Bad start"},
+		{5000, 7000, "Bad end"},
+		{7000, 8000, "Comma"},
+	} {
+		require.Equal(t, want.start, cues[i].start, "cue %d start", i)
+		require.Equal(t, want.end, cues[i].end, "cue %d end", i)
+		require.Equal(t, []string{want.text}, cues[i].lines, "cue %d text", i)
+	}
+}

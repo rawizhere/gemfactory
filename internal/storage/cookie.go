@@ -2,8 +2,6 @@ package storage
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"gemfactory/internal/model"
 	"strings"
@@ -20,18 +18,7 @@ func NewCookieRepository(db *bun.DB) model.CookieRepository {
 }
 
 func (r *CookieRepository) GetByDomain(ctx context.Context, domain string) (*model.Cookie, error) {
-	cookie := new(model.Cookie)
-	err := r.db.NewSelect().
-		Model(cookie).
-		Where("domain = ?", domain).
-		Scan(ctx)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to query cookie by domain: %w", err)
-	}
-	return cookie, nil
+	return one(ctx, r.db.NewSelect().Where("domain = ?", domain), new(model.Cookie), "cookie by domain")
 }
 
 func (r *CookieRepository) GetAll(ctx context.Context) ([]model.CookieSummary, error) {

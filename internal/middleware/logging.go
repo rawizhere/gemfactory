@@ -8,18 +8,18 @@ import (
 
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
-	"go.uber.org/zap"
+	"log/slog"
 )
 
 // Logging logs incoming commands and their duration.
-func Logging(logger *zap.Logger) th.Handler {
+func Logging(logger *slog.Logger) th.Handler {
 	return func(ctx *th.Context, update telego.Update) error {
 		if update.Message == nil || update.Message.From == nil {
 			if q := update.CallbackQuery; q != nil {
 				logger.Info("Callback query",
-					zap.Int64("user_id", q.From.ID),
-					zap.String("user", telegram.GetUserIdentifier(&q.From)),
-					zap.String("data", q.Data))
+					slog.Int64("user_id", q.From.ID),
+					slog.String("user", telegram.GetUserIdentifier(&q.From)),
+					slog.String("data", q.Data))
 			}
 			return ctx.Next(update)
 		}
@@ -30,19 +30,19 @@ func Logging(logger *zap.Logger) th.Handler {
 		user := telegram.GetUserIdentifier(update.Message.From)
 
 		logger.Info("Processing command",
-			zap.String("request_id", reqID),
-			zap.String("command", command),
-			zap.Int64("user_id", update.Message.From.ID),
-			zap.Int64("chat_id", update.Message.Chat.ID),
-			zap.String("user", user),
-			zap.Int("update_id", update.UpdateID))
+			slog.String("request_id", reqID),
+			slog.String("command", command),
+			slog.Int64("user_id", update.Message.From.ID),
+			slog.Int64("chat_id", update.Message.Chat.ID),
+			slog.String("user", user),
+			slog.Int("update_id", update.UpdateID))
 
 		err := ctx.Next(update)
 
 		logger.Info("Command completed",
-			zap.String("request_id", reqID),
-			zap.String("command", command),
-			zap.Duration("duration", time.Since(startTime)))
+			slog.String("request_id", reqID),
+			slog.String("command", command),
+			slog.Duration("duration", time.Since(startTime)))
 
 		return err
 	}

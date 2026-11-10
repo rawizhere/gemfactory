@@ -95,3 +95,22 @@ func TestFallbackFetchArgs(t *testing.T) {
 		t.Fatalf("expected concurrent fragments disabled (-N 1), got %q", joined)
 	}
 }
+
+func TestParseDownloadProgress(t *testing.T) {
+	upd, ok := parseYTDLPProgress("[download]  42.5% of ~ 25.40MiB at 4.12MiB/s ETA Unknown")
+	require.True(t, ok)
+	require.Equal(t, ProgressUpdate{Stage: StageDownload, Percent: 42, Size: "25.4 MB", Speed: "4.12MiB/s"}, upd)
+	_, ok = parseYTDLPProgress("frame= 10 time=00:00:01.00")
+	require.False(t, ok)
+
+	line := "frame=  250 fps= 50 q=-1.0 size=    2048KiB time=00:00:05.00 bitrate=3355.4kbits/s speed=2.00x"
+	upd, ok = parseSectionProgress(line, 10000)
+	require.True(t, ok)
+	require.Equal(t, ProgressUpdate{Stage: StageDownload, Percent: 50, Size: "2.0 MB", Speed: "839 KB/s"}, upd)
+	upd, ok = parseSectionProgress("size=1KiB time=00:00:30.00 speed=N/A", 10000)
+	require.True(t, ok)
+	require.Equal(t, 100, upd.Percent)
+	require.Equal(t, "N/A", upd.Speed)
+	_, ok = parseSectionProgress(line, 0)
+	require.False(t, ok, "no expected duration, no section progress")
+}

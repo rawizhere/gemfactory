@@ -1,140 +1,29 @@
 package web
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
-	"regexp"
-	"slices"
 	"strconv"
-	"strings"
 
-	"go.uber.org/zap"
-
-	"gemfactory/internal/config"
 	"gemfactory/internal/scraper"
-	"gemfactory/internal/translate"
+	"gemfactory/internal/settings"
 )
 
-// settingSpec describes one web-manageable config key.
-type settingSpec struct {
-	key      string
-	def      string                // displayed when unset in db and env
-	masked   bool                  // API-key style value
-	validate func(string) error    // nil = free-form
-	apply    func(*Server, string) // runtime side effect, optional
-}
-
-var bitrateRe = regexp.MustCompile(`^\d+k$`)
-
-func intRange(min, max int) func(string) error {
-	return func(v string) error {
-		n, err := strconv.Atoi(strings.TrimSpace(v))
-		if err != nil || n < min || n > max {
-			return fmt.Errorf("must be an integer between %d and %d", min, max)
+// applySetting runs the runtime side effect of a changed setting, if it has one.
+func (s *Server) applySetting(k settings.Key, v string) {
+	switch k.Name {
+	case settings.DownloadConcurrency.Name:
+		if n, err := strconv.Atoi(v); err == nil && s.Downloads != nil {
+			s.Downloads.SetConcurrency(n)
 		}
-		return nil
-	}
-}
-
-func oneOf(allowed ...string) func(string) error {
-	return func(v string) error {
-		if !slices.Contains(allowed, strings.TrimSpace(v)) {
-			return fmt.Errorf("must be one of: %s", strings.Join(allowed, ", "))
-		}
-		return nil
-	}
-}
-
-var boolSpec = oneOf("true", "false")
-
-func normalizeBool(v string) string {
-	if strings.EqualFold(strings.TrimSpace(v), "true") {
-		return "true"
-	}
-	return "false"
-}
-
-func settingRegistry() []settingSpec {
-	return []settingSpec{
-		{key: "DOWNLOAD_CONCURRENCY", def: "4", validate: intRange(1, 20),
-			apply: func(s *Server, v string) {
-				if n, err := strconv.Atoi(v); err == nil && s.Downloads != nil {
-					s.Downloads.SetConcurrency(n)
-				}
-			}},
-		{key: "DOWNLOAD_RETENTION_HOURS", def: "24", validate: intRange(1, 8760)},
-		{key: "TG_FILE_LIMIT_MB", def: "49", validate: intRange(1, 2048)},
-		{key: "CLIP_MAX_DURATION_SECONDS", def: "300", validate: intRange(5, 3600)},
-		{key: "CLIP_MAX_DURATION_HQ_SECONDS", def: "30", validate: intRange(5, 600)},
-		{key: "YTDLP_PROXY", def: ""},
-		{key: "CLIP_CRF", def: "20", validate: intRange(15, 35)},
-		{key: "SUBS_CRF", def: "20", validate: intRange(15, 35)},
-		{key: "CLIP_PRESET", def: "fast", validate: oneOf("ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow")},
-		{key: "CLIP_AUDIO_BITRATE", def: "192k", validate: func(v string) error {
-			if !bitrateRe.MatchString(strings.TrimSpace(v)) {
-				return fmt.Errorf("must look like 192k")
-			}
-			return nil
-		}},
-		{key: "CLIP_DELETE_STATUS", def: "false", validate: boolSpec},
-		{key: "TRANSLATION_TIMEOUT", def: "180", validate: intRange(10, 600)},
-		{key: "SUBS_YOUTUBE_ONLY", def: "false", validate: boolSpec},
-		{key: "SUBS_SOURCE_PREF_RU", def: "en,ko"},
-		{key: "TRANSLATION_PROMPT", def: translate.DefaultTranslationPrompt},
-		{key: "GEMINI_API_KEY", masked: true},
-		{key: "GEMINI_MODEL", def: translate.DefaultModel},
-		{key: "GROK_ENABLED", def: "true", validate: boolSpec},
-		{key: "GROK_RATE_LIMIT", def: strconv.Itoa(translate.DefaultGrokRateLimit), validate: intRange(1, 1000)},
-		{key: "GROK_MAX_CHARS", def: strconv.Itoa(translate.DefaultGrokMaxChars), validate: intRange(100, 50000)},
-		{key: "GROK_PROMPT", def: translate.DefaultGrokPrompt},
-		{key: "GROK_RETELL_PROMPT", def: translate.DefaultGrokRetellPrompt},
-		{key: "GROK_OPINION_PROMPT", def: translate.DefaultGrokOpinionPrompt},
-		{key: "SCRAPER_USER_AGENTS", def: strings.Join(config.DefaultScraperUserAgents, "\n"),
-			validate: validateUserAgents,
-			apply:    applyScraperUserAgents},
-	}
-}
-
-// isRegisteredSetting reports whether key has a dedicated editor in the settings sections.
-func isRegisteredSetting(key string) bool {
-	for _, spec := range settingRegistry() {
-		if spec.key == key {
-			return true
+	case settings.ScraperUserAgents.Name:
+		if uas := scraper.ParseUserAgents(v); len(uas) > 0 && s.Scraper != nil {
+			s.Scraper.SetUserAgents(uas)
 		}
 	}
-	return false
-}
-
-func validateUserAgents(v string) error {
-	if len(scraper.ParseUserAgents(v)) == 0 {
-		return fmt.Errorf("add at least one user agent line")
-	}
-	return nil
-}
-
-func applyScraperUserAgents(s *Server, v string) {
-	if s.Scraper == nil {
-		return
-	}
-	if uas := scraper.ParseUserAgents(v); len(uas) > 0 {
-		s.Scraper.SetUserAgents(uas)
-	}
-}
-
-// resolveSetting returns the effective value and its source ("db", "env" or "default").
-func (s *Server) resolveSetting(ctx context.Context, spec settingSpec) (value, source string) {
-	if s.Configs != nil {
-		if c, err := s.Configs.Get(ctx, spec.key); err == nil && c != nil && strings.TrimSpace(c.Value) != "" {
-			return strings.TrimSpace(c.Value), "db"
-		}
-	}
-	if env := os.Getenv(spec.key); strings.TrimSpace(env) != "" {
-		return strings.TrimSpace(env), "env"
-	}
-	return spec.def, "default"
 }
 
 // GET /api/settings — effective values with source info plus read-only system info.
@@ -149,19 +38,12 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		Default string `json:"default"`
 	}
 	out := make([]entry, 0, 24)
-	for _, spec := range settingRegistry() {
-		value, source := s.resolveSetting(ctx, spec)
-		shown := value
-		if spec.masked && shown != "" {
-			shown = maskKey(shown)
+	for _, k := range settings.Editable {
+		value, source := s.Settings.Resolve(ctx, k)
+		if k.Masked {
+			value = maskKey(value)
 		}
-		out = append(out, entry{
-			Key:     spec.key,
-			Value:   shown,
-			Source:  source,
-			Masked:  spec.masked,
-			Default: spec.def,
-		})
+		out = append(out, entry{Key: k.Name, Value: value, Source: source, Masked: k.Masked, Default: k.Def})
 	}
 
 	system := []map[string]string{}
@@ -187,57 +69,41 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	specs := settingRegistry()
-	byKey := make(map[string]settingSpec, len(specs))
-	for _, spec := range specs {
-		byKey[spec.key] = spec
-	}
-
 	ctx := r.Context()
 	type pending struct {
-		spec settingSpec
-		val  string
+		key settings.Key
+		val string
 	}
 	var updates []pending
-	for key, raw := range req {
-		spec, ok := byKey[key]
+	for name, raw := range req {
+		k, ok := settings.Lookup(name)
 		if !ok {
-			http.Error(w, "unknown setting "+key, http.StatusBadRequest)
+			http.Error(w, "unknown setting "+name, http.StatusBadRequest)
 			return
 		}
-		v := strings.TrimSpace(raw)
-
-		if spec.masked && isMaskedKey(v) {
+		if k.Masked && isMaskedKey(raw) {
 			continue // echoed-back mask = keep current
 		}
-
 		// Empty clears the DB value: env or default applies again (for API keys this removes the key).
-		if v != "" && spec.validate != nil {
-			if err := spec.validate(v); err != nil {
-				http.Error(w, fmt.Sprintf("%s: %v", key, err), http.StatusBadRequest)
-				return
-			}
+		v, err := k.Check(raw)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("%s: %v", name, err), http.StatusBadRequest)
+			return
 		}
-		if v != "" && (spec.key == "CLIP_DELETE_STATUS" || spec.key == "SUBS_YOUTUBE_ONLY" || spec.key == "GROK_ENABLED") {
-			v = normalizeBool(v)
-		}
-		updates = append(updates, pending{spec: spec, val: v})
+		updates = append(updates, pending{k, v})
 	}
 
 	for _, u := range updates {
-		if err := s.Configs.Set(ctx, u.spec.key, u.val); err != nil {
+		if err := s.Settings.Set(ctx, u.key.Name, u.val); err != nil {
 			s.fail(w, err)
 			return
 		}
 	}
 	for _, u := range updates {
-		if u.spec.apply != nil {
-			// Resolve again so a cleared value applies the env/default it falls back to.
-			v, _ := s.resolveSetting(ctx, u.spec)
-			u.spec.apply(s, v)
-		}
+		// Resolve again so a cleared value applies the env/default it falls back to.
+		s.applySetting(u.key, s.Settings.Value(ctx, u.key))
 	}
 
-	s.logger.Info("Settings updated", zap.Int("count", len(updates)))
+	s.logger.Info("Settings updated", slog.Int("count", len(updates)))
 	writeJSON(w, map[string]any{"status": "ok"})
 }

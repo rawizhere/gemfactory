@@ -2,8 +2,6 @@ package storage
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"gemfactory/internal/model"
 	"time"
@@ -15,7 +13,7 @@ type ReleaseRepository struct {
 	db *bun.DB
 }
 
-func NewReleaseRepository(db *bun.DB) *ReleaseRepository {
+func NewReleaseRepository(db *bun.DB) model.ReleaseRepository {
 	return &ReleaseRepository{db: db}
 }
 
@@ -72,38 +70,6 @@ func (r *ReleaseRepository) GetByDateRange(ctx context.Context, start, end time.
 		return nil, fmt.Errorf("failed to query releases by date range: %w", err)
 	}
 	return releases, nil
-}
-
-func (r *ReleaseRepository) GetByArtistDateAndTrack(ctx context.Context, artistID int, date time.Time, titleTrack string) (*model.Release, error) {
-	var release model.Release
-	err := r.db.NewSelect().
-		Model(&release).
-		Where("artist_id = ? AND date = ? AND title_track = ?", artistID, date, titleTrack).
-		Scan(ctx)
-
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to query release by artist, date and track: %w", err)
-	}
-	return &release, nil
-}
-
-func (r *ReleaseRepository) GetByArtistDateAndSource(ctx context.Context, artistID int, date time.Time, sourceURL string) (*model.Release, error) {
-	var release model.Release
-	err := r.db.NewSelect().
-		Model(&release).
-		Where("artist_id = ? AND date = ? AND source_url = ?", artistID, date, sourceURL).
-		Scan(ctx)
-
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to query release by artist, date and source: %w", err)
-	}
-	return &release, nil
 }
 
 func (r *ReleaseRepository) GetTotalCount(ctx context.Context) (int, error) {

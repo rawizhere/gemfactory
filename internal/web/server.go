@@ -12,13 +12,14 @@ import (
 	"strings"
 	"time"
 
-	"go.uber.org/zap"
+	"log/slog"
 
 	"gemfactory/internal/config"
 	"gemfactory/internal/downloader"
 	"gemfactory/internal/model"
 	"gemfactory/internal/scraper"
 	"gemfactory/internal/service"
+	"gemfactory/internal/settings"
 	"gemfactory/internal/storage"
 )
 
@@ -31,7 +32,7 @@ type Deps struct {
 	DB         *storage.Postgres // pinged by /health; nil in tests
 	Artists    model.ArtistRepository
 	Releases   model.ReleaseRepository
-	Configs    model.ConfigRepository
+	Settings   *settings.Provider
 	Cookies    model.CookieRepository
 	Downloads  *downloader.Service
 	ReleaseSvc *service.ReleaseService
@@ -41,10 +42,10 @@ type Deps struct {
 type Server struct {
 	Deps
 	server *http.Server
-	logger *zap.Logger
+	logger *slog.Logger
 }
 
-func NewServer(port string, logger *zap.Logger, deps Deps) *Server {
+func NewServer(port string, logger *slog.Logger, deps Deps) *Server {
 	s := &Server{
 		Deps:   deps,
 		logger: logger,
@@ -89,7 +90,7 @@ func NewServer(port string, logger *zap.Logger, deps Deps) *Server {
 }
 
 func (s *Server) Start() error {
-	s.logger.Info("Starting admin web server", zap.String("addr", s.server.Addr))
+	s.logger.Info("Starting admin web server", slog.String("addr", s.server.Addr))
 	return s.server.ListenAndServe()
 }
 
@@ -103,7 +104,7 @@ func (s *Server) Stop() error {
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	if s.DB != nil {
 		if err := s.DB.Ping(); err != nil {
-			s.logger.Error("Health check failed", zap.Error(err))
+			s.logger.Error("Health check failed", slog.Any("error", err))
 			w.WriteHeader(http.StatusServiceUnavailable)
 			writeJSON(w, map[string]string{"status": "unhealthy"})
 			return
@@ -249,7 +250,7 @@ func (s *Server) runParser(w http.ResponseWriter, r *http.Request) {
 		found, err = s.ReleaseSvc.ParseReleasesForMonth(ctx, fmt.Sprintf("%s-%d", month, year))
 	}
 	if err != nil {
-		s.logger.Warn("Parser failed", zap.String("month", month), zap.Int("year", year), zap.Error(err))
+		s.logger.Warn("Parser failed", slog.String("month", month), slog.Int("year", year), slog.Any("error", err))
 		http.Error(w, fmt.Sprintf("parser failed after saving %d releases: %v", found, err), http.StatusBadGateway)
 		return
 	}
@@ -486,7 +487,7 @@ func (s *Server) deleteReleases(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listConfig(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.Configs.GetAll(r.Context())
+	rows, err := s.Settings.All(r.Context())
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -500,42 +501,16 @@ func (s *Server) listConfig(w http.ResponseWriter, r *http.Request) {
 		Editable    bool   `json:"editable"`
 	}
 
-	sensitive := func(key string) bool {
-		key = strings.ToUpper(key)
-		return strings.Contains(key, "TOKEN") ||
-			strings.Contains(key, "PASSWORD") ||
-			strings.Contains(key, "SECRET")
-	}
-
-	// Legacy seed rows never read back; they duplicate values shown under System Info.
-	isDeadDBKey := func(key string) bool {
-		switch key {
-		case "RELEASE_CHECK_INTERVAL", "RATE_LIMIT_REQUESTS", "RATE_LIMIT_WINDOW",
-			"SCRAPER_DELAY", "LOG_LEVEL", "TIMEZONE", "APP_DATA_DIR",
-			"BOT_TOKEN", "ADMIN_USERNAME", "DB_DSN",
-			"WEB_PORT", "WEB_ENABLED", "HEALTH_PORT", "HEALTH_CHECK_ENABLED":
-			return true
-		default:
-			return false
-		}
-	}
-
 	out := []entry{}
 	for _, c := range rows {
-		if isRegisteredSetting(c.Key) || isDeadDBKey(c.Key) {
+		if _, ok := settings.Lookup(c.Key); ok {
 			continue
 		}
-		value := c.Value
-		if sensitive(c.Key) {
+		value, editable := c.Value, !isSensitive(c.Key)
+		if !editable {
 			value = "•••"
 		}
-		out = append(out, entry{
-			Source:      "db",
-			Key:         c.Key,
-			Value:       value,
-			Description: c.Description,
-			Editable:    !sensitive(c.Key),
-		})
+		out = append(out, entry{Source: "db", Key: c.Key, Value: value, Description: c.Description, Editable: editable})
 	}
 
 	if s.AppCfg != nil {
@@ -554,13 +529,11 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid key", http.StatusBadRequest)
 		return
 	}
-	if strings.Contains(strings.ToUpper(key), "TOKEN") ||
-		strings.Contains(strings.ToUpper(key), "PASSWORD") ||
-		strings.Contains(strings.ToUpper(key), "SECRET") {
+	if isSensitive(key) {
 		http.Error(w, "sensitive keys cannot be edited here", http.StatusForbidden)
 		return
 	}
-	if isRegisteredSetting(key) {
+	if _, ok := settings.Lookup(key); ok {
 		// Registered settings go through /api/settings for validation and runtime apply.
 		http.Error(w, key+" is managed in the settings sections", http.StatusBadRequest)
 		return
@@ -573,11 +546,17 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if err := s.Configs.Set(r.Context(), key, req.Value); err != nil {
+	if err := s.Settings.Set(r.Context(), key, req.Value); err != nil {
 		s.fail(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// isSensitive reports whether a config key holds a credential that the panel must not show or edit.
+func isSensitive(key string) bool {
+	key = strings.ToUpper(key)
+	return strings.Contains(key, "TOKEN") || strings.Contains(key, "PASSWORD") || strings.Contains(key, "SECRET")
 }
 
 func parseGender(w http.ResponseWriter, raw string) (model.Gender, bool) {
@@ -595,7 +574,7 @@ func (s *Server) fail(w http.ResponseWriter, err error) {
 	if errors.Is(err, context.Canceled) {
 		return
 	}
-	s.logger.Error("web request failed", zap.Error(err))
+	s.logger.Error("web request failed", slog.Any("error", err))
 	http.Error(w, "internal error", http.StatusInternalServerError)
 }
 

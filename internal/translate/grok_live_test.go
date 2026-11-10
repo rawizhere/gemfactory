@@ -5,6 +5,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"gemfactory/internal/settings"
 )
 
 // TestLiveGrokSearch calls Gemini for real; run with GEMINI_API_KEY (and optionally GEMINI_MODEL) set.
@@ -15,14 +17,14 @@ func TestLiveGrokSearch(t *testing.T) {
 	}
 	model := os.Getenv("GEMINI_MODEL")
 	if model == "" {
-		model = DefaultModel
+		model = settings.GeminiModel.Def
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	msg := "Текст для проверки:\n\"IVE выпустили новый альбом в этом месяце\"\n\nВопрос пользователя: какой последний релиз у IVE и когда он вышел?"
 
-	out, err := Complete(ctx, Config{Key: key, Model: model}, DefaultGrokPrompt, msg, 0.3)
+	out, err := Complete(ctx, Config{Key: key, Model: model}, settings.GrokPrompt.Def, msg, 0.3)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"log/slog"
 )
 
 func TestHTTPClientFailsOverOn403(t *testing.T) {
@@ -27,7 +27,7 @@ func TestHTTPClientFailsOverOn403(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewHTTPClient([]string{"ua-bad", "ua-good"}, zap.NewNop())
+	c := NewHTTPClient([]string{"ua-bad", "ua-good"}, slog.New(slog.DiscardHandler))
 	resp, err := c.doRequest(context.Background(), srv.URL)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -51,7 +51,7 @@ func TestHTTPClientSetUserAgents(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewHTTPClient([]string{"ua-old"}, zap.NewNop())
+	c := NewHTTPClient([]string{"ua-old"}, slog.New(slog.DiscardHandler))
 	c.SetUserAgents([]string{"ua-new", "ua-two"})
 	resp, err := c.doRequest(context.Background(), srv.URL)
 	require.NoError(t, err)

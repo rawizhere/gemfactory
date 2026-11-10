@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"log/slog"
 )
 
 func TestVariantSuffix(t *testing.T) {
@@ -56,7 +56,7 @@ func TestCacheHitRequiresVideoFile(t *testing.T) {
 
 func newTestService(t *testing.T) *Service {
 	t.Helper()
-	return NewService(nil, nil, t.TempDir(), 1, zap.NewNop())
+	return NewService(nil, nil, t.TempDir(), 1, slog.New(slog.DiscardHandler))
 }
 
 func TestCleanupOnceRemovesOldArtifactsOnly(t *testing.T) {
@@ -128,7 +128,19 @@ func TestCleanStorageProtectsActiveJobs(t *testing.T) {
 		VideoID:    "doneVid",
 		Status:     StatusDone,
 		OutputDir:  doneFile,
-		lastProgAt: time.Now().Add(-10 * time.Minute),
+		finishedAt: time.Now().Add(-10 * time.Minute),
+	}
+	// Finished moments ago (e.g. a cache hit still uploading): protected although no progress was ever emitted.
+	recentDir := filepath.Join(s.dataDir, "recentVid")
+	require.NoError(t, os.MkdirAll(recentDir, 0755))
+	recentFile := filepath.Join(recentDir, "clip.mp4")
+	require.NoError(t, os.WriteFile(recentFile, []byte("recent"), 0644))
+	s.jobs["job-done-recent"] = &Job{
+		ID:         "job-done-recent",
+		VideoID:    "recentVid",
+		Status:     StatusDone,
+		OutputDir:  recentFile,
+		finishedAt: time.Now(),
 	}
 	s.mu.Unlock()
 
@@ -138,6 +150,7 @@ func TestCleanStorageProtectsActiveJobs(t *testing.T) {
 	require.Equal(t, 1, removed, "want 1 removed file (freed: %d)", freed)
 
 	require.NoError(t, isMissing(activeFile), "active job file was deleted by CleanStorage")
+	require.NoError(t, isMissing(recentFile), "just-finished job file was deleted by CleanStorage")
 	require.True(t, os.IsNotExist(isMissing(doneFile)), "old completed job file was not deleted by CleanStorage")
 
 	s.mu.Lock()

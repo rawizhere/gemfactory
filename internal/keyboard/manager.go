@@ -8,7 +8,7 @@ import (
 
 	"github.com/mymmrac/telego"
 	"github.com/mymmrac/telego/telegoutil"
-	"go.uber.org/zap"
+	"log/slog"
 
 	"gemfactory/internal/config"
 	"gemfactory/internal/model"
@@ -18,7 +18,7 @@ import (
 
 type Manager struct {
 	releaseService    *service.ReleaseService
-	logger            *zap.Logger
+	logger            *slog.Logger
 	config            *config.Config
 	tg                *telegram.Client
 	allMonthsKeyboard telego.InlineKeyboardMarkup
@@ -26,7 +26,7 @@ type Manager struct {
 	lastMonth         int
 }
 
-func NewManager(releaseService *service.ReleaseService, tg *telegram.Client, config *config.Config, logger *zap.Logger) *Manager {
+func NewManager(releaseService *service.ReleaseService, tg *telegram.Client, config *config.Config, logger *slog.Logger) *Manager {
 	k := &Manager{
 		releaseService: releaseService,
 		tg:             tg,
@@ -69,7 +69,7 @@ func (k *Manager) initAllMonthsKeyboard() {
 func (k *Manager) updateMainMonthKeyboard() {
 	loc, err := time.LoadLocation(k.config.Timezone)
 	if err != nil {
-		k.logger.Error("Failed to load timezone", zap.String("timezone", k.config.Timezone), zap.Error(err))
+		k.logger.Error("Failed to load timezone", slog.String("timezone", k.config.Timezone), slog.Any("error", err))
 		loc = time.UTC
 	}
 
@@ -89,7 +89,7 @@ func (k *Manager) updateMainMonthKeyboard() {
 	k.lastMonth = currentMonth
 	k.mainMonthKeyboard = *telegoutil.InlineKeyboard(telegoutil.InlineKeyboardRow(buttons...))
 
-	k.logger.Info("Updated main month keyboard", zap.String("current_month", model.Months[currentMonth-1]))
+	k.logger.Info("Updated main month keyboard", slog.String("current_month", model.Months[currentMonth-1]))
 }
 
 func (k *Manager) GetMainKeyboard() *telego.InlineKeyboardMarkup {
@@ -115,7 +115,7 @@ func (k *Manager) HandleMonthCallback(ctx context.Context, callback *telego.Call
 
 	releases, err := k.releaseService.GetReleasesForMonth(ctx, monthWithYear, false, false)
 	if err != nil {
-		k.logger.Error("Failed to get releases for month", zap.String("month", monthWithYear), zap.Error(err))
+		k.logger.Error("Failed to get releases for month", slog.String("month", monthWithYear), slog.Any("error", err))
 		return fmt.Errorf("failed to get releases for month %s: %w", monthWithYear, err)
 	}
 

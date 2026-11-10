@@ -350,7 +350,7 @@ func (s *Service) authArgs(ctx context.Context, cookieFile string) []string {
 	if cookieFile != "" {
 		args = append(args, "--cookies", cookieFile)
 	}
-	if proxy := settings.New(s.configs).Value(ctx, "YTDLP_PROXY", ""); proxy != "" {
+	if proxy := s.cfg.Value(ctx, settings.YTDLPProxy); proxy != "" {
 		args = append(args, "--proxy", proxy)
 	}
 	return args

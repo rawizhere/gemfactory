@@ -5,24 +5,23 @@ import (
 	"fmt"
 	"gemfactory/internal/model"
 	"gemfactory/internal/scraper"
-	"gemfactory/internal/storage"
 	"iter"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/uptrace/bun"
-	"go.uber.org/zap"
+	"log/slog"
 )
 
 type ReleaseService struct {
 	repo       model.ReleaseRepository
 	artistRepo model.ArtistRepository
 	scraper    *scraper.Fetcher
-	logger     *zap.Logger
+	logger     *slog.Logger
 	mu         sync.Mutex
 	lastParse  atomic.Pointer[ParseResult]
 }
@@ -47,10 +46,10 @@ func (s *ReleaseService) recordParse(n int, err error) (int, error) {
 	return n, err
 }
 
-func NewReleaseService(db *bun.DB, scraper *scraper.Fetcher, logger *zap.Logger) *ReleaseService {
+func NewReleaseService(repo model.ReleaseRepository, artistRepo model.ArtistRepository, scraper *scraper.Fetcher, logger *slog.Logger) *ReleaseService {
 	return &ReleaseService{
-		repo:       storage.NewReleaseRepository(db),
-		artistRepo: storage.NewArtistRepository(db),
+		repo:       repo,
+		artistRepo: artistRepo,
 		scraper:    scraper,
 		logger:     logger,
 	}
@@ -169,24 +168,38 @@ func (s *ReleaseService) GetReleasesForMonth(ctx context.Context, month string, 
 	return result.String(), nil
 }
 
+// Upsert saves a scraped release, merging it into an existing row of the same artist when one matches.
 func (s *ReleaseService) Upsert(ctx context.Context, release *model.Release) error {
 	if err := s.validateRelease(release); err != nil {
 		return err
+	}
+	existing, err := s.repo.GetByArtistID(ctx, release.ArtistID)
+	if err != nil {
+		return fmt.Errorf("failed to check for existing release: %w", err)
+	}
+	_, err = s.upsert(ctx, release, existing)
+	return err
+}
+
+var genericTitles = []string{
+	"youtube", "official audio", "music video", "mv release",
+	"jyp entertainment official youtube", "official youtube",
+	"mv", "audio", "video",
+}
+
+// upsert matches release against the artist's existing rows in memory and returns the updated row set.
+func (s *ReleaseService) upsert(ctx context.Context, release *model.Release, existing []model.Release) ([]model.Release, error) {
+	if err := s.validateRelease(release); err != nil {
+		return existing, err
 	}
 
 	release.Title = CleanReleaseTitle(release.Title)
 	release.AlbumName = CleanReleaseTitle(release.AlbumName)
 	release.TitleTrack = CleanReleaseTitle(release.TitleTrack)
 
-	genericTitles := []string{
-		"youtube", "official audio", "music video", "mv release",
-		"jyp entertainment official youtube", "official youtube",
-		"mv", "audio", "video",
-	}
-
 	titleLower := strings.ToLower(release.TitleTrack)
 	for _, generic := range genericTitles {
-		if titleLower == generic || strings.Contains(titleLower, generic) {
+		if strings.Contains(titleLower, generic) {
 			release.TitleTrack = ""
 			break
 		}
@@ -195,109 +208,103 @@ func (s *ReleaseService) Upsert(ctx context.Context, release *model.Release) err
 	release.MV = CleanLink(release.MV)
 	release.Spotify = CleanLink(release.Spotify)
 
-	var existingRelease *model.Release
-	var err error
-
-	if release.SourceURL != "" {
-		existingRelease, err = s.repo.GetByArtistDateAndSource(ctx, release.ArtistID, release.Date, release.SourceURL)
-	}
-
-	if err == nil && existingRelease == nil {
-		if release.TitleTrack != "" && release.TitleTrack != "N/A" {
-			existingRelease, err = s.repo.GetByArtistDateAndTrack(ctx, release.ArtistID, release.Date, release.TitleTrack)
-		}
-	}
-
-	if err == nil && existingRelease == nil {
-		artistReleases, aErr := s.repo.GetByArtistID(ctx, release.ArtistID)
-		if aErr == nil {
-			for i := range artistReleases {
-				r := &artistReleases[i]
-				if r.Date.Equal(release.Date) {
-					if strings.EqualFold(r.AlbumName, release.AlbumName) ||
-						strings.EqualFold(r.Title, release.Title) ||
-						strings.EqualFold(r.TitleTrack, release.TitleTrack) ||
-						r.AlbumName == "" || release.AlbumName == "" {
-						existingRelease = r
-						break
-					}
-				}
-			}
-		}
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to check for existing release: %w", err)
-	}
-
 	// Skip placeholder releases: the site links pre-release posts to the parent album,
 	// so a shorter album name for the same date adds nothing to the fuller row.
-	artistReleases, aErr := s.repo.GetByArtistID(ctx, release.ArtistID)
-	if aErr == nil {
-		for i := range artistReleases {
-			r := &artistReleases[i]
-			album := strings.ToLower(strings.TrimSpace(release.AlbumName))
-			if r.Date.Equal(release.Date) && album != "" && len(album) < len(r.AlbumName) &&
-				strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.AlbumName)), album) {
-				return nil
+	album := strings.ToLower(strings.TrimSpace(release.AlbumName))
+	for i := range existing {
+		r := &existing[i]
+		if r.Date.Equal(release.Date) && album != "" && len(album) < len(r.AlbumName) &&
+			strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.AlbumName)), album) {
+			return existing, nil
+		}
+	}
+
+	match := findExisting(existing, release)
+	if match == nil {
+		if err := s.repo.Create(ctx, release); err != nil {
+			return existing, err
+		}
+		return append(existing, *release), nil
+	}
+
+	if release.Title != "" && release.Title != "N/A" {
+		match.Title = release.Title
+	}
+	if release.AlbumName != "" && release.AlbumName != "N/A" {
+		match.AlbumName = release.AlbumName
+	}
+	if release.TitleTrack != "" && release.TitleTrack != "N/A" {
+		match.TitleTrack = release.TitleTrack
+	}
+	if release.MV != "" && release.MV != "N/A" {
+		match.MV = release.MV
+	}
+	if release.Spotify != "" && release.Spotify != "N/A" {
+		match.Spotify = release.Spotify
+	}
+	if release.SourceURL != "" {
+		match.SourceURL = release.SourceURL
+	}
+	match.UpdatedAt = time.Now()
+
+	// Merge and drop same-date duplicates, keeping the richer row.
+	var dropped []int
+	for i := range existing {
+		r := &existing[i]
+		if r.ReleaseID == match.ReleaseID || !r.Date.Equal(match.Date) {
+			continue
+		}
+		if strings.EqualFold(r.AlbumName, match.AlbumName) ||
+			strings.EqualFold(r.Title, match.Title) ||
+			r.AlbumName == "" {
+			if match.TitleTrack == "" && r.TitleTrack != "" {
+				match.TitleTrack = r.TitleTrack
+			}
+			if match.MV == "" && r.MV != "" {
+				match.MV = r.MV
+			}
+			if match.Spotify == "" && r.Spotify != "" {
+				match.Spotify = r.Spotify
+			}
+			if s.repo.Delete(ctx, r.ReleaseID) == nil {
+				dropped = append(dropped, r.ReleaseID)
 			}
 		}
 	}
 
-	if existingRelease != nil {
-		if release.Title != "" && release.Title != "N/A" {
-			existingRelease.Title = release.Title
-		}
-		if release.AlbumName != "" && release.AlbumName != "N/A" {
-			existingRelease.AlbumName = release.AlbumName
-		}
-		if release.TitleTrack != "" && release.TitleTrack != "N/A" {
-			existingRelease.TitleTrack = release.TitleTrack
-		}
-		if release.MV != "" && release.MV != "N/A" {
-			existingRelease.MV = release.MV
-		}
-		if release.Spotify != "" && release.Spotify != "N/A" {
-			existingRelease.Spotify = release.Spotify
-		}
-		if release.SourceURL != "" {
-			existingRelease.SourceURL = release.SourceURL
-		}
-		existingRelease.UpdatedAt = time.Now()
+	if err := s.repo.Update(ctx, match); err != nil {
+		return existing, err
+	}
+	return slices.DeleteFunc(existing, func(r model.Release) bool { return slices.Contains(dropped, r.ReleaseID) }), nil
+}
 
-		// Merge and drop same-date duplicates, keeping the richer row.
-		artistReleases, aErr := s.repo.GetByArtistID(ctx, release.ArtistID)
-		if aErr == nil {
-			for i := range artistReleases {
-				r := &artistReleases[i]
-				if r.ReleaseID == existingRelease.ReleaseID || !r.Date.Equal(existingRelease.Date) {
-					continue
-				}
-				if strings.EqualFold(r.AlbumName, existingRelease.AlbumName) ||
-					strings.EqualFold(r.Title, existingRelease.Title) ||
-					r.AlbumName == "" {
-					if existingRelease.TitleTrack == "" && r.TitleTrack != "" {
-						existingRelease.TitleTrack = r.TitleTrack
-					}
-					if existingRelease.MV == "" && r.MV != "" {
-						existingRelease.MV = r.MV
-					}
-					if existingRelease.Spotify == "" && r.Spotify != "" {
-						existingRelease.Spotify = r.Spotify
-					}
-					_ = s.repo.Delete(ctx, r.ReleaseID)
-				}
+// findExisting returns the row matching release: same source URL, then same title track,
+// then a same-date row sharing album/title/track or lacking an album.
+func findExisting(existing []model.Release, release *model.Release) *model.Release {
+	byDate := func(match func(r *model.Release) bool) *model.Release {
+		for i := range existing {
+			if r := &existing[i]; r.Date.Equal(release.Date) && match(r) {
+				return r
 			}
 		}
-
-		if err := s.repo.Update(ctx, existingRelease); err != nil {
-			return err
-		}
-
 		return nil
 	}
-
-	return s.repo.Create(ctx, release)
+	if release.SourceURL != "" {
+		if r := byDate(func(r *model.Release) bool { return r.SourceURL == release.SourceURL }); r != nil {
+			return r
+		}
+	}
+	if release.TitleTrack != "" && release.TitleTrack != "N/A" {
+		if r := byDate(func(r *model.Release) bool { return r.TitleTrack == release.TitleTrack }); r != nil {
+			return r
+		}
+	}
+	return byDate(func(r *model.Release) bool {
+		return strings.EqualFold(r.AlbumName, release.AlbumName) ||
+			strings.EqualFold(r.Title, release.Title) ||
+			strings.EqualFold(r.TitleTrack, release.TitleTrack) ||
+			r.AlbumName == "" || release.AlbumName == ""
+	})
 }
 
 func (s *ReleaseService) validateRelease(release *model.Release) error {
@@ -321,20 +328,20 @@ func (s *ReleaseService) ParseReleasesForMonth(ctx context.Context, monthName st
 	defer s.mu.Unlock()
 
 	month, year := resolveMonthYear(monthName)
-	s.logger.Info("Starting to parse releases", zap.String("month", monthName))
+	s.logger.Info("Starting to parse releases", slog.String("month", monthName))
 	return s.recordParse(s.parseReleases(ctx, s.scraper.ParseMonth(ctx, month, year), "month",
 		"failed to parse monthly page",
-		[]zap.Field{zap.String("month", month), zap.String("year", year)}))
+		[]any{slog.String("month", month), slog.String("year", year)}))
 }
 
 func (s *ReleaseService) ParseReleasesForYear(ctx context.Context, year string) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.logger.Info("Starting to parse releases for year", zap.String("year", year))
+	s.logger.Info("Starting to parse releases for year", slog.String("year", year))
 	return s.recordParse(s.parseReleases(ctx, s.scraper.ParseYear(ctx, year), "year",
 		"failed to parse year "+year,
-		[]zap.Field{zap.String("year", year)}))
+		[]any{slog.String("year", year)}))
 }
 
 // resolveMonthYear splits a "month-year" input and shifts to next year for past months without an explicit year.
@@ -353,7 +360,7 @@ func resolveMonthYear(monthName string) (month, year string) {
 }
 
 // parseReleases scrapes releases from the given iterator and upserts those with matched active artists.
-func (s *ReleaseService) parseReleases(ctx context.Context, releases iter.Seq2[scraper.Release, error], period, scrapeErrPrefix string, endFields []zap.Field) (int, error) {
+func (s *ReleaseService) parseReleases(ctx context.Context, releases iter.Seq2[scraper.Release, error], period, scrapeErrPrefix string, endFields []any) (int, error) {
 	activeArtists, err := s.artistRepo.GetActive(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get artists: %w", err)
@@ -364,6 +371,9 @@ func (s *ReleaseService) parseReleases(ctx context.Context, releases iter.Seq2[s
 		artistObjectMap[strings.ToLower(activeArtists[i].Name)] = &activeArtists[i]
 	}
 
+	// Existing rows per artist are loaded once and kept in sync as the run saves releases.
+	existing := make(map[int][]model.Release)
+
 	savedCount := 0
 	for scrapedRelease, err := range releases {
 		if err != nil {
@@ -373,9 +383,9 @@ func (s *ReleaseService) parseReleases(ctx context.Context, releases iter.Seq2[s
 		artist := s.findArtist(scrapedRelease.Artist, artistObjectMap)
 		if artist == nil {
 			s.logger.Debug("Scraped release artist not matched in active artists",
-				zap.String("artist", scrapedRelease.Artist),
-				zap.String("title", scrapedRelease.Title),
-				zap.String("date", scrapedRelease.Date.Format("2006-01-02")))
+				slog.String("artist", scrapedRelease.Artist),
+				slog.String("title", scrapedRelease.Title),
+				slog.String("date", scrapedRelease.Date.Format("2006-01-02")))
 			continue
 		}
 
@@ -392,17 +402,27 @@ func (s *ReleaseService) parseReleases(ctx context.Context, releases iter.Seq2[s
 			IsActive:      true,
 		}
 
-		if err := s.Upsert(ctx, release); err != nil {
+		rels, loaded := existing[artist.ArtistID]
+		if !loaded {
+			if rels, err = s.repo.GetByArtistID(ctx, artist.ArtistID); err != nil {
+				s.logger.Warn("Failed to load existing releases",
+					slog.String("artist", scrapedRelease.Artist), slog.Any("error", err))
+				continue
+			}
+		}
+		rels, err = s.upsert(ctx, release, rels)
+		existing[artist.ArtistID] = rels
+		if err != nil {
 			s.logger.Warn("Failed to save release",
-				zap.String("artist", scrapedRelease.Artist),
-				zap.Error(err))
+				slog.String("artist", scrapedRelease.Artist),
+				slog.Any("error", err))
 			continue
 		}
 
 		savedCount++
 	}
 
-	s.logger.Info("Completed parsing releases for "+period, append(endFields, zap.Int("saved", savedCount))...)
+	s.logger.Info("Completed parsing releases for "+period, append(endFields, slog.Int("saved", savedCount))...)
 
 	return savedCount, nil
 }

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
+	"log/slog"
 
 	"gemfactory/internal/model"
 	"gemfactory/internal/settings"
@@ -42,6 +42,11 @@ const (
 	StatusError       JobStatus = "error"
 )
 
+// Active reports whether a job in this state is still being worked on.
+func (s JobStatus) Active() bool {
+	return s == StatusPending || s == StatusDownloading || s == StatusProcessing
+}
+
 // Job tracks progress of one clip request.
 type Job struct {
 	ID          string
@@ -61,6 +66,8 @@ type Job struct {
 	lastProgSpeed   string
 	lastProgAt      time.Time
 
+	finishedAt time.Time // when the job became StatusDone
+
 	// Last reported pipeline stage (with its detail), for callback re-attachment.
 	lastStage       string
 	lastStageDetail string
@@ -68,9 +75,9 @@ type Job struct {
 
 type Service struct {
 	cookies model.CookieRepository
-	configs model.ConfigRepository
+	cfg     *settings.Provider
 	dataDir string
-	logger  *zap.Logger
+	logger  *slog.Logger
 
 	mu          sync.Mutex
 	cond        *sync.Cond
@@ -80,13 +87,13 @@ type Service struct {
 	order       []string
 }
 
-func NewService(cookies model.CookieRepository, configs model.ConfigRepository, dataDir string, concurrency int, logger *zap.Logger) *Service {
+func NewService(cookies model.CookieRepository, cfg *settings.Provider, dataDir string, concurrency int, logger *slog.Logger) *Service {
 	if concurrency < 1 {
 		concurrency = 1
 	}
 	s := &Service{
 		cookies:     cookies,
-		configs:     configs,
+		cfg:         cfg,
 		dataDir:     filepath.Join(dataDir, "downloads", "youtube"),
 		logger:      logger,
 		jobs:        make(map[string]*Job),
@@ -104,7 +111,7 @@ func (s *Service) SetConcurrency(n int) {
 	defer s.mu.Unlock()
 	s.concurrency = n
 	s.cond.Broadcast()
-	s.logger.Info("downloader concurrency updated", zap.Int("concurrency", n))
+	s.logger.Info("downloader concurrency updated", slog.Int("concurrency", n))
 }
 
 func (s *Service) acquireSlot() {
@@ -124,14 +131,13 @@ func (s *Service) releaseSlot() {
 }
 
 func (s *Service) SubmitWithCallbacks(ctx context.Context, req ClipRequest, cbs *ClipCallbacks) (*Job, error) {
-	videoID := ""
+	var startMs, endMs float64
 	if req.Start != "" || req.End != "" {
-		startMs, err := ParseTimecode(req.Start)
-		if err != nil {
+		var err error
+		if startMs, err = ParseTimecode(req.Start); err != nil {
 			return nil, fmt.Errorf("invalid start: %w", err)
 		}
-		endMs, err := ParseTimecode(req.End)
-		if err != nil {
+		if endMs, err = ParseTimecode(req.End); err != nil {
 			return nil, fmt.Errorf("invalid end: %w", err)
 		}
 		if endMs <= startMs {
@@ -150,16 +156,8 @@ func (s *Service) SubmitWithCallbacks(ctx context.Context, req ClipRequest, cbs 
 		req.Quality = "1080p"
 	}
 
-	variant := variantSuffix(req)
-	var jobID string
-	if req.Start == "" && req.End == "" {
-		jobID = videoID + "_full" + variant
-	} else {
-		jobID = fmt.Sprintf("%s_%s-%s%s", videoID, req.Start, req.End, variant)
-	}
-
 	job := &Job{
-		ID:      jobID,
+		ID:      clipName(videoID, req, startMs, endMs),
 		VideoID: videoID,
 		Request: req,
 		Status:  StatusPending,
@@ -287,7 +285,7 @@ func (s *Service) run(ctx context.Context, job *Job) {
 
 	cookieFile, cleanup, err := s.prepareCookieFile(ctx, cookieDomainFor(job.Request.URL))
 	if err != nil {
-		s.logger.Warn("cookies unavailable, continuing without", zap.Error(err))
+		s.logger.Warn("cookies unavailable, continuing without", slog.Any("error", err))
 	} else {
 		defer cleanup()
 	}
@@ -304,14 +302,15 @@ func (s *Service) run(ctx context.Context, job *Job) {
 	}
 
 	// Clamp the requested interval to the real video length before any work.
-	var segStartMs, segEndMs float64
-	if job.Request.Start != "" && job.Request.End != "" {
-		segStartMs, segEndMs, err = s.resolveSegmentBounds(ctx, meta, job.Request)
+	full := job.Request.Start == "" && job.Request.End == ""
+	var startMs, endMs float64
+	if !full {
+		startMs, endMs, err = s.resolveSegmentBounds(ctx, meta, job.Request)
 		if err != nil {
 			s.fail(job, err.Error())
 			return
 		}
-		if clamped := s.segmentOutputPath(job, segStartMs, segEndMs); clamped != clipPath {
+		if clamped := s.outputPath(job, startMs, endMs); clamped != clipPath {
 			clipPath = clamped
 			if marker := readCacheHit(clipPath); marker != nil {
 				s.serveFromCache(job, clipPath, marker)
@@ -319,54 +318,43 @@ func (s *Service) run(ctx context.Context, job *Job) {
 			}
 		}
 	}
+	progress := func(p ProgressUpdate) { s.reportProgress(job, p) }
+	// fetch downloads the source into out unless it is already there; false means the job failed.
+	fetch := func(out string) bool {
+		if _, err := os.Stat(out); !os.IsNotExist(err) {
+			return true
+		}
+		if err := s.fetchMedia(ctx, job, dlOpts{req: job.Request, out: out, cookie: cookieFile,
+			startMs: startMs, endMs: endMs, vertical: meta.IsVertical(), onProgress: progress}); err != nil {
+			s.fail(job, "download failed: "+err.Error())
+			return false
+		}
+		return true
+	}
 
 	switch {
 	case job.Request.AudioOnly:
 		s.reportStage(job, StageDownload, "")
-		hasSections := job.Request.Start != "" && job.Request.End != ""
 		rawMedia := filepath.Join(s.workbenchDir(job.VideoID), job.ID+"_raw.mp4")
 		if _, err := os.Stat(clipPath); os.IsNotExist(err) {
-			if _, err := os.Stat(rawMedia); os.IsNotExist(err) {
-				if hasSections {
-					if err := s.downloadSegment(ctx, job.Request, rawMedia, cookieFile, segStartMs, segEndMs, meta.IsVertical(), func(p ProgressUpdate) {
-						s.reportProgress(job, p)
-					}); err != nil {
-						s.fail(job, "download failed: "+err.Error())
-						return
-					}
-				} else {
-					if err := s.downloadFullVideo(ctx, job.Request, rawMedia, cookieFile, meta.IsVertical(), func(p ProgressUpdate) {
-						s.reportProgress(job, p)
-					}); err != nil {
-						s.fail(job, "download failed: "+err.Error())
-						return
-					}
-				}
+			if !fetch(rawMedia) {
+				return
 			}
 			s.setStatus(job, StatusProcessing)
 			s.reportStage(job, StageReencode, "mp3")
-			var durMS float64
-			if hasSections {
-				durMS = segEndMs - segStartMs
-			} else if meta.Duration > 0 {
-				durMS = meta.Duration * 1000.0
+			durMS := endMs - startMs
+			if full {
+				durMS = max(meta.Duration*1000, 0)
 			}
-			if err := s.ExtractAudioMP3(ctx, rawMedia, clipPath, durMS, func(p ProgressUpdate) {
-				s.reportProgress(job, p)
-			}); err != nil {
+			if err := s.ExtractAudioMP3(ctx, rawMedia, clipPath, durMS, progress); err != nil {
 				s.fail(job, "mp3 conversion failed: "+err.Error())
 				return
 			}
 		}
-	case job.Request.Start == "" && job.Request.End == "":
+	case full:
 		s.reportStage(job, StageDownload, "")
-		if _, err := os.Stat(clipPath); os.IsNotExist(err) {
-			if err := s.downloadFullVideo(ctx, job.Request, clipPath, cookieFile, meta.IsVertical(), func(p ProgressUpdate) {
-				s.reportProgress(job, p)
-			}); err != nil {
-				s.fail(job, "download failed: "+err.Error())
-				return
-			}
+		if !fetch(clipPath) {
+			return
 		}
 		s.setStatus(job, StatusProcessing)
 		s.reportStage(job, StageReencode, "")
@@ -374,8 +362,6 @@ func (s *Service) run(ctx context.Context, job *Job) {
 			clipPath = finalPath
 		}
 	default:
-		startMs, endMs := segStartMs, segEndMs
-
 		var trimmedVTT string
 		if lang := job.Request.SubsLang; lang != "" {
 			s.setStatus(job, StatusProcessing)
@@ -390,29 +376,13 @@ func (s *Service) run(ctx context.Context, job *Job) {
 
 		s.setStatus(job, StatusDownloading)
 		s.reportStage(job, StageDownload, "")
-		if _, err := os.Stat(clipPath); os.IsNotExist(err) {
-			if err := s.downloadSegment(ctx, job.Request, clipPath, cookieFile, startMs, endMs, meta.IsVertical(), func(p ProgressUpdate) {
-				s.reportProgress(job, p)
-			}); err != nil {
-				if errors.Is(err, ErrIncompleteStream) {
-					s.logger.Warn("incomplete stream detected, retrying with fallback fetch strategy", zap.String("job", job.ID), zap.Error(err))
-					_ = os.Remove(clipPath)
-					err = s.downloadSegmentFallback(ctx, job.Request, clipPath, cookieFile, startMs, endMs, meta.IsVertical(), func(p ProgressUpdate) {
-						s.reportProgress(job, p)
-					})
-				}
-				if err != nil {
-					s.fail(job, "download failed: "+err.Error())
-					return
-				}
-			}
+		if !fetch(clipPath) {
+			return
 		}
 
 		s.setStatus(job, StatusProcessing)
 		s.reportStage(job, StageReencode, "")
-		finalPath, rerr := s.ReencodeWithSubs(ctx, clipPath, trimmedVTT, job.Request.GIF, endMs-startMs, func(p ProgressUpdate) {
-			s.reportProgress(job, p)
-		})
+		finalPath, rerr := s.ReencodeWithSubs(ctx, clipPath, trimmedVTT, job.Request.GIF, endMs-startMs, progress)
 		if rerr != nil {
 			s.fail(job, "re-encode failed: "+rerr.Error())
 			return
@@ -425,60 +395,65 @@ func (s *Service) run(ctx context.Context, job *Job) {
 		return
 	}
 
-	baseTitle, altTitle := displayTitleParts(meta)
-	title := baseTitle
-	if altTitle != "" {
-		title = altTitle
-	}
 	var caption string
-	if job.Request.Shorts && job.Request.Start == "" && job.Request.End == "" {
-		caption = FormatCaption(title, CaptionHashtags(meta))
+	if job.Request.Shorts && full {
+		caption = FormatCaption(DisplayTitle(meta), CaptionHashtags(meta))
 	}
 
 	s.mu.Lock()
 	translation := job.Translation
 	s.mu.Unlock()
+	baseTitle, altTitle := displayTitleParts(meta)
 	writeCacheMarker(clipPath, cacheMarker{
 		Title:       baseTitle,
 		AltTitle:    altTitle,
 		Tags:        AllHashtags(meta),
 		Translation: translation,
 	})
-	s.mu.Lock()
-	job.Status = StatusDone
-	job.OutputDir = clipPath
-	job.Caption = caption
-	s.mu.Unlock()
+	s.markDone(job, clipPath, caption)
 	s.reportStage(job, StageUpload, "")
 	s.notifyDone(job, clipPath, caption)
-	s.logger.Info("clip ready", zap.String("job", job.ID), zap.String("output", clipPath))
+	s.logger.Info("clip ready", slog.String("job", job.ID), slog.String("output", clipPath))
 }
 
+// fetchMedia downloads the job's section (or the whole video when the bounds are empty) and retries
+// with the fallback fetch path when the result turns out to be an incomplete stream.
+func (s *Service) fetchMedia(ctx context.Context, job *Job, o dlOpts) error {
+	err := s.download(ctx, o)
+	if errors.Is(err, ErrIncompleteStream) {
+		s.logger.Warn("incomplete stream detected, retrying with fallback fetch strategy", slog.String("job", job.ID), slog.Any("error", err))
+		_ = os.Remove(o.out)
+		o.fallback = true
+		err = s.download(ctx, o)
+	}
+	return err
+}
+
+// clipName is the base name shared by job IDs and output files: "<id>_full<variant>" or "<id>_<start>-<end><variant>".
+func clipName(videoID string, req ClipRequest, startMs, endMs float64) string {
+	if req.Start == "" && req.End == "" {
+		return videoID + "_full" + variantSuffix(req)
+	}
+	return fileNameWithTimecodeVariant(videoID, startMs, endMs, variantSuffix(req))
+}
+
+// outputPath is the final file for the job's request with the given (clamped) bounds.
+func (s *Service) outputPath(job *Job, startMs, endMs float64) string {
+	ext := ".mp4"
+	if job.Request.AudioOnly {
+		ext = ".mp3"
+	}
+	return filepath.Join(s.workbenchDir(job.VideoID), clipName(job.VideoID, job.Request, startMs, endMs)+ext)
+}
+
+// outputPathFor is the output file for the request's bounds as given (before clamping).
 func (s *Service) outputPathFor(job *Job) string {
-	variant := variantSuffix(job.Request)
-	ext := ".mp4"
-	if job.Request.AudioOnly {
-		ext = ".mp3"
-	}
-	if job.Request.Start == "" && job.Request.End == "" {
-		return filepath.Join(s.workbenchDir(job.VideoID), job.VideoID+"_full"+variant+ext)
-	}
 	startMs, endMs := mustParsePair(job.Request.Start, job.Request.End)
-	return s.segmentOutputPath(job, startMs, endMs)
-}
-
-func (s *Service) segmentOutputPath(job *Job, startMs, endMs float64) string {
-	variant := variantSuffix(job.Request)
-	ext := ".mp4"
-	if job.Request.AudioOnly {
-		ext = ".mp3"
-	}
-	return filepath.Join(s.workbenchDir(job.VideoID),
-		fileNameWithTimecodeVariant(job.VideoID, startMs, endMs, variant)+ext)
+	return s.outputPath(job, startMs, endMs)
 }
 
 func (s *Service) serveFromCache(job *Job, clipPath string, marker *cacheMarker) {
-	s.logger.Info("cache hit", zap.String("job", job.ID), zap.String("output", clipPath))
+	s.logger.Info("cache hit", slog.String("job", job.ID), slog.String("output", clipPath))
 	title := marker.Title
 	if marker.AltTitle != "" {
 		title = marker.AltTitle
@@ -499,22 +474,20 @@ func (s *Service) serveFromCache(job *Job, clipPath string, marker *cacheMarker)
 
 	caption := ""
 	if marker.Title != "" {
-		title := marker.Title
-		if marker.AltTitle != "" {
-			title = marker.AltTitle
-		}
-		tags := marker.Tags
-		if len(tags) > 5 {
-			tags = tags[:5]
-		}
-		caption = FormatCaption(title, tags)
+		caption = FormatCaption(title, marker.Tags[:min(len(marker.Tags), 5)])
 	}
+	s.markDone(job, clipPath, caption)
+	s.notifyDone(job, clipPath, caption)
+}
+
+// markDone records a finished job's output.
+func (s *Service) markDone(job *Job, output, caption string) {
 	s.mu.Lock()
 	job.Status = StatusDone
-	job.OutputDir = clipPath
+	job.OutputDir = output
 	job.Caption = caption
+	job.finishedAt = time.Now()
 	s.mu.Unlock()
-	s.notifyDone(job, clipPath, caption)
 }
 
 func (s *Service) reportStage(job *Job, stage, detail string) {
@@ -595,7 +568,7 @@ func (s *Service) fail(job *Job, msg string) {
 	job.Error = msg
 	cbs := job.callbacks
 	s.mu.Unlock()
-	s.logger.Error("clip job failed", zap.String("job", job.ID), zap.String("error", msg))
+	s.logger.Error("clip job failed", slog.String("job", job.ID), slog.String("error", msg))
 
 	if cbs != nil && cbs.OnError != nil {
 		cbs.OnError(FriendlyError(msg))
@@ -665,14 +638,9 @@ func (s *Service) CleanStorage() (freedBytes int64, removedFiles int, err error)
 	protectedVideoIDs := make(map[string]bool)
 	now := time.Now()
 	for _, j := range s.jobs {
-		if j.Status == StatusPending || j.Status == StatusDownloading || j.Status == StatusProcessing {
-			if j.VideoID != "" {
-				protectedVideoIDs[j.VideoID] = true
-			}
-		} else if j.Status == StatusDone && now.Sub(j.lastProgAt) < 5*time.Minute {
-			if j.VideoID != "" {
-				protectedVideoIDs[j.VideoID] = true
-			}
+		// Recently finished jobs may still be uploading their output.
+		if j.VideoID != "" && (j.Status.Active() || j.Status == StatusDone && now.Sub(j.finishedAt) < 5*time.Minute) {
+			protectedVideoIDs[j.VideoID] = true
 		}
 	}
 	s.mu.Unlock()
@@ -689,7 +657,7 @@ func (s *Service) CleanStorage() (freedBytes int64, removedFiles int, err error)
 	for _, entry := range entries {
 		name := entry.Name()
 		if protectedVideoIDs[name] {
-			s.logger.Debug("skipping protected active download directory", zap.String("video_id", name))
+			s.logger.Debug("skipping protected active download directory", slog.String("video_id", name))
 			continue
 		}
 		targetPath := filepath.Join(dir, name)
@@ -717,8 +685,8 @@ func (s *Service) CleanStorage() (freedBytes int64, removedFiles int, err error)
 	s.mu.Unlock()
 
 	s.logger.Info("Downloads storage cleaned",
-		zap.Int64("freed_bytes", freedBytes),
-		zap.Int("removed_files", removedFiles),
+		slog.Int64("freed_bytes", freedBytes),
+		slog.Int("removed_files", removedFiles),
 	)
 	return freedBytes, removedFiles, nil
 }
@@ -733,16 +701,15 @@ type EncodeOptions struct {
 
 // GetEncodeOptions resolves encoding options from database config with fallback to environment or defaults.
 func (s *Service) GetEncodeOptions(ctx context.Context, hasSubs bool) EncodeOptions {
-	crfKey := "CLIP_CRF"
+	crf := settings.ClipCRF
 	if hasSubs {
-		crfKey = "SUBS_CRF"
+		crf = settings.SubsCRF
 	}
-	cfg := settings.New(s.configs)
 	return EncodeOptions{
-		CRF:          cfg.Value(ctx, crfKey, "20"),
-		Preset:       cfg.Value(ctx, "CLIP_PRESET", "fast"),
-		AudioBitrate: cfg.Value(ctx, "CLIP_AUDIO_BITRATE", "192k"),
-		MaxFileMB:    cfg.Int(ctx, "TG_FILE_LIMIT_MB", 49),
+		CRF:          s.cfg.Value(ctx, crf),
+		Preset:       s.cfg.Value(ctx, settings.ClipPreset),
+		AudioBitrate: s.cfg.Value(ctx, settings.ClipAudioBitrate),
+		MaxFileMB:    s.cfg.Int(ctx, settings.TGFileLimitMB),
 	}
 }
 
@@ -768,11 +735,11 @@ func (s *Service) resolveSegmentBounds(ctx context.Context, meta *SourceMeta, re
 
 // maxSegmentDuration returns the max clip length in ms: 30s for HQ, 300s otherwise.
 func (s *Service) maxSegmentDuration(ctx context.Context, hq bool) float64 {
-	key, def := "CLIP_MAX_DURATION_SECONDS", 300
+	key := settings.ClipMaxDurationSeconds
 	if hq {
-		key, def = "CLIP_MAX_DURATION_HQ_SECONDS", 30
+		key = settings.ClipMaxDurationHQSeconds
 	}
-	return float64(settings.New(s.configs).Int(ctx, key, def)) * 1000
+	return float64(s.cfg.Int(ctx, key)) * 1000
 }
 
 func (s *Service) MaxSegmentDurationSeconds(ctx context.Context, hq bool) float64 {
@@ -780,9 +747,7 @@ func (s *Service) MaxSegmentDurationSeconds(ctx context.Context, hq bool) float6
 }
 
 func (s *Service) telegramFileLimitBytes(ctx context.Context) int64 {
-	const defMB = 49
-	mb := settings.New(s.configs).Int(ctx, "TG_FILE_LIMIT_MB", defMB)
-	return int64(mb) * 1024 * 1024
+	return int64(s.cfg.Int(ctx, settings.TGFileLimitMB)) << 20
 }
 
 func checkFileSize(path string, limitBytes int64) error {

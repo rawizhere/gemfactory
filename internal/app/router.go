@@ -9,15 +9,15 @@ import (
 
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
-	"go.uber.org/zap"
+	"log/slog"
 
 	"gemfactory/internal/config"
 	"gemfactory/internal/downloader"
 	"gemfactory/internal/handlers"
 	"gemfactory/internal/keyboard"
 	"gemfactory/internal/middleware"
-	"gemfactory/internal/notify"
 	"gemfactory/internal/service"
+	"gemfactory/internal/settings"
 	"gemfactory/internal/telegram"
 )
 
@@ -26,10 +26,10 @@ type Router struct {
 	handlers *handlers.Handlers
 	config   *config.Config
 	services *service.Services
-	logger   *zap.Logger
+	logger   *slog.Logger
 }
 
-func NewRouter(services *service.Services, config *config.Config, keyboard *keyboard.Manager, logger *zap.Logger, tg *telegram.Client, downloads *downloader.Service) *Router {
+func NewRouter(services *service.Services, config *config.Config, keyboard *keyboard.Manager, logger *slog.Logger, tg *telegram.Client, downloads *downloader.Service) *Router {
 	return &Router{
 		handlers: handlers.New(services, config, keyboard, logger, tg, downloads),
 		config:   config,
@@ -127,9 +127,9 @@ func (r *Router) rememberAdmin() th.Handler {
 			return ctx.Next(update)
 		}
 		chatID := strconv.FormatInt(m.Chat.ID, 10)
-		if stored, err := r.services.Configs.Get(ctx.Context(), notify.AdminChatIDKey); err != nil || stored == nil || stored.Value != chatID {
-			if err := r.services.Configs.Set(ctx.Context(), notify.AdminChatIDKey, chatID); err != nil {
-				r.logger.Warn("Failed to store admin chat id", zap.Error(err))
+		if r.services.Settings.Value(ctx.Context(), settings.AdminChatID) != chatID {
+			if err := r.services.Settings.Set(ctx.Context(), settings.AdminChatID.Name, chatID); err != nil {
+				r.logger.Warn("Failed to store admin chat id", slog.Any("error", err))
 			}
 		}
 		return ctx.Next(update)

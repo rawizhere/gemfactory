@@ -6,25 +6,24 @@ import (
 	"gemfactory/internal/app"
 	"gemfactory/internal/config"
 	"gemfactory/internal/logger"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
-
-	"go.uber.org/zap"
 )
 
 func main() {
 	log := logger.New()
 
 	if err := run(log); err != nil {
-		log.Error("Bot stopped with error", zap.Error(err))
+		log.Error("Bot stopped with error", slog.Any("error", err))
 		os.Exit(1)
 	}
 
 	log.Info("Bot stopped successfully")
 }
 
-func run(log *zap.Logger) error {
+func run(log *slog.Logger) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -44,7 +43,7 @@ func run(log *zap.Logger) error {
 	}
 
 	if err := bot.Stop(); err != nil {
-		log.Error("Failed to stop bot gracefully", zap.Error(err))
+		log.Error("Failed to stop bot gracefully", slog.Any("error", err))
 	}
 
 	return nil

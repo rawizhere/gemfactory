@@ -1,0 +1,1 @@
+-- Deleted legacy config rows are not restored.

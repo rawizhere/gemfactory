@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"log/slog"
 
 	"gemfactory/internal/model"
 )
@@ -38,7 +38,7 @@ func (s *stubCookies) Delete(ctx context.Context, domain string) (int, error) {
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	return &Server{
-		logger: zap.NewNop(),
+		logger: slog.New(slog.DiscardHandler),
 		Deps:   Deps{Cookies: &stubCookies{domains: map[string]string{}}},
 	}
 }

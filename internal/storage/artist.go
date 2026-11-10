@@ -2,8 +2,6 @@ package storage
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"gemfactory/internal/model"
 
@@ -14,26 +12,12 @@ type ArtistRepository struct {
 	db *bun.DB
 }
 
-func NewArtistRepository(db *bun.DB) *ArtistRepository {
+func NewArtistRepository(db *bun.DB) model.ArtistRepository {
 	return &ArtistRepository{db: db}
 }
 
 func (r *ArtistRepository) GetByID(ctx context.Context, id int) (*model.Artist, error) {
-	artist := new(model.Artist)
-
-	err := r.db.NewSelect().
-		Model(artist).
-		Where("artist_id = ?", id).
-		Scan(ctx)
-
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to query artist by ID: %w", err)
-	}
-
-	return artist, nil
+	return one(ctx, r.db.NewSelect().Where("artist_id = ?", id), new(model.Artist), "artist by ID")
 }
 
 func (r *ArtistRepository) GetAll(ctx context.Context) ([]model.Artist, error) {
@@ -49,21 +33,7 @@ func (r *ArtistRepository) GetAll(ctx context.Context) ([]model.Artist, error) {
 }
 
 func (r *ArtistRepository) GetByName(ctx context.Context, name string) (*model.Artist, error) {
-	artist := new(model.Artist)
-
-	err := r.db.NewSelect().
-		Model(artist).
-		Where("LOWER(name) = LOWER(?)", name).
-		Scan(ctx)
-
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to query artist by name: %w", err)
-	}
-
-	return artist, nil
+	return one(ctx, r.db.NewSelect().Where("LOWER(name) = LOWER(?)", name), new(model.Artist), "artist by name")
 }
 
 func (r *ArtistRepository) GetActive(ctx context.Context) ([]model.Artist, error) {

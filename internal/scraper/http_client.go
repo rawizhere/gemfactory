@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
+	"log/slog"
 
 	"gemfactory/internal/config"
 )
@@ -20,14 +20,14 @@ const uaCooldown = time.Hour
 
 type HTTPClient struct {
 	client     *http.Client
-	logger     *zap.Logger
+	logger     *slog.Logger
 	nextAt     time.Time // earliest time the next request may start, guarded by mu
 	mu         sync.Mutex
 	userAgents []string
 	badUntil   map[string]time.Time
 }
 
-func NewHTTPClient(userAgents []string, logger *zap.Logger) *HTTPClient {
+func NewHTTPClient(userAgents []string, logger *slog.Logger) *HTTPClient {
 	transport := &http.Transport{
 		MaxIdleConns:        50,
 		MaxIdleConnsPerHost: 10,
@@ -121,7 +121,7 @@ func (c *HTTPClient) doRequest(ctx context.Context, apiURL string) (*http.Respon
 
 	resp, err := c.doRequestOnce(ctx, apiURL, attempts)
 	if err != nil && timeoutErr(err) {
-		c.logger.Warn("REST request timed out, retrying once", zap.String("url", apiURL))
+		c.logger.Warn("REST request timed out, retrying once", slog.String("url", apiURL))
 		resp, err = c.doRequestOnce(ctx, apiURL, attempts)
 	}
 	return resp, err
@@ -153,7 +153,7 @@ func (c *HTTPClient) doRequestOnce(ctx context.Context, apiURL string, attempts 
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 512))
 			_ = resp.Body.Close()
 			c.markBad(ua)
-			c.logger.Warn("Scraper user agent blocked, failing over", zap.String("user_agent", ua))
+			c.logger.Warn("Scraper user agent blocked, failing over", slog.String("user_agent", ua))
 			continue
 		}
 		return resp, nil

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"go.uber.org/zap"
+	"log/slog"
 
 	"gemfactory/internal/model"
 )
@@ -42,14 +42,14 @@ func (f *Fetcher) ParseYear(ctx context.Context, year string) iter.Seq2[Release,
 func (f *Fetcher) parseRESTWindow(ctx context.Context, after, before time.Time, month, year string, yield func(Release, error) bool) {
 	posts, err := f.httpClient.FetchAlbumsWindow(ctx, after, before)
 	if err != nil {
-		f.logger.Warn("REST album fetch failed", zap.Error(err))
+		f.logger.Warn("REST album fetch failed", slog.Any("error", err))
 		yield(Release{}, err)
 		return
 	}
 	f.logger.Info("Fetched albums via REST",
-		zap.Int("count", len(posts)),
-		zap.String("month", month),
-		zap.String("year", year))
+		slog.Int("count", len(posts)),
+		slog.String("month", month),
+		slog.String("year", year))
 
 	seen := make(map[string]bool)
 	for _, post := range posts {

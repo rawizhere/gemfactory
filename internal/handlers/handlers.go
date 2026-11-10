@@ -8,7 +8,7 @@ import (
 	"gemfactory/internal/telegram"
 
 	"github.com/mymmrac/telego"
-	"go.uber.org/zap"
+	"log/slog"
 )
 
 type Handlers struct {
@@ -18,7 +18,7 @@ type Handlers struct {
 	Grok  *GrokHandlers
 }
 
-func New(services *service.Services, config *config.Config, keyboard *keyboard.Manager, logger *zap.Logger, tg *telegram.Client, downloads *downloader.Service) *Handlers {
+func New(services *service.Services, config *config.Config, keyboard *keyboard.Manager, logger *slog.Logger, tg *telegram.Client, downloads *downloader.Service) *Handlers {
 	base := NewBaseHandler(services, config, keyboard, logger, tg)
 
 	user := NewUserHandlers(base)

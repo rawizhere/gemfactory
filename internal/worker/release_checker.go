@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"go.uber.org/zap"
+	"log/slog"
 
 	"gemfactory/internal/notify"
 	"gemfactory/internal/service"
@@ -13,13 +13,13 @@ import (
 
 type ReleaseChecker struct {
 	releaseService *service.ReleaseService
-	logger         *zap.Logger
+	logger         *slog.Logger
 	interval       time.Duration
 	notifier       *notify.AdminNotifier
 	alerted        bool
 }
 
-func NewReleaseChecker(releaseService *service.ReleaseService, logger *zap.Logger, initialInterval time.Duration, notifier *notify.AdminNotifier) *ReleaseChecker {
+func NewReleaseChecker(releaseService *service.ReleaseService, logger *slog.Logger, initialInterval time.Duration, notifier *notify.AdminNotifier) *ReleaseChecker {
 	return &ReleaseChecker{
 		releaseService: releaseService,
 		logger:         logger,
@@ -29,7 +29,7 @@ func NewReleaseChecker(releaseService *service.ReleaseService, logger *zap.Logge
 }
 
 func (w *ReleaseChecker) Start(ctx context.Context) {
-	w.logger.Info("Release checker started", zap.Duration("interval", w.interval))
+	w.logger.Info("Release checker started", slog.Duration("interval", w.interval))
 
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
@@ -58,22 +58,22 @@ func (w *ReleaseChecker) Start(ctx context.Context) {
 func (w *ReleaseChecker) checkReleases(ctx context.Context) {
 	now := time.Now()
 	currentYear := now.Format("2006")
-	w.logger.Info("Checking releases for current year via REST...", zap.String("year", currentYear))
+	w.logger.Info("Checking releases for current year via REST...", slog.String("year", currentYear))
 
 	var parseErr error
 	if _, err := w.releaseService.ParseReleasesForYear(ctx, currentYear); err != nil {
-		w.logger.Error("Failed to check releases for current year", zap.String("year", currentYear), zap.Error(err))
+		w.logger.Error("Failed to check releases for current year", slog.String("year", currentYear), slog.Any("error", err))
 		parseErr = err
 	} else {
-		w.logger.Info("Current year release check completed", zap.String("year", currentYear))
+		w.logger.Info("Current year release check completed", slog.String("year", currentYear))
 	}
 
 	// In January, check previous year to catch late backfills
 	if now.Month() == time.January {
 		prevYear := strconv.Itoa(now.Year() - 1)
-		w.logger.Info("Checking releases for previous year backfills...", zap.String("year", prevYear))
+		w.logger.Info("Checking releases for previous year backfills...", slog.String("year", prevYear))
 		if _, err := w.releaseService.ParseReleasesForYear(ctx, prevYear); err != nil && parseErr == nil {
-			w.logger.Warn("Failed to check releases for previous year", zap.String("year", prevYear), zap.Error(err))
+			w.logger.Warn("Failed to check releases for previous year", slog.String("year", prevYear), slog.Any("error", err))
 			parseErr = err
 		}
 	}
@@ -81,9 +81,9 @@ func (w *ReleaseChecker) checkReleases(ctx context.Context) {
 	// In Q4 (Oct, Nov, Dec), check next year for early comebacks
 	if now.Month() >= time.October {
 		nextYear := strconv.Itoa(now.Year() + 1)
-		w.logger.Info("Checking releases for next year...", zap.String("year", nextYear))
+		w.logger.Info("Checking releases for next year...", slog.String("year", nextYear))
 		if _, err := w.releaseService.ParseReleasesForYear(ctx, nextYear); err != nil && parseErr == nil {
-			w.logger.Warn("Failed to check releases for next year", zap.String("year", nextYear), zap.Error(err))
+			w.logger.Warn("Failed to check releases for next year", slog.String("year", nextYear), slog.Any("error", err))
 			parseErr = err
 		}
 	}
@@ -95,7 +95,7 @@ func (w *ReleaseChecker) checkReleases(ctx context.Context) {
 func (w *ReleaseChecker) reportHealth(ctx context.Context, parseErr error) {
 	if parseErr != nil {
 		if w.alerted {
-			w.logger.Warn("Release parsing still failing", zap.Error(parseErr))
+			w.logger.Warn("Release parsing still failing", slog.Any("error", parseErr))
 			return
 		}
 		w.alerted = true

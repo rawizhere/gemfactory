@@ -7,7 +7,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"log/slog"
 )
 
 func TestSplitTitle(t *testing.T) {
@@ -85,7 +85,7 @@ func TestParseEventPageFromDoc(t *testing.T) {
 <a href="https://open.spotify.com/album/12345?si=x">Spotify</a>
 </div></body></html>`
 
-	f := &Fetcher{logger: zap.NewNop()}
+	f := &Fetcher{logger: slog.New(slog.DiscardHandler)}
 	doc, err := newTestDoc(html)
 	require.NoError(t, err, "failed to parse html")
 
@@ -115,7 +115,7 @@ func TestParseEventPageFromDocFallbackDate(t *testing.T) {
 <div class="entry-content"><p>Available since June 1, 2024 worldwide.</p></div>
 </body></html>`
 
-	f := &Fetcher{logger: zap.NewNop()}
+	f := &Fetcher{logger: slog.New(slog.DiscardHandler)}
 	doc, err := newTestDoc(html)
 	require.NoError(t, err, "failed to parse html")
 
@@ -162,7 +162,7 @@ func TestParseEventPageFromDocGreenShift(t *testing.T) {
 </div>
 </div></body></html>`
 
-	f := &Fetcher{logger: zap.NewNop()}
+	f := &Fetcher{logger: slog.New(slog.DiscardHandler)}
 	doc, err := newTestDoc(html)
 	require.NoError(t, err, "failed to parse html")
 
@@ -195,7 +195,7 @@ func TestParseEventPageFromDocGreenShiftPreRelease(t *testing.T) {
 <iframe src="https://www.youtube.com/embed/videoseries?si=abc&list=OLAK5uy_x"></iframe>
 </div></body></html>`
 
-	f := &Fetcher{logger: zap.NewNop()}
+	f := &Fetcher{logger: slog.New(slog.DiscardHandler)}
 	doc, err := newTestDoc(html)
 	require.NoError(t, err, "failed to parse html")
 
@@ -226,7 +226,7 @@ func TestParseEventPageFromDocTBATrack(t *testing.T) {
 </table>
 </div></body></html>`
 
-	f := &Fetcher{logger: zap.NewNop()}
+	f := &Fetcher{logger: slog.New(slog.DiscardHandler)}
 	doc, err := newTestDoc(html)
 	require.NoError(t, err, "failed to parse html")
 

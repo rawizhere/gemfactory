@@ -23,13 +23,13 @@ import (
 	"sync"
 	"time"
 
-	"go.uber.org/zap"
+	"log/slog"
 )
 
 // Bot coordinates the lifecycle of all services, workers, and the Telegram client.
 type Bot struct {
 	config         *config.Config
-	logger         *zap.Logger
+	logger         *slog.Logger
 	db             *storage.Postgres
 	telegram       *telegram.Client
 	web            *web.Server
@@ -43,7 +43,7 @@ type Bot struct {
 	cancel         context.CancelFunc
 }
 
-func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, error) {
+func NewBot(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*Bot, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config cannot be nil")
 	}
@@ -63,13 +63,15 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 	configRepo := storage.NewConfigRepository(db.GetDB())
 	provider := settings.New(configRepo)
 	if cfg.BotToken == "" {
-		cfg.BotToken = provider.Value(ctx, "BOT_TOKEN", "")
+		cfg.BotToken = provider.Value(ctx, settings.BotToken)
 	}
 	if cfg.AdminUsername == "" {
-		cfg.AdminUsername = strings.TrimPrefix(provider.Value(ctx, "ADMIN_USERNAME", ""), "@")
+		cfg.AdminUsername = strings.TrimPrefix(provider.Value(ctx, settings.AdminUsername), "@")
 	}
 
-	services := service.NewServices(db, cfg, logger)
+	artistRepo := storage.NewArtistRepository(db.GetDB())
+	releaseRepo := storage.NewReleaseRepository(db.GetDB())
+	services := service.NewServices(artistRepo, releaseRepo, provider, logger)
 	tgClient, err := telegram.NewClient(cfg.BotToken, logger)
 	if err != nil {
 		_ = db.Close()
@@ -82,10 +84,10 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 
 	// yt-dlp downloader: resolve binary, start nightly update loop.
 	cookieRepo := storage.NewCookieRepository(db.GetDB())
-	concurrency := provider.Int(botCtx, "DOWNLOAD_CONCURRENCY", cfg.DownloadConcurrency)
-	downloaderSvc := downloader.NewService(cookieRepo, configRepo, cfg.AppDataDir, concurrency, logger)
+	concurrency := provider.Int(botCtx, settings.DownloadConcurrency)
+	downloaderSvc := downloader.NewService(cookieRepo, provider, cfg.AppDataDir, concurrency, logger)
 	if err := downloader.EnsureYTDLP(botCtx); err != nil {
-		logger.Warn("yt-dlp unavailable at startup; downloads disabled until next restart", zap.Error(err))
+		logger.Warn("yt-dlp unavailable at startup; downloads disabled until next restart", slog.Any("error", err))
 	} else {
 		downloader.StartYTDLPUpdateLoop(botCtx)
 	}
@@ -100,16 +102,16 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 	webServer := web.NewServer(cfg.WebPort, logger, web.Deps{
 		AppCfg:     cfg,
 		DB:         db,
-		Artists:    storage.NewArtistRepository(db.GetDB()),
-		Releases:   storage.NewReleaseRepository(db.GetDB()),
-		Configs:    configRepo,
+		Artists:    artistRepo,
+		Releases:   releaseRepo,
+		Settings:   provider,
 		Cookies:    cookieRepo,
 		Downloads:  downloaderSvc,
 		ReleaseSvc: services.Release,
 		Scraper:    services.Scraper,
 	})
 
-	adminNotifier := notify.NewAdminNotifier(configRepo, tgClient, logger)
+	adminNotifier := notify.NewAdminNotifier(provider, tgClient, logger)
 	releaseChecker := worker.NewReleaseChecker(services.Release, logger, cfg.ReleaseCheckInterval, adminNotifier)
 
 	return &Bot{
@@ -128,10 +130,10 @@ func NewBot(ctx context.Context, cfg *config.Config, logger *zap.Logger) (*Bot, 
 	}, nil
 }
 
-func warnIfFFmpegMissingLibass(logger *zap.Logger) {
+func warnIfFFmpegMissingLibass(logger *slog.Logger) {
 	out, err := exec.Command("ffmpeg", "-hide_banner", "-filters").Output()
 	if err != nil {
-		logger.Warn("ffmpeg not available; clip re-encoding will fail", zap.Error(err))
+		logger.Warn("ffmpeg not available; clip re-encoding will fail", slog.Any("error", err))
 		return
 	}
 	if !strings.Contains(string(out), " subtitles ") {
@@ -147,7 +149,7 @@ func (b *Bot) Start(ctx context.Context) error {
 	go func() {
 		defer b.wg.Done()
 		if err := b.web.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			b.logger.Error("Web server failed", zap.Error(err))
+			b.logger.Error("Web server failed", slog.Any("error", err))
 		}
 	}()
 
@@ -170,7 +172,7 @@ func (b *Bot) Stop() error {
 	}
 
 	if err := b.web.Stop(); err != nil {
-		b.logger.Warn("Failed to stop web server", zap.Error(err))
+		b.logger.Warn("Failed to stop web server", slog.Any("error", err))
 	}
 
 	stopped := make(chan struct{})

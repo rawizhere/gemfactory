@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"go.uber.org/zap"
-
 	"gemfactory/internal/settings"
 )
 
@@ -76,7 +74,7 @@ func (s *Service) StartCleanupLoop(ctx context.Context) {
 func (s *Service) runCleanup(ctx context.Context) {
 	n, bytes := s.CleanupOnce(ctx)
 	s.logger.Info("downloads cleanup finished",
-		zap.Int("files_removed", n), zap.Int64("bytes_freed", bytes))
+		slog.Int("files_removed", n), slog.Int64("bytes_freed", bytes))
 }
 
 // CleanupOnce deletes download artifacts older than DOWNLOAD_RETENTION_HOURS
@@ -88,10 +86,8 @@ func (s *Service) CleanupOnce(ctx context.Context) (int, int64) {
 	protected := make(map[string]bool)
 	s.mu.Lock()
 	for _, j := range s.jobs {
-		if j.Status == StatusPending || j.Status == StatusDownloading || j.Status == StatusProcessing {
-			if j.VideoID != "" {
-				protected[j.VideoID] = true
-			}
+		if j.Status.Active() && j.VideoID != "" {
+			protected[j.VideoID] = true
 		}
 	}
 	s.mu.Unlock()
@@ -125,7 +121,7 @@ func (s *Service) CleanupOnce(ctx context.Context) (int, int64) {
 		return nil
 	})
 	if err != nil {
-		s.logger.Warn("cleanup walk failed", zap.String("dir", s.dataDir), zap.Error(err))
+		s.logger.Warn("cleanup walk failed", slog.String("dir", s.dataDir), slog.Any("error", err))
 	}
 
 	pruneEmptyDirs(s.dataDir)
@@ -141,7 +137,7 @@ func (s *Service) CleanupOnce(ctx context.Context) (int, int64) {
 		}
 		for i, id := range s.order {
 			if j, ok := s.jobs[id]; ok {
-				if j.Status == StatusPending || j.Status == StatusDownloading || j.Status == StatusProcessing || i >= keepStart {
+				if j.Status.Active() || i >= keepStart {
 					newJobs[id] = j
 					newOrder = append(newOrder, id)
 				}
@@ -171,6 +167,5 @@ func pruneEmptyDirs(root string) {
 
 // retentionPeriod resolves DOWNLOAD_RETENTION_HOURS with DB → env → default (24h) precedence.
 func (s *Service) retentionPeriod(ctx context.Context) time.Duration {
-	h := settings.New(s.configs).Int(ctx, "DOWNLOAD_RETENTION_HOURS", 24)
-	return time.Duration(h) * time.Hour
+	return time.Duration(s.cfg.Int(ctx, settings.DownloadRetentionHours)) * time.Hour
 }

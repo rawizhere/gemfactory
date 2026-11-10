@@ -32,8 +32,6 @@ type ReleaseRepository interface {
 	GetByArtistID(ctx context.Context, artistID int) ([]Release, error)
 	GetByArtist(ctx context.Context, artistName string) ([]Release, error)
 	GetByDateRange(ctx context.Context, start, end time.Time) ([]Release, error)
-	GetByArtistDateAndTrack(ctx context.Context, artistID int, date time.Time, titleTrack string) (*Release, error)
-	GetByArtistDateAndSource(ctx context.Context, artistID int, date time.Time, sourceURL string) (*Release, error)
 	GetTotalCount(ctx context.Context) (int, error)
 	Create(ctx context.Context, release *Release) error
 	Update(ctx context.Context, release *Release) error

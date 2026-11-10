@@ -7,12 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"gemfactory/internal/settings"
 	"gemfactory/internal/translate"
 )
 
 func (s *Server) translationConfig(ctx context.Context) translate.Config {
-	return translate.ResolveConfig(ctx, settings.New(s.Configs))
+	return translate.ResolveConfig(ctx, s.Settings)
 }
 
 // getTranslationConfig reports whether Gemini refuses the stored key.

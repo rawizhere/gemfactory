@@ -5,11 +5,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"log/slog"
 )
 
 func TestDebouncerShouldProcess(t *testing.T) {
-	d := NewDebouncer(50*time.Millisecond, zap.NewNop())
+	d := NewDebouncer(50*time.Millisecond, slog.New(slog.DiscardHandler))
 
 	require.True(t, d.ShouldProcess(1, "msg:month"), "first call must pass")
 	require.False(t, d.ShouldProcess(1, "msg:month"), "repeated call within interval must be dropped")
@@ -21,7 +21,7 @@ func TestDebouncerShouldProcess(t *testing.T) {
 }
 
 func TestDebouncerEntriesExpire(t *testing.T) {
-	d := NewDebouncer(10*time.Millisecond, zap.NewNop())
+	d := NewDebouncer(10*time.Millisecond, slog.New(slog.DiscardHandler))
 	d.ShouldProcess(1, "a")
 	d.ShouldProcess(2, "b")
 

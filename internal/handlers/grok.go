@@ -8,25 +8,25 @@ import (
 	"time"
 
 	"github.com/mymmrac/telego"
-	"go.uber.org/zap"
+	"log/slog"
 
 	"gemfactory/internal/middleware"
+	"gemfactory/internal/settings"
 	"gemfactory/internal/translate"
 )
 
 // GrokMode is one @grok command: which prompt to load, how to frame the input text and how to call the model.
 type GrokMode struct {
-	promptKey   string
-	defPrompt   string
+	key         settings.Key
 	inputLabel  string
 	quoteLabel  string
 	temperature float32
 }
 
 var (
-	GrokFactCheck = GrokMode{"GROK_PROMPT", translate.DefaultGrokPrompt, "Текст для проверки", "Проверяемая цитата", 0.3}
-	GrokRetell    = GrokMode{"GROK_RETELL_PROMPT", translate.DefaultGrokRetellPrompt, "Текст для пересказа", "Пересказываемая цитата", 0.5}
-	GrokOpinion   = GrokMode{"GROK_OPINION_PROMPT", translate.DefaultGrokOpinionPrompt, "Текст для оценки", "Цитата для оценки", 0.7}
+	GrokFactCheck = GrokMode{settings.GrokPrompt, "Текст для проверки", "Проверяемая цитата", 0.3}
+	GrokRetell    = GrokMode{settings.GrokRetellPrompt, "Текст для пересказа", "Пересказываемая цитата", 0.5}
+	GrokOpinion   = GrokMode{settings.GrokOpinionPrompt, "Текст для оценки", "Цитата для оценки", 0.7}
 )
 
 // grokFailReplies answer a failed model call in the prompts' dry, emoji-free voice.
@@ -55,7 +55,7 @@ func (h *GrokHandlers) Run(ctx context.Context, message *telego.Message, mode Gr
 		return
 	}
 
-	if !h.Services.Settings.Bool(ctx, "GROK_ENABLED", true) {
+	if !h.Services.Settings.Bool(ctx, settings.GrokEnabled) {
 		return
 	}
 
@@ -74,7 +74,7 @@ func (h *GrokHandlers) Run(ctx context.Context, message *telego.Message, mode Gr
 	}
 
 	if !h.IsAdmin(message.From) {
-		rateLimit := h.Services.Settings.Int(ctx, "GROK_RATE_LIMIT", translate.DefaultGrokRateLimit)
+		rateLimit := h.Services.Settings.Int(ctx, settings.GrokRateLimit)
 
 		userID := int64(0)
 		if message.From != nil {
@@ -90,7 +90,7 @@ func (h *GrokHandlers) Run(ctx context.Context, message *telego.Message, mode Gr
 		}
 	}
 
-	maxChars := h.Services.Settings.Int(ctx, "GROK_MAX_CHARS", translate.DefaultGrokMaxChars)
+	maxChars := h.Services.Settings.Int(ctx, settings.GrokMaxChars)
 	replyText = truncateRunes(replyText, maxChars)
 
 	var targetText string
@@ -103,14 +103,14 @@ func (h *GrokHandlers) Run(ctx context.Context, message *telego.Message, mode Gr
 		targetText += "\n\nВопрос пользователя: " + truncateRunes(question, maxChars)
 	}
 
-	prompt := h.Services.Settings.Value(ctx, mode.promptKey, mode.defPrompt)
+	prompt := h.Services.Settings.Value(ctx, mode.key)
 	cfg := translate.ResolveConfig(ctx, h.Services.Settings)
 
 	h.TG.SendTyping(ctx, message.Chat.ID, message.MessageThreadID)
 
 	resp, err := translate.Complete(ctx, cfg, prompt, targetText, mode.temperature)
 	if err != nil {
-		h.Logger.Error("grok request failed", zap.Error(err), zap.String("mode", mode.promptKey))
+		h.Logger.Error("grok request failed", slog.Any("error", err), slog.String("mode", mode.key.Name))
 		// The handler timeout may have fired; the apology still goes out.
 		sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()

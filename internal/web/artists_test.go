@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
+	"log/slog"
 
 	"gemfactory/internal/model"
 )
@@ -48,7 +48,7 @@ func TestUpdateArtistRename(t *testing.T) {
 		1: {ArtistID: 1, Name: "ive"},
 		2: {ArtistID: 2, Name: "ITZY"},
 	}}
-	s := &Server{logger: zap.NewNop(), Deps: Deps{Artists: repo}}
+	s := &Server{logger: slog.New(slog.DiscardHandler), Deps: Deps{Artists: repo}}
 
 	require.Equal(t, 409, renameArtist(s, "1", "itzy"), "name taken by another artist")
 	require.Equal(t, "ive", repo.byID[1].Name)

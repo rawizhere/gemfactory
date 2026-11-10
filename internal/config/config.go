@@ -23,7 +23,6 @@ type Config struct {
 	WebPort              string        `env:"WEB_PORT" envDefault:"9090"`
 	Timezone             string        `env:"TIMEZONE" envDefault:"Europe/Moscow"`
 	AppDataDir           string        `env:"APP_DATA_DIR" envDefault:"./data"`
-	DownloadConcurrency  int           `env:"DOWNLOAD_CONCURRENCY" envDefault:"4"`
 	ReleaseCheckInterval time.Duration `env:"RELEASE_CHECK_INTERVAL" envDefault:"24h"`
 }
 

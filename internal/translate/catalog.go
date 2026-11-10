@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"google.golang.org/genai"
+
+	"gemfactory/internal/settings"
 )
 
 // Model availability statuses.
@@ -166,7 +168,7 @@ func KeyRejected(ctx context.Context, key string) bool {
 	if err != nil {
 		return false
 	}
-	_, err = client.Models.Get(ctx, DefaultModel, nil)
+	_, err = client.Models.Get(ctx, settings.GeminiModel.Def, nil)
 	var apiErr genai.APIError
 	return errors.As(err, &apiErr) && keyInvalid(apiErr)
 }

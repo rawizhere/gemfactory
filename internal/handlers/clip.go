@@ -8,9 +8,10 @@ import (
 	"sync"
 
 	"github.com/mymmrac/telego"
-	"go.uber.org/zap"
+	"log/slog"
 
 	"gemfactory/internal/downloader"
+	"gemfactory/internal/settings"
 	"gemfactory/internal/telegram"
 )
 
@@ -194,7 +195,7 @@ func (h *ClipHandlers) submitParsed(ctx context.Context, message *telego.Message
 func (h *ClipHandlers) sendStatus(ctx context.Context, chatID int64, text string, replyToMsgID ...int) int {
 	msg, err := h.TG.SendMessageRaw(ctx, chatID, text, replyToMsgID...)
 	if err != nil {
-		h.Logger.Warn("failed to send status message", zap.Error(err))
+		h.Logger.Warn("failed to send status message", slog.Any("error", err))
 		return -1
 	}
 	return msg.MessageID
@@ -243,35 +244,40 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 		}
 		state.lastRender = text
 		if err := h.TG.EditMessageText(context.Background(), chatID, statusID, text); err != nil {
-			h.Logger.Warn("failed to update status card", zap.Error(err))
+			h.Logger.Warn("failed to update status card", slog.Any("error", err))
 		}
+	}
+
+	// update applies f to the state under the lock, then re-renders the card.
+	update := func(f func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		f()
+		edit()
 	}
 
 	// deliver uploads the result, then drops or finalizes the status card.
 	deliver := func(send func(ctx context.Context, onUpload telegram.UploadProgressCallback) error) {
-		mu.Lock()
-		state.stage = downloader.StageUpload
-		state.percent = 0
-		state.statusLine = "<b>Upload:</b> Uploading to Telegram..."
-		edit()
-		mu.Unlock()
+		update(func() {
+			state.stage = downloader.StageUpload
+			state.percent = 0
+			state.statusLine = "<b>Upload:</b> Uploading to Telegram..."
+		})
 
 		bgCtx := context.Background()
 		onUploadProgress := func(pct int, speed, sizeStr string) {
-			mu.Lock()
-			defer mu.Unlock()
-			state.stage = downloader.StageUpload
-			state.percent = pct
-			if speed != "" {
-				state.statusLine = fmt.Sprintf("<b>Upload:</b> %s (%s)", sizeStr, speed)
-			} else {
-				state.statusLine = fmt.Sprintf("<b>Upload:</b> %s", sizeStr)
-			}
-			edit()
+			update(func() {
+				state.stage = downloader.StageUpload
+				state.percent = pct
+				state.statusLine = "<b>Upload:</b> " + sizeStr
+				if speed != "" {
+					state.statusLine += " (" + speed + ")"
+				}
+			})
 		}
 
 		if sendErr := send(bgCtx, onUploadProgress); sendErr != nil {
-			h.Logger.Error("failed to send resulting media", zap.Error(sendErr))
+			h.Logger.Error("failed to send resulting media", slog.Any("error", sendErr))
 			_ = h.TG.SendMessage(bgCtx, chatID, "Failed to send file: "+html.EscapeString(sendErr.Error()))
 		}
 		mu.Lock()
@@ -289,118 +295,64 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 	}
 
 	return &downloader.ClipCallbacks{
-		OnHashtags: func(tags []string) {
-			mu.Lock()
-			defer mu.Unlock()
-			state.hashtags = tags
-			edit()
-		},
-
-		OnTranslation: func(providerModel string) {
-			mu.Lock()
-			defer mu.Unlock()
-			state.translatedVia = providerModel
-			edit()
-		},
+		OnHashtags:    func(tags []string) { update(func() { state.hashtags = tags }) },
+		OnTranslation: func(providerModel string) { update(func() { state.translatedVia = providerModel }) },
 
 		OnTranslateAttempt: func(providerModel string) {
-			mu.Lock()
-			defer mu.Unlock()
-			state.stage = downloader.StageTranslate
-			target := state.translating
-			if target == "" {
-				target = state.subsLang
-			}
-			state.statusLine = fmt.Sprintf("<b>Translating:</b> %s → %s...", target, providerModel)
-			edit()
+			update(func() {
+				state.stage = downloader.StageTranslate
+				target := state.translating
+				if target == "" {
+					target = state.subsLang
+				}
+				state.statusLine = fmt.Sprintf("<b>Translating:</b> %s → %s...", target, providerModel)
+			})
 		},
 
 		OnStage: func(stage, detail string) {
-			mu.Lock()
-			defer mu.Unlock()
-			state.stage = stage
-			switch stage {
-			case downloader.StageQueued:
-				state.statusLine = "Waiting for a free slot..."
-			case downloader.StageMetadata:
-				if detail != "" {
-					state.title = detail
-					state.statusLine = "Extracting metadata..."
-				} else {
-					state.statusLine = "Extracting metadata..."
+			update(func() {
+				state.stage = stage
+				if stage != downloader.StageQueued && stage != downloader.StageMetadata {
+					state.percent = 0
 				}
-			case downloader.StageSubtitles:
-				state.percent = 0
-				state.statusLine = fmt.Sprintf("Extracting subtitles (%s)...", detail)
-			case downloader.StageTranslate:
-				state.percent = 0
-				state.translating = detail
-				state.statusLine = fmt.Sprintf("<b>Translating:</b> %s...", detail)
-			case downloader.StageDownload:
-				state.percent = 0
-				if state.audioOnly {
-					state.statusLine = "<b>Download:</b> Downloading audio..."
-				} else {
+				switch stage {
+				case downloader.StageQueued:
+					state.statusLine = "Waiting for a free slot..."
+				case downloader.StageMetadata:
+					if detail != "" {
+						state.title = detail
+					}
+					state.statusLine = "Extracting metadata..."
+				case downloader.StageSubtitles:
+					state.statusLine = fmt.Sprintf("Extracting subtitles (%s)...", detail)
+				case downloader.StageTranslate:
+					state.translating = detail
+					state.statusLine = fmt.Sprintf("<b>Translating:</b> %s...", detail)
+				case downloader.StageDownload:
 					state.statusLine = "<b>Download:</b> Downloading video..."
-				}
-			case downloader.StageReencode:
-				state.percent = 0
-				switch {
-				case state.subsLang != "":
-					state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Burning subtitles (%s)...", state.subsLang)
-				case state.audioOnly:
-					state.statusLine = "<b>Converting:</b> Extracting MP3 (192 kbps)..."
-				case state.gif:
-					state.statusLine = "<b>Re-encoding:</b> Generating GIF..."
+					if state.audioOnly {
+						state.statusLine = "<b>Download:</b> Downloading audio..."
+					}
+				case downloader.StageReencode:
+					state.statusLine = reencodeLine(state, "")
+				case downloader.StageUpload:
+					state.statusLine = "<b>Upload:</b> Uploading to Telegram..."
 				default:
-					state.statusLine = "<b>Re-encoding:</b> Processing video..."
+					// Unknown stages keep the previous status line (and percent).
 				}
-			case downloader.StageUpload:
-				state.percent = 0
-				state.statusLine = "<b>Upload:</b> Uploading to Telegram..."
-			}
-			edit()
+			})
 		},
 		OnProgress: func(p downloader.ProgressUpdate) {
-			mu.Lock()
-			defer mu.Unlock()
-			state.stage = p.Stage
-			state.percent = p.Percent
-			switch p.Stage {
-			case downloader.StageDownload:
-				switch {
-				case p.Size != "" && p.Speed != "" && p.ETA != "":
-					state.statusLine = fmt.Sprintf("<b>Download:</b> %s (%s • ETA %s)", p.Size, p.Speed, p.ETA)
-				case p.Size != "" && p.Speed != "":
-					state.statusLine = fmt.Sprintf("<b>Download:</b> %s (%s)", p.Size, p.Speed)
-				case p.Size != "":
-					state.statusLine = fmt.Sprintf("<b>Download:</b> %s", p.Size)
-				case p.Speed != "":
-					state.statusLine = fmt.Sprintf("<b>Download:</b> %d%% (%s)", p.Percent, p.Speed)
-				default:
-					state.statusLine = fmt.Sprintf("<b>Download:</b> %d%%", p.Percent)
+			update(func() {
+				state.stage = p.Stage
+				state.percent = p.Percent
+				switch p.Stage {
+				case downloader.StageDownload:
+					state.statusLine = downloadLine(p)
+				case downloader.StageReencode:
+					state.statusLine = reencodeLine(state, p.Speed)
 				}
-			case downloader.StageReencode:
-				switch {
-				case state.subsLang != "" && p.Speed != "":
-					state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Burning subtitles (%s • %s)", state.subsLang, p.Speed)
-				case state.subsLang != "":
-					state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Burning subtitles (%s)", state.subsLang)
-				case state.audioOnly && p.Speed != "":
-					state.statusLine = fmt.Sprintf("<b>Converting:</b> Extracting MP3 (%s)", p.Speed)
-				case state.audioOnly:
-					state.statusLine = "<b>Converting:</b> Extracting MP3 (192 kbps)..."
-				case state.gif && p.Speed != "":
-					state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Generating GIF (%s)", p.Speed)
-				case state.gif:
-					state.statusLine = "<b>Re-encoding:</b> Generating GIF..."
-				case p.Speed != "":
-					state.statusLine = fmt.Sprintf("<b>Re-encoding:</b> Processing video (%s)", p.Speed)
-				default:
-					state.statusLine = "<b>Re-encoding:</b> Processing video..."
-				}
-			}
-			edit()
+			})
 		},
 		OnDone: func(path, caption string) {
 			if req.NoDesc {
@@ -432,6 +384,45 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 			_ = h.TG.EditMessageText(context.Background(), chatID, statusID, errMsg)
 		},
 	}
+}
+
+func downloadLine(p downloader.ProgressUpdate) string {
+	switch {
+	case p.Size != "" && p.Speed != "" && p.ETA != "":
+		return fmt.Sprintf("<b>Download:</b> %s (%s • ETA %s)", p.Size, p.Speed, p.ETA)
+	case p.Size != "" && p.Speed != "":
+		return fmt.Sprintf("<b>Download:</b> %s (%s)", p.Size, p.Speed)
+	case p.Size != "":
+		return "<b>Download:</b> " + p.Size
+	case p.Speed != "":
+		return fmt.Sprintf("<b>Download:</b> %d%% (%s)", p.Percent, p.Speed)
+	}
+	return fmt.Sprintf("<b>Download:</b> %d%%", p.Percent)
+}
+
+// reencodeLine describes the re-encode step; speed is empty before progress arrives.
+func reencodeLine(s clipTaskState, speed string) string {
+	withSpeed := func(label string) string {
+		if speed == "" {
+			return label + "..."
+		}
+		return label + " (" + speed + ")"
+	}
+	switch {
+	case s.subsLang != "":
+		if speed == "" {
+			return fmt.Sprintf("<b>Re-encoding:</b> Burning subtitles (%s)...", s.subsLang)
+		}
+		return fmt.Sprintf("<b>Re-encoding:</b> Burning subtitles (%s • %s)", s.subsLang, speed)
+	case s.audioOnly:
+		if speed == "" {
+			return "<b>Converting:</b> Extracting MP3 (192 kbps)..."
+		}
+		return fmt.Sprintf("<b>Converting:</b> Extracting MP3 (%s)", speed)
+	case s.gif:
+		return "<b>Re-encoding:</b> " + withSpeed("Generating GIF")
+	}
+	return "<b>Re-encoding:</b> " + withSpeed("Processing video")
 }
 
 func initialStatusCard(req downloader.ClipRequest) string {
@@ -509,40 +500,35 @@ func progressBar(percent, length int) string {
 	return "[" + strings.Repeat("█", filled) + strings.Repeat("░", empty) + "]"
 }
 func formatMode(req downloader.ClipRequest) string {
-	qSuffix := ""
-	if req.Quality == "720p" || req.Quality == "720" {
-		qSuffix = " (720p)"
+	is720 := req.Quality == "720p" || req.Quality == "720"
+	// withQuality builds "label (extra)" where extra lists the HQ or 720p marker.
+	withQuality := func(label, extra string) string {
+		switch {
+		case req.HQ:
+			extra = strings.TrimPrefix(extra+", HQ", ", ")
+		case is720:
+			extra = strings.TrimPrefix(extra+", 720p", ", ")
+		}
+		if extra == "" {
+			return label
+		}
+		return label + " (" + extra + ")"
 	}
 	switch {
 	case req.AudioOnly:
 		return "MP3"
 	case req.GIF:
-		if req.HQ {
-			return "GIF (HQ)"
-		}
-		if qSuffix != "" {
-			return "GIF" + qSuffix
-		}
-		return "GIF"
+		return withQuality("GIF", "")
 	case req.SubsLang != "":
-		if req.HQ {
-			return fmt.Sprintf("Subtitles (%s, HQ)", req.SubsLang)
-		}
-		if qSuffix != "" {
-			return fmt.Sprintf("Subtitles (%s, 720p)", req.SubsLang)
-		}
-		return fmt.Sprintf("Subtitles (%s)", req.SubsLang)
+		return withQuality("Subtitles", req.SubsLang)
 	case req.HQ:
 		return "Clip (HQ 2K)"
 	case req.Shorts:
 		return ""
-	default:
-		if qSuffix != "" {
-			return "Clip" + qSuffix
-		}
-		return "Clip"
 	}
+	return withQuality("Clip", "")
 }
+
 func formatInterval(req downloader.ClipRequest) string {
 	if req.Start != "" && req.End != "" {
 		return fmt.Sprintf("%s – %s", req.Start, req.End)
@@ -551,5 +537,5 @@ func formatInterval(req downloader.ClipRequest) string {
 }
 
 func (h *ClipHandlers) shouldDeleteStatus(ctx context.Context) bool {
-	return h.Services.Settings.Bool(ctx, "CLIP_DELETE_STATUS", false)
+	return h.Services.Settings.Bool(ctx, settings.ClipDeleteStatus)
 }

@@ -1,4 +1,4 @@
-package translate
+package settings
 
 import (
 	"strings"
@@ -13,5 +13,5 @@ import (
 func TestDefaultPromptMatchesLatestMigration(t *testing.T) {
 	sql, err := migrations.FS.ReadFile("000017_translation_prompt_youtube.up.sql")
 	require.NoError(t, err)
-	require.Contains(t, string(sql), strings.ReplaceAll(DefaultTranslationPrompt, "'", "''"))
+	require.Contains(t, string(sql), strings.ReplaceAll(defaultTranslationPrompt, "'", "''"))
 }
