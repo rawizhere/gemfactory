@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"time"
 
+	"log/slog"
+
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
-	"log/slog"
 )
 
 type Postgres struct {

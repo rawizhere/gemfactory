@@ -7,9 +7,10 @@ import (
 	"strings"
 	"unicode"
 
+	"log/slog"
+
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
-	"log/slog"
 
 	"gemfactory/internal/config"
 	"gemfactory/internal/downloader"
