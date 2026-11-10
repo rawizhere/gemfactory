@@ -7,8 +7,9 @@ import (
 	"gemfactory/internal/service"
 	"gemfactory/internal/telegram"
 
-	"github.com/mymmrac/telego"
 	"log/slog"
+
+	"github.com/mymmrac/telego"
 )
 
 type Handlers struct {

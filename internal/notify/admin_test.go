@@ -6,8 +6,9 @@ import (
 
 	"gemfactory/internal/settings"
 
-	"github.com/stretchr/testify/require"
 	"log/slog"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestAdminNotifierSendWithoutChatID(t *testing.T) {

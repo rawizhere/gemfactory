@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
+	"log/slog"
+
 	"github.com/PuerkitoBio/goquery"
 	"github.com/stretchr/testify/require"
-	"log/slog"
 )
 
 func TestSplitTitle(t *testing.T) {

@@ -8,9 +8,10 @@ import (
 
 	"gemfactory/internal/telegram"
 
+	"log/slog"
+
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
-	"log/slog"
 )
 
 type Debouncer struct {

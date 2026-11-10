@@ -7,8 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mymmrac/telego"
 	"log/slog"
+
+	"github.com/mymmrac/telego"
 
 	"gemfactory/internal/middleware"
 	"gemfactory/internal/settings"

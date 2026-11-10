@@ -3,8 +3,9 @@ package keyboard
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
 	"log/slog"
+
+	"github.com/stretchr/testify/require"
 
 	"gemfactory/internal/config"
 )

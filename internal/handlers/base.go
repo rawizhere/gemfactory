@@ -8,8 +8,9 @@ import (
 	"gemfactory/internal/telegram"
 	"strings"
 
-	"github.com/mymmrac/telego"
 	"log/slog"
+
+	"github.com/mymmrac/telego"
 )
 
 type BaseHandler struct {

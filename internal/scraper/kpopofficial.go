@@ -9,8 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/PuerkitoBio/goquery"
 	"log/slog"
+
+	"github.com/PuerkitoBio/goquery"
 
 	"gemfactory/internal/model"
 )

@@ -3,8 +3,9 @@ package middleware
 import (
 	"time"
 
-	th "github.com/mymmrac/telego/telegohandler"
 	"log/slog"
+
+	th "github.com/mymmrac/telego/telegohandler"
 )
 
 // Handlers returns the telegohandler middleware chain, applied in registration order:

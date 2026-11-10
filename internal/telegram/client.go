@@ -11,11 +11,12 @@ import (
 	"strings"
 	"time"
 
+	"log/slog"
+
 	"github.com/mymmrac/telego"
 	"github.com/mymmrac/telego/telegoapi"
 	th "github.com/mymmrac/telego/telegohandler"
 	"github.com/mymmrac/telego/telegoutil"
-	"log/slog"
 
 	"gemfactory/internal/format"
 	"gemfactory/internal/media"
