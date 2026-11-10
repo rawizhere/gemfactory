@@ -24,7 +24,7 @@ func IsValidLangTag(s string) bool {
 }
 
 // commandFlags are stripped from arguments before interval extraction.
-var commandFlags = map[string]bool{"hq": true, "meta": true, "nollm": true}
+var commandFlags = map[string]bool{"hq": true, "meta": true, "nollm": true, "nodesc": true}
 
 // TimeInterval is a raw start/end timecode pair as provided by the user.
 type TimeInterval struct {
@@ -41,6 +41,7 @@ type ParsedCommand struct {
 	HQ        bool
 	Meta      bool
 	NoLLM     bool // translate subs via YouTube auto-translate only
+	NoDesc    bool // send the result without a caption
 	GIF       bool
 	Shorts    bool
 	AudioOnly bool
@@ -49,11 +50,12 @@ type ParsedCommand struct {
 // ParseClipArgs parses telegram command arguments: URL, flags, optional language tag and timecode pairs.
 func ParseClipArgs(args []string) (*ParsedCommand, error) {
 	var (
-		url             string
-		lang            string
-		quality         string
-		hq, meta, noLLM bool
-		rest            []string
+		url           string
+		lang          string
+		quality       string
+		hq, meta      bool
+		noLLM, noDesc bool
+		rest          []string
 	)
 
 	for i := 0; i < len(args); i++ {
@@ -84,6 +86,8 @@ func ParseClipArgs(args []string) (*ParsedCommand, error) {
 				meta = true
 			case "nollm":
 				noLLM = true
+			case "nodesc":
+				noDesc = true
 			}
 		case lang == "" && IsValidLangTag(arg):
 			lang = arg
@@ -112,6 +116,7 @@ func ParseClipArgs(args []string) (*ParsedCommand, error) {
 			HQ:        hq,
 			Meta:      meta,
 			NoLLM:     noLLM,
+			NoDesc:    noDesc,
 			Shorts:    true,
 		}, nil
 	}
@@ -144,6 +149,7 @@ func ParseClipArgs(args []string) (*ParsedCommand, error) {
 		HQ:        hq,
 		Meta:      meta,
 		NoLLM:     noLLM,
+		NoDesc:    noDesc,
 		Shorts:    false,
 	}, nil
 }
@@ -311,6 +317,23 @@ func DetectImplicitClips(text string) []*ParsedCommand {
 		c.SubsLang = lang
 	}
 	return cmds
+}
+
+// ParseDirectFlags scans a bare-link message for command flags; everything else is ignored.
+// debt: second flag switch next to ParseClipArgs; merge into it if direct links ever need more flags.
+func ParseDirectFlags(text string) (hq, noDesc bool) {
+	for _, arg := range strings.Fields(text) {
+		if strings.Contains(arg, "http") {
+			continue
+		}
+		switch arg {
+		case "hq":
+			hq = true
+		case "nodesc":
+			noDesc = true
+		}
+	}
+	return hq, noDesc
 }
 
 func ExtractFirstURL(text string) string {

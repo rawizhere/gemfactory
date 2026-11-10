@@ -57,6 +57,23 @@ func TestParseClipArgsQualityFlags(t *testing.T) {
 	require.Equal(t, "720", p.Quality)
 }
 
+func TestParseClipArgsNoDesc(t *testing.T) {
+	p, err := ParseClipArgs([]string{"https://www.tiktok.com/@u/video/123", "nodesc"})
+	require.NoError(t, err)
+	require.True(t, p.NoDesc, "nodesc not parsed: %+v", p)
+	require.True(t, p.Shorts)
+}
+
+func TestParseDirectFlags(t *testing.T) {
+	hq, noDesc := ParseDirectFlags("https://www.youtube.com/shorts/abc123XYZ_- hq nodesc")
+	require.True(t, hq)
+	require.True(t, noDesc)
+
+	hq, noDesc = ParseDirectFlags("https://vm.tiktok.com/ZN8yL3o4D/")
+	require.False(t, hq)
+	require.False(t, noDesc)
+}
+
 func TestParseClipArgsShorts(t *testing.T) {
 	p, err := ParseClipArgs([]string{"https://www.youtube.com/shorts/abc123XYZ_-"})
 	require.NoError(t, err)

@@ -28,6 +28,7 @@ type ClipRequest struct {
 	GIF       bool   // drop audio track
 	Shorts    bool   // download whole short, best quality
 	AudioOnly bool   // extract mp3
+	NoDesc    bool   // send the result without a caption
 }
 
 // JobStatus is the lifecycle state of a download job.

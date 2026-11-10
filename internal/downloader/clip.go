@@ -64,6 +64,9 @@ func formatSelector(quality string, hq, shorts, audioOnly, vertical bool) string
 		dim = "width"
 	}
 	switch {
+	case shorts && hq:
+		// No caps: best stream of any codec; the re-encode step fits it into the Telegram size limit.
+		return "bestvideo+bestaudio/best"
 	case shorts:
 		return "bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
 	case hq:
@@ -516,7 +519,7 @@ func (s *Service) ReencodeWithSubs(ctx context.Context, clipPath, trimmedVTT str
 		vfilters = append(vfilters, fmt.Sprintf("subtitles=%s:force_style=%s", subArg, subtitleStyle))
 	}
 	if maxVideoKbps > 0 && maxVideoKbps < 2800 {
-		vfilters = append(vfilters, "scale=trunc(min(iw\\,1280)/2)*2:trunc(min(ih\\,720)/2)*2")
+		vfilters = append(vfilters, "scale=w=1280:h=720:force_original_aspect_ratio=decrease:force_divisible_by=2")
 	} else {
 		vfilters = append(vfilters, "scale=trunc(iw/2)*2:trunc(ih/2)*2")
 	}

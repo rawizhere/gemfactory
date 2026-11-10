@@ -3,7 +3,17 @@ package downloader
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
+
+func TestFormatSelectorShortsHQ(t *testing.T) {
+	sel := formatSelector("", true, true, false, true)
+	require.Equal(t, "bestvideo+bestaudio/best", sel, "shorts+hq must be uncapped")
+
+	def := formatSelector("", false, true, false, true)
+	require.Contains(t, def, "avc1", "default shorts path must stay avc1-first")
+}
 
 func TestCalculateBitrateCapKbps(t *testing.T) {
 	tests := []struct {

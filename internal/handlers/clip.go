@@ -46,12 +46,15 @@ func (h *ClipHandlers) DirectLink(ctx context.Context, message *telego.Message, 
 	}
 	chatID := message.Chat.ID
 	if downloader.IsDirectDownloadURL(rawURL) {
+		hq, noDesc := downloader.ParseDirectFlags(message.Text)
 		req := downloader.ClipRequest{
 			URL:    rawURL,
 			Shorts: true,
+			HQ:     hq,
+			NoDesc: noDesc,
 		}
 		statusID := h.sendStatus(ctx, chatID, initialStatusCard(req), message.MessageID)
-		parsed := &downloader.ParsedCommand{URL: rawURL, Shorts: true}
+		parsed := &downloader.ParsedCommand{URL: rawURL, Shorts: true, HQ: hq, NoDesc: noDesc}
 		cbs := h.newCallbacks(chatID, statusID, parsed, req, message.MessageID)
 		if _, err := h.downloads.SubmitWithCallbacks(ctx, req, cbs); err != nil {
 			_ = h.TG.EditMessageText(context.Background(), chatID, statusID, "Error: "+html.EscapeString(err.Error()))
@@ -168,6 +171,7 @@ func (h *ClipHandlers) submitParsed(ctx context.Context, message *telego.Message
 			GIF:       parsed.GIF,
 			Shorts:    parsed.Shorts,
 			AudioOnly: parsed.AudioOnly,
+			NoDesc:    parsed.NoDesc,
 			SubsLang:  "",
 		}
 		if subs && parsed.SubsLang != "" {
@@ -399,6 +403,9 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 			edit()
 		},
 		OnDone: func(path, caption string) {
+			if req.NoDesc {
+				caption = ""
+			}
 			deliver(func(ctx context.Context, onUpload telegram.UploadProgressCallback) error {
 				if req.AudioOnly {
 					return h.TG.SendAudioFile(ctx, chatID, path, caption, onUpload, replyToMsgID)
@@ -407,6 +414,9 @@ func (h *ClipHandlers) newCallbacks(chatID int64, statusID int, parsed *download
 			})
 		},
 		OnPostDone: func(media []downloader.PostMedia, caption string) {
+			if req.NoDesc {
+				caption = ""
+			}
 			deliver(func(ctx context.Context, _ telegram.UploadProgressCallback) error {
 				items := make([]telegram.AlbumItem, len(media))
 				for i, m := range media {
