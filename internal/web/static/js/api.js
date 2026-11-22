@@ -59,31 +59,54 @@ export function showMsg(target, text, isOk = false, timeout = 4000) {
 
 let toastHost = null;
 
+const hasPopover = 'popover' in HTMLElement.prototype;
+
 export function toast(message, kind = 'info', timeout = 3500) {
   if (!toastHost) {
-    toastHost = el('div', { class: 'toast-host' });
+    toastHost = el('div', {
+      class: 'toast-host',
+      role: 'region',
+      'aria-label': 'Notifications',
+      'aria-live': 'polite',
+      popover: hasPopover ? 'manual' : null,
+    });
     document.body.appendChild(toastHost);
   }
-  const t = el('div', { class: `toast toast-${kind}` }, message);
-  toastHost.appendChild(t);
-  requestAnimationFrame(() => t.classList.add('show'));
-  setTimeout(() => {
+  // Re-showing moves the host to the top of the top layer, above any modal opened since.
+  if (hasPopover) {
+    if (toastHost.matches(':popover-open')) toastHost.hidePopover();
+    toastHost.showPopover();
+  }
+  const close = el('button', { type: 'button', class: 'toast-close', 'aria-label': 'Dismiss notification' }, '×');
+  const t = el('div', { class: `toast toast-${kind}` }, [el('span', null, message), close]);
+  const dismiss = () => {
     t.classList.remove('show');
     setTimeout(() => t.remove(), 300);
-  }, timeout);
+  };
+  let timer = setTimeout(dismiss, timeout);
+  const pause = () => clearTimeout(timer);
+  const resume = () => {
+    if (!t.matches(':hover, :focus-within')) timer = setTimeout(dismiss, timeout);
+  };
+  t.addEventListener('pointerenter', pause);
+  t.addEventListener('focusin', pause);
+  t.addEventListener('pointerleave', resume);
+  t.addEventListener('focusout', (e) => { if (!t.contains(e.relatedTarget)) resume(); });
+  close.addEventListener('click', () => { pause(); dismiss(); });
+  toastHost.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('show'));
 }
 
 export function confirmDialog(message) {
   return new Promise((resolve) => {
-    const dlg = el('dialog', { class: 'confirm-dialog' });
-    const text = el('p', { class: 'confirm-text' }, message);
-    const cancel = el('button', { class: 'btn btn-ghost btn-sm', type: 'button' }, 'Cancel');
-    const ok = el('button', { class: 'btn btn-danger btn-sm', type: 'button' }, 'Confirm');
-    ok.addEventListener('click', () => { dlg.close('ok'); });
-    cancel.addEventListener('click', () => { dlg.close(); });
+    const dlg = el('dialog', { class: 'confirm-dialog', 'aria-labelledby': 'confirm-text' });
+    const text = el('p', { class: 'confirm-text', id: 'confirm-text' }, message);
+    const cancel = el('button', { class: 'btn btn-ghost btn-sm', type: 'submit', value: 'cancel' }, 'Cancel');
+    const ok = el('button', { class: 'btn btn-danger btn-sm', type: 'submit', value: 'ok' }, 'Confirm');
     dlg.addEventListener('close', () => { dlg.remove(); resolve(dlg.returnValue === 'ok'); });
-    const box = el('div', { class: 'confirm-box' }, [text, el('div', { class: 'confirm-actions' }, [cancel, ok])]);
-    dlg.appendChild(box);
+    // method="dialog" closes the dialog with the clicked button's value as returnValue.
+    const form = el('form', { method: 'dialog', class: 'confirm-box' }, [text, el('div', { class: 'confirm-actions' }, [cancel, ok])]);
+    dlg.appendChild(form);
     document.body.appendChild(dlg);
     dlg.showModal();
   });

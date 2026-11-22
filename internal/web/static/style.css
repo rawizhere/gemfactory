@@ -325,7 +325,6 @@ tbody td:first-child:has(> input[type="checkbox"]) { width: 1%; }
 tbody td:first-child > input[type="checkbox"] { display: block; margin: 0 auto; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
-a.clickable-link { cursor: pointer; }
 .empty { color: var(--muted); padding: 2.5rem 0; text-align: center; font-size: 0.88rem; }
 
 /* Count & Stats Pills */
@@ -360,7 +359,6 @@ a.clickable-link { cursor: pointer; }
 }
 :where(input, textarea)::placeholder { color: var(--muted); opacity: 0.8; }
 :where(input:not([type="checkbox"], [type="radio"], [type="file"]), textarea, select):focus {
-  outline: none;
   border-color: var(--accent-emphasis);
   box-shadow: inset 0 0 0 1px var(--accent-emphasis);
 }
@@ -625,7 +623,6 @@ label.chk:hover { color: var(--ink); }
   border: none;
   font-size: 0.95rem;
   color: var(--ink);
-  outline: none;
   padding: 0;
 }
 .palette-results {
@@ -735,8 +732,13 @@ footer {
 /* ---- Toasts ---- */
 .toast-host {
   position: fixed;
-  right: 1rem;
-  bottom: 1rem;
+  inset: auto 1rem 1rem auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  overflow: visible;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -755,6 +757,18 @@ footer {
   transition: opacity 0.25s ease, transform 0.25s ease;
 }
 .toast.show { opacity: 1; transform: translateY(0); }
+.toast { display: flex; align-items: flex-start; gap: 0.6rem; }
+.toast > span { flex: 1; }
+.toast-close {
+  font: inherit;
+  line-height: 1;
+  color: var(--muted);
+  background: none;
+  border: none;
+  padding: 0 0.15rem;
+  cursor: pointer;
+}
+.toast-close:hover { color: var(--ink); }
 .toast-success { border-color: #2f6b3a; }
 .toast-error { border-color: var(--danger); }
 
@@ -1080,6 +1094,9 @@ footer {
   line-height: 1.55;
   padding: 0.6rem 0.75rem;
   resize: none; /* height follows the content */
+  field-sizing: content;
+  height: auto;
+  max-block-size: 70vh;
 }
 .text-editor.mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1093,3 +1110,21 @@ footer {
   margin-top: 0.5rem;
 }
 
+
+/* ---- Focus, modals, motion ---- */
+:focus-visible {
+  outline: 2px solid var(--accent-emphasis);
+  outline-offset: 2px;
+}
+/* Text fields show focus through their border; the palette input has none, so it keeps the ring. */
+:where(input:not([type="checkbox"], [type="radio"], [type="file"]), textarea, select):focus-visible { outline-offset: 0; }
+dialog:modal { overscroll-behavior: contain; }
+dialog::backdrop { overflow: hidden; overscroll-behavior: contain; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+}

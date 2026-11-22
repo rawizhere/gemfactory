@@ -16,6 +16,7 @@ export function openPalette() {
   if (!dialog || !input) return;
 
   dialog.showModal();
+  input.setAttribute('aria-expanded', 'true');
   input.value = '';
   renderPaletteResults('');
   input.focus();
@@ -69,6 +70,7 @@ function renderPaletteResults(query) {
   const container = $('#palette-results');
   if (!container) return;
   container.textContent = '';
+  $('#palette-input')?.removeAttribute('aria-activedescendant');
   const q = query.trim().toLowerCase();
 
   const actions = getAvailableActions();
@@ -118,6 +120,7 @@ function renderPaletteResults(query) {
   items = items.slice(0, 15);
 
   if (!items.length) {
+    $('#palette-input')?.removeAttribute('aria-activedescendant');
     container.appendChild(el('div', { class: 'empty', style: 'padding:1.5rem 0' }, 'No matching commands or items.'));
     return;
   }
@@ -125,7 +128,12 @@ function renderPaletteResults(query) {
   if (selectedIndex >= items.length) selectedIndex = 0;
 
   items.forEach((item, idx) => {
-    const itemEl = el('div', { class: `palette-item ${idx === selectedIndex ? 'selected' : ''}` });
+    const itemEl = el('div', {
+      class: `palette-item ${idx === selectedIndex ? 'selected' : ''}`,
+      role: 'option',
+      id: `palette-opt-${idx}`,
+      'aria-selected': String(idx === selectedIndex),
+    });
 
     const left = el('span', null, item.title);
     const right = el('span', { class: 'item-type' }, item.type);
@@ -145,16 +153,19 @@ function renderPaletteResults(query) {
 
     container.appendChild(itemEl);
   });
+  $('#palette-input')?.setAttribute('aria-activedescendant', `palette-opt-${selectedIndex}`);
 }
 
 function updateSelection() {
   const resultEls = $$('#palette-results .palette-item');
   resultEls.forEach((el, idx) => {
     el.classList.toggle('selected', idx === selectedIndex);
+    el.setAttribute('aria-selected', String(idx === selectedIndex));
     if (idx === selectedIndex) {
       el.scrollIntoView({ block: 'nearest' });
     }
   });
+  $('#palette-input')?.setAttribute('aria-activedescendant', `palette-opt-${selectedIndex}`);
 }
 
 export function initPalette() {
@@ -164,11 +175,23 @@ export function initPalette() {
   const closeBtn = $('#palette-close');
 
   openBtn?.addEventListener('click', openPalette);
-  closeBtn?.addEventListener('click', closePalette);
-
-  dialog?.addEventListener('click', (e) => {
-    if (e.target === dialog) closePalette();
+  dialog?.addEventListener('close', () => {
+    input?.setAttribute('aria-expanded', 'false');
+    input?.removeAttribute('aria-activedescendant');
   });
+
+  // Fallbacks for browsers without invoker commands / closedby="any".
+  if (!('commandForElement' in HTMLButtonElement.prototype)) {
+    closeBtn?.addEventListener('click', closePalette);
+  }
+  if (!('closedBy' in HTMLDialogElement.prototype)) {
+    dialog?.addEventListener('click', (e) => {
+      if (e.target !== dialog) return; // keyboard-fired clicks on inner controls report 0,0
+      const r = dialog.getBoundingClientRect();
+      const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+      if (!inside) closePalette();
+    });
+  }
 
   input?.addEventListener('input', () => {
     selectedIndex = 0;
@@ -189,6 +212,7 @@ export function initPalette() {
         updateSelection();
       }
     } else if (e.key === 'Enter') {
+      if (e.isComposing || e.keyCode === 229) return;
       e.preventDefault();
       if (items[selectedIndex]) {
         closePalette();

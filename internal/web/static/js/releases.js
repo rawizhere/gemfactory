@@ -117,7 +117,7 @@ function renderPager(totalRows) {
   });
   controls.appendChild(nextBtn);
 
-  const sizeSelect = el('select', { style: 'padding:0.18rem 0.4rem;font-size:0.78rem' });
+  const sizeSelect = el('select', { 'aria-label': 'Page size', style: 'padding:0.18rem 0.4rem;font-size:0.78rem' });
   [50, 100, 200, 0].forEach((sz) => {
     sizeSelect.appendChild(el('option', { value: String(sz) }, sz === 0 ? 'All' : `${sz} / page`));
   });
@@ -180,7 +180,7 @@ export function renderReleases() {
   const thead = el('thead');
   const headRow = el('tr');
   ['', 'Artist', 'Title', 'Date', 'Title Track', 'Links', ''].forEach((title, idx) => {
-    headRow.appendChild(el('th', { class: idx === 0 ? 'num' : '' }, title));
+    headRow.appendChild(el('th', { scope: title ? 'col' : null, class: idx === 0 ? 'num' : '' }, title));
   });
   thead.appendChild(headRow);
   table.appendChild(thead);
@@ -210,11 +210,8 @@ export function renderReleases() {
 
     // Artist name (clickable)
     const tdArtist = el('td');
-    const artistLink = el('a', { class: 'clickable-link', title: 'Filter by this artist' }, r.artist);
-    artistLink.addEventListener('click', (e) => {
-      e.preventDefault();
-      filterByArtist(r.artist);
-    });
+    const artistLink = el('button', { type: 'button', class: 'count-link', title: 'Filter by this artist' }, r.artist);
+    artistLink.addEventListener('click', () => filterByArtist(r.artist));
     tdArtist.appendChild(artistLink);
     tr.appendChild(tdArtist);
 

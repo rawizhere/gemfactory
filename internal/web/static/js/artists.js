@@ -34,13 +34,12 @@ export function parseArtistNames(raw) {
 }
 
 export function genderBadge(gender, onClick) {
-  const b = el('span', { class: `badge ${gender}`, title: 'Click to change gender', style: 'cursor:pointer' }, gender);
-  if (onClick) {
-    b.addEventListener('click', (e) => {
-      e.stopPropagation();
-      onClick();
-    });
-  }
+  if (!onClick) return el('span', { class: `badge ${gender}` }, gender);
+  const b = el('button', { type: 'button', class: `badge badge-toggle ${gender}`, title: 'Click to change gender' }, gender);
+  b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    onClick();
+  });
   return b;
 }
 
@@ -93,7 +92,7 @@ export function renderArtists() {
   const thead = el('thead');
   const headRow = el('tr');
   ['', 'Name', 'Releases', 'Gender', 'Status', ''].forEach((title, idx) => {
-    headRow.appendChild(el('th', { class: idx === 0 || idx === 2 ? 'num' : '' }, title));
+    headRow.appendChild(el('th', { scope: title ? 'col' : null, class: idx === 0 || idx === 2 ? 'num' : '' }, title));
   });
   thead.appendChild(headRow);
   table.appendChild(thead);
@@ -152,6 +151,8 @@ export function renderArtists() {
       input.addEventListener('blur', save);
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
+          if (e.isComposing || e.keyCode === 229) return;
+          e.preventDefault();
           input.blur();
         } else if (e.key === 'Escape') {
           cancelled = true; // removing the input may fire blur

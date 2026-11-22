@@ -8,7 +8,9 @@ import { initPalette, setPaletteTabCallback } from './palette.js';
 
 export function switchTab(tabName) {
   $$('nav[role=tablist] button').forEach((b) => {
-    b.setAttribute('aria-selected', b.dataset.tab === tabName ? 'true' : 'false');
+    const on = b.dataset.tab === tabName;
+    b.setAttribute('aria-selected', String(on));
+    b.tabIndex = on ? 0 : -1;
   });
 
   $$('main section[role=tabpanel]').forEach((s) => {
@@ -71,6 +73,18 @@ async function updateStats() {
 function initNavigation() {
   $$('nav[role=tablist] button').forEach((btn) => {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+  });
+
+  // Roving focus per the ARIA tabs pattern: arrows/Home/End move and activate.
+  $('nav[role=tablist]')?.addEventListener('keydown', (e) => {
+    const tabs = [...$$('nav[role=tablist] button')];
+    const i = tabs.indexOf(document.activeElement);
+    if (i < 0) return;
+    const next = { ArrowRight: (i + 1) % tabs.length, ArrowLeft: (i - 1 + tabs.length) % tabs.length, Home: 0, End: tabs.length - 1 }[e.key];
+    if (next === undefined) return;
+    e.preventDefault();
+    tabs[next].focus();
+    switchTab(tabs[next].dataset.tab);
   });
 
   // Cross-tab navigation from Artists -> Releases

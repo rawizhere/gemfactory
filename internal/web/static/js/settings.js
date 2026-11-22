@@ -100,7 +100,7 @@ function buildEditor(f) {
   const current = effectiveValue(f.key);
 
   if (f.type === 'bool') {
-    const cb = el('input', { type: 'checkbox' });
+    const cb = el('input', { type: 'checkbox', id: `fld-${f.key}` });
     cb.checked = String(current) === 'true';
     cb.addEventListener('change', () => {
       state.edited.set(f.key, cb.checked ? 'true' : 'false');
@@ -134,6 +134,7 @@ function buildEditor(f) {
     updateSaveBar();
   });
   node.dataset.key = f.key;
+  node.id = `fld-${f.key}`;
   return node;
 }
 
@@ -143,7 +144,7 @@ function fieldRow(f, opts = {}) {
 
   const tdLabel = el('td', { class: 'fld-label' });
   const labelWrap = el('div', { style: 'display:flex; align-items:center; gap:0.5rem;' });
-  labelWrap.appendChild(el('span', null, f.label));
+  labelWrap.appendChild(el('label', { for: `fld-${f.key}` }, f.label));
   labelWrap.appendChild(srcBadge(f.key));
   tdLabel.appendChild(labelWrap);
   tr.appendChild(tdLabel);
@@ -174,7 +175,7 @@ function fieldRow(f, opts = {}) {
 function fieldsTable(rows) {
   const table = el('table', { class: 'fields-table' });
   const headRow = el('tr');
-  ['Setting', 'Value', 'Description'].forEach((t) => headRow.appendChild(el('th', null, t)));
+  ['Setting', 'Value', 'Description'].forEach((t) => headRow.appendChild(el('th', { scope: 'col' }, t)));
   const thead = el('thead');
   thead.appendChild(headRow);
   table.appendChild(thead);
@@ -449,7 +450,7 @@ function renderTranslationGeneralCard(root) {
   const fRu = FIELD('SUBS_SOURCE_PREF_RU', 'RU Source Priority', 'text', { mono: true, placeholder: 'ko, ja, en', hint: 'Preferred source languages' });
   const colRu = el('div', { class: 'trans-col' });
   const headRu = el('div', { class: 'trans-col-head' });
-  headRu.appendChild(el('span', null, fRu.label));
+  headRu.appendChild(el('label', { for: `fld-${fRu.key}` }, fRu.label));
   headRu.appendChild(srcBadge(fRu.key));
   const editRu = buildEditor(fRu);
   colRu.appendChild(headRu);
@@ -460,7 +461,7 @@ function renderTranslationGeneralCard(root) {
   const fTimeout = FIELD('TRANSLATION_TIMEOUT', 'Request Timeout', 'number', { min: 10, max: 600, unit: 'sec', hint: 'Per Gemini request' });
   const colTimeout = el('div', { class: 'trans-col' });
   const headTimeout = el('div', { class: 'trans-col-head' });
-  headTimeout.appendChild(el('span', null, fTimeout.label));
+  headTimeout.appendChild(el('label', { for: `fld-${fTimeout.key}` }, fTimeout.label));
   headTimeout.appendChild(srcBadge(fTimeout.key));
   const editTimeout = buildEditor(fTimeout);
   colTimeout.appendChild(headTimeout);
@@ -538,7 +539,7 @@ function renderConfigTable(rows, editable) {
 
   const table = el('table');
   const headRow = el('tr');
-  ['Key', 'Value', 'Description', ''].forEach((t) => headRow.appendChild(el('th', null, t)));
+  ['Key', 'Value', 'Description', ''].forEach((t) => headRow.appendChild(el('th', { scope: t ? 'col' : null }, t)));
   const thead = el('thead');
   thead.appendChild(headRow);
   table.appendChild(thead);
@@ -599,7 +600,7 @@ async function renderAdvancedSection(root) {
 function renderSystemSection(root) {
   const table = el('table');
   const headRow = el('tr');
-  ['Key', 'Value'].forEach((t) => headRow.appendChild(el('th', null, t)));
+  ['Key', 'Value'].forEach((t) => headRow.appendChild(el('th', { scope: 'col' }, t)));
   const thead = el('thead');
   thead.appendChild(headRow);
   table.appendChild(thead);
@@ -637,7 +638,8 @@ function renderTextEditor(root, { key, title, desc, mono = false, collapsed = fa
   });
   if (mono) area.wrap = 'off';
   area.value = effectiveValue(key);
-  const fit = () => {
+  // field-sizing: content in CSS does this natively; JS only for browsers without it.
+  const fit = CSS.supports('field-sizing', 'content') ? () => {} : () => {
     if (!area.offsetParent) return;
     area.style.height = 'auto';
     area.style.height = `${Math.min(area.scrollHeight + 2, window.innerHeight * 0.7)}px`;

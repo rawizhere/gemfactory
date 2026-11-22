@@ -85,7 +85,7 @@ export function renderSchedule() {
   const thead = el('thead');
   const headRow = el('tr');
   ['Date', 'Day', 'Artist', 'Title', 'Title Track', 'Links'].forEach((col) => {
-    headRow.appendChild(el('th', null, col));
+    headRow.appendChild(el('th', { scope: 'col' }, col));
   });
   thead.appendChild(headRow);
   table.appendChild(thead);

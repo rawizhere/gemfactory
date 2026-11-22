@@ -25,16 +25,16 @@
       </button>
     </div>
     <nav role="tablist" aria-label="Sections">
-      <button type="button" role="tab" data-tab="schedule" aria-selected="true">Schedule</button>
-      <button type="button" role="tab" data-tab="releases" aria-selected="false">Releases</button>
-      <button type="button" role="tab" data-tab="artists" aria-selected="false">Artists</button>
-      <button type="button" role="tab" data-tab="cookies" aria-selected="false">Cookies</button>
-      <button type="button" role="tab" data-tab="settings" aria-selected="false">Settings</button>
+      <button type="button" role="tab" id="tabbtn-schedule" aria-controls="tab-schedule" tabindex="0" data-tab="schedule" aria-selected="true">Schedule</button>
+      <button type="button" role="tab" id="tabbtn-releases" aria-controls="tab-releases" tabindex="-1" data-tab="releases" aria-selected="false">Releases</button>
+      <button type="button" role="tab" id="tabbtn-artists" aria-controls="tab-artists" tabindex="-1" data-tab="artists" aria-selected="false">Artists</button>
+      <button type="button" role="tab" id="tabbtn-cookies" aria-controls="tab-cookies" tabindex="-1" data-tab="cookies" aria-selected="false">Cookies</button>
+      <button type="button" role="tab" id="tabbtn-settings" aria-controls="tab-settings" tabindex="-1" data-tab="settings" aria-selected="false">Settings</button>
     </nav>
   </header>
 
   <!-- SCHEDULE TAB (MAIN / FIRST) -->
-  <section id="tab-schedule" class="active" role="tabpanel">
+  <section id="tab-schedule" aria-labelledby="tabbtn-schedule" class="active" role="tabpanel">
     <div class="bar">
       <div class="sched-nav">
         <button type="button" class="btn btn-ghost btn-sm" id="sched-prev-month" title="Previous Month">← Prev</button>
@@ -58,7 +58,7 @@
   </section>
 
   <!-- RELEASES TAB -->
-  <section id="tab-releases" role="tabpanel">
+  <section id="tab-releases" aria-labelledby="tabbtn-releases" role="tabpanel">
     <!-- Parser Tool Bar -->
     <details class="parser-card">
       <summary class="parser-header">
@@ -97,10 +97,10 @@
         <datalist id="rel-artist-list"></datalist>
         <button type="button" class="btn-clear" id="rel-artist-clear" title="Clear artist filter" hidden>×</button>
       </div>
-      <select id="rel-year">
+      <select id="rel-year" aria-label="Year filter">
         <option value="">All years</option>
       </select>
-      <select id="rel-month">
+      <select id="rel-month" aria-label="Month filter">
         <option value="">All months</option>
         <option value="01">01 Jan</option>
         <option value="02">02 Feb</option>
@@ -115,7 +115,7 @@
         <option value="11">11 Nov</option>
         <option value="12">12 Dec</option>
       </select>
-      <select id="rel-sort">
+      <select id="rel-sort" aria-label="Sort order">
         <option value="">Default order</option>
         <option value="new">Newest first</option>
         <option value="old">Oldest first</option>
@@ -133,7 +133,7 @@
   </section>
 
   <!-- ARTISTS TAB -->
-  <section id="tab-artists" role="tabpanel">
+  <section id="tab-artists" aria-labelledby="tabbtn-artists" role="tabpanel">
     <form id="artist-add" class="add-box">
       <div class="add-header">
         <span class="add-title">Add Artists</span>
@@ -185,7 +185,7 @@
   </section>
 
   <!-- COOKIES TAB -->
-  <section id="tab-cookies" role="tabpanel">
+  <section id="tab-cookies" aria-labelledby="tabbtn-cookies" role="tabpanel">
     <p class="hint">
       Paste your Netscape cookie file export (Cookie-Editor format). Domains, cookies count, and expiration are detected automatically.
     </p>
@@ -202,7 +202,7 @@
   </section>
 
   <!-- SETTINGS TAB -->
-  <section id="tab-settings" role="tabpanel">
+  <section id="tab-settings" aria-labelledby="tabbtn-settings" role="tabpanel">
     <div class="subtabs" id="settings-subtabs"></div>
     <div id="settings-body"></div>
     <div class="save-bar" id="settings-savebar">
@@ -214,14 +214,14 @@
 </main>
 
 <!-- Command Palette Modal -->
-<dialog id="cmd-palette" class="palette-dialog">
+<dialog id="cmd-palette" class="palette-dialog" closedby="any" aria-label="Command palette">
   <div class="palette-box">
     <div class="palette-input-wrap">
       <span class="palette-icon">⌘</span>
-      <input type="text" id="palette-input" placeholder="Type a command, artist, or release title..." autocomplete="off" spellcheck="false">
-      <button type="button" class="btn-clear" id="palette-close">Esc</button>
+      <input type="text" id="palette-input" role="combobox" aria-label="Search commands" aria-autocomplete="list" aria-controls="palette-results" aria-expanded="false" placeholder="Type a command, artist, or release title..." autocomplete="off" spellcheck="false">
+      <button type="button" class="btn-clear" id="palette-close" commandfor="cmd-palette" command="close" aria-label="Close command palette">Esc</button>
     </div>
-    <div class="palette-results" id="palette-results"></div>
+    <div class="palette-results" id="palette-results" role="listbox" aria-label="Results"></div>
   </div>
 </dialog>
 
