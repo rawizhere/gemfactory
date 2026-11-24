@@ -34,16 +34,17 @@ RUN mkdir -p /usr/share/fonts/lato \
     && addgroup -S app && adduser -S app -G app
 
 # bgutil POT plugin; YouTube gates streams behind PO tokens.
-ARG BGUTIL_POT_VERSION=1.3.2
+ARG BGUTIL_POT_VERSION=2.0.2
 RUN mkdir -p /etc/yt-dlp/plugins \
     && curl -fsSL -o /etc/yt-dlp/plugins/bgutil-ytdlp-pot-provider.zip \
       "https://github.com/Brainicism/bgutil-ytdlp-pot-provider/releases/download/${BGUTIL_POT_VERSION}/bgutil-ytdlp-pot-provider.zip"
 
-# yt-dlp standalone musl binary (latest, unpinned) in an app-owned dir: the daily
+# yt-dlp standalone musl binary (nightly, unpinned) in an app-owned dir: the daily
 # --update-to nightly writes temp files next to the binary, so /usr/local/bin would fail.
+ARG CACHEBUST=1
 RUN case "$(uname -m)" in aarch64) asset=yt-dlp_musllinux_aarch64 ;; *) asset=yt-dlp_musllinux ;; esac \
     && mkdir -p /app/bin \
-    && curl -fsSL -o /app/bin/yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/latest/download/${asset}" \
+    && curl -fsSL -o /app/bin/yt-dlp "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/${asset}" \
     && chmod +x /app/bin/yt-dlp \
     && chown -R app:app /app/bin
 
